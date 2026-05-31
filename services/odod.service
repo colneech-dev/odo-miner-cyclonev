@@ -1,0 +1,18 @@
+[Unit]
+Description=OdoCrypt FPGA miner daemon
+Documentation=man:systemd.exec
+After=network-online.target syslog.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/odod.conf
+ExecStart=/usr/bin/odod ${ODOD_POOL_HOST} ${ODOD_POOL_PORT} ${ODOD_WORKER} ${ODOD_PASSWORD}
+Restart=always
+RestartSec=5
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=odod
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+# odod daemon configuration
+# This file is loaded by the odod.service EnvironmentFile directive.
+# Example values:
+# ODOD_POOL_HOST=pool.example.com
+# ODOD_POOL_PORT=3333
+# ODOD_WORKER=user.worker
+# ODOD_PASSWORD=x
+
+ODOD_POOL_HOST=pool.example.com
+ODOD_POOL_PORT=3333
+ODOD_WORKER=worker.1
+ODOD_PASSWORD=x

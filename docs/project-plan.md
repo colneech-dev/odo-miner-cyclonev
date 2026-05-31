@@ -258,6 +258,19 @@ Claude must determine, from repository evidence and trusted references if needed
 Can this miner reasonably operate as a **static bitstream + changing job data** appliance, or does the algorithm introduce requirements that undermine that model?
 
 ### Acceptance criteria for Phase 0.5
+
+---
+
+## Current status
+- HPS software now builds cleanly in WSL; `odod` is produced successfully.
+- `hps/fpga_smoke_test` compiles and runs, and `/dev/mem` access succeeds on the target.
+- The smoke test currently reads `0xFFFFFFFF` for all expected registers at `0xFF200000`.
+- This means the HPS MMIO region can be reached, but the FPGA peripheral is not responding at the expected LWH2F address or the bitstream/interface is not loaded.
+- Next step: verify the LWH2F base address and FPGA configuration state before continuing software/RAM integration.
+
+### Related docs
+- continue tracking task progress in `docs/TODO.md`
+
 - Claude explicitly states whether the static-wrapper concept appears valid, invalid, or unresolved.
 - Any unresolved algorithm-level risks are clearly listed.
 - If the design would require periodic reconfiguration or regeneration, that is elevated as a project-level risk immediately.

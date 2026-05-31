@@ -1,5 +1,42 @@
 # TODO
 
+## Immediate work
+
+- [x] Fix `hps/miner_daemon.c` so `REG_NONCE_START` and `REG_NONCE_END` are written before starting the FPGA.
+- [x] Fix `hps/stratum.c` compile issues so HPS daemon code builds cleanly in WSL.
+- [x] Build `hps/fpga_smoke_test` and verify `/dev/mem` access on target hardware.
+- [ ] Add explicit `CTRL_CLEAR_FOUND` behavior on each job start/re-arm.
+- [ ] Add logging for FPGA register status and version during daemon startup.
+- [ ] Diagnose why `hps/fpga_smoke_test` reads all `0xFFFFFFFF` from the FPGA MMIO region.
+
+## RTL and register validation
+
+- [ ] Add RTL testbenches for `hdl/src/odocrypt_top.v` register read/write behavior.
+- [ ] Add simulation coverage for `CONTROL` start/reset semantics and `STATUS` bit behavior.
+- [ ] Validate the OdoCrypt algorithm against a reference implementation.
+- [ ] Confirm target and header endianness in `hps/odocrypt_header.c` matches RTL expectations.
+
+## FPGA integration
+
+- [ ] Populate `hdl/qsys/` with the Platform Designer project.
+- [ ] Populate `hdl/quartus/` with the Quartus project files and build scripts.
+- [ ] Add `hdl/constraints/` timing constraints for bridge and hash clock domains.
+- [ ] Verify the LWH2F base address and document it in `hps/hps_regs.h`.
+
+## Software and deployment
+
+- [ ] Choose the canonical HPS source tree and remove redundant copies.
+- [ ] Verify Buildroot/rootfs includes `odod` and required kernel support.
+- [ ] Add `services/odod.service` and optional `services/odo-update.service`.
+- [ ] Document SD card layout and boot flow in `docs/bringup-plan.md`.
+
+## Validation and automation
+
+- [ ] Run `hps/fpga_smoke_test` on target hardware to validate MMIO.
+- [ ] Add CI jobs for HPS build and smoke-test compilation.
+- [ ] Add a register-map consistency check between RTL, `hps/hps_regs.h`, and docs.
+- [ ] Add a hardware bring-up checklist to `docs/bringup-plan.md`.
+
 ## 1. RTL / FPGA
 - [x] Implement `hdl/src/odocrypt_top.v` Avalon-MM wrapper for control/status/epoch/header/target/nonce registers
 - [x] Implement `hdl/src/odocrypt_core.v` job FSM, pipeline input builder, and target comparison
@@ -35,6 +72,9 @@
 - [ ] Add share submission and job re-arm behavior once the core is functional
 
 ## 6. Current status
-- RTL core skeleton is implemented and now exercises a full 84-stage pipeline with epoch-aware constants.
-- The Avalon-MM register interface is wired through `hdl/src/odocrypt_top.v` and is compatible with the HPS job loader.
-- The remaining work is functional validation, exact OdoCrypt algorithm matching, multi-core expansion, and Quartus/System integration.
+- HPS software now builds cleanly in WSL; `odod` is produced successfully.
+- `hps/fpga_smoke_test` also compiles and runs, and `/dev/mem` open succeeds on the target.
+- The smoke test currently reads `0xFFFFFFFF` for every expected register at `0xFF200000`.
+- This indicates the HPS MMIO region is reachable, but the FPGA peripheral is not responding at the expected address or the bitstream/interface is not present.
+- Next work: verify the LWH2F base address, confirm the FPGA bitstream is loaded, and update the register-map contract in `hps/hps_regs.h`.
+- Remaining work still includes functional RTL validation, exact OdoCrypt algorithm matching, and SoC/Quartus integration.

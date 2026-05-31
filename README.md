@@ -19,6 +19,6 @@ The project targets an autonomous appliance and may optionally include an extern
 - boot/ — bootloader, device-tree, SD card build artifacts
 - linux/ — Buildroot and rootfs image scripts
 - sw/ — user-space software and services
-- scripts/ — build and deployment helpers
+- scripts/ — build and deployment helpers (includes HPS build and smoke-test scripts)
 - services/ — unit/service files
 - docs/ — project documentation and bring-up notes
