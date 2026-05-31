@@ -1,0 +1,69 @@
+/*
+ * stratum.h - Stratum V1 client interface for the standalone OdoCrypt miner
+ */
+
+#ifndef STRATUM_H
+#define STRATUM_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include "job.h"
+
+#define STRATUM_RECV_BUF      (16 * 1024)
+#define STRATUM_MAX_URL       256
+#define STRATUM_MAX_USER      256
+#define STRATUM_MAX_PASS      128
+#define STRATUM_MAX_JOBID     64
+
+typedef enum {
+    STRATUM_DISCONNECTED = 0,
+    STRATUM_CONNECTING,
+    STRATUM_SUBSCRIBED,
+    STRATUM_AUTHORIZED,
+    STRATUM_READY,
+    STRATUM_ERROR
+} stratum_state_t;
+
+typedef struct {
+    char host[STRATUM_MAX_URL];
+    char port[32];
+    char user[STRATUM_MAX_USER];
+    char pass[STRATUM_MAX_PASS];
+
+    int fd;
+    stratum_state_t state;
+
+    bool subscribed;
+    bool authorized;
+
+    uint8_t extranonce1[32];
+    size_t  extranonce1_len;
+    int     extranonce2_size;
+
+    job_t current_job;
+    bool  have_job;
+
+    char rxbuf[STRATUM_RECV_BUF];
+    size_t rxlen;
+
+    uint64_t next_id;
+} stratum_ctx_t;
+
+int  stratum_init(stratum_ctx_t *ctx,
+                  const char *host,
+                  const char *port,
+                  const char *user,
+                  const char *pass);
+int  stratum_connect(stratum_ctx_t *ctx);
+int  stratum_poll(stratum_ctx_t *ctx, int timeout_ms);
+void stratum_disconnect(stratum_ctx_t *ctx);
+void stratum_destroy(stratum_ctx_t *ctx);
+
+bool stratum_get_job(stratum_ctx_t *ctx, job_t *out);
+int  stratum_submit_share(stratum_ctx_t *ctx,
+                          const job_t *job,
+                          uint32_t nonce);
+
+const char *stratum_state_str(stratum_state_t state);
+
+#endif /* STRATUM_H */

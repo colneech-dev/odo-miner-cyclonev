@@ -15,6 +15,8 @@ module odocrypt_array #(
     input  wire [31:0]  nonce_start,
     input  wire [31:0]  nonce_end,
     input  wire [31:0]  header_words [0:23],
+    input  wire [255:0] target,
+    input  wire [31:0]  epoch,
 
     output wire         busy,
     output reg          found,
@@ -61,6 +63,8 @@ module odocrypt_array #(
                 .nonce_start  (core_nonce_start[gi]),
                 .nonce_end    (core_nonce_end[gi]),
                 .header_words (header_words),
+                .target       (target),
+                .epoch        (epoch),
                 .busy         (core_busy[gi]),
                 .found        (core_found[gi]),
                 .found_nonce  (core_found_nonce[gi])

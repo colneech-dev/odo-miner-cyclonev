@@ -12,7 +12,9 @@ module odocrypt_core (
     input  wire         start,
     input  wire [31:0]  nonce_start,
     input  wire [31:0]  nonce_end,
-    input  wire [31:0]  header_words [0:23],
+    input  wire [31:0]  header_words [0:19],
+    input  wire [255:0]  target,
+    input  wire [31:0]  epoch,
 
     output reg          busy,
     output reg          found,
@@ -37,10 +39,14 @@ module odocrypt_core (
     reg [2:0]  state, state_next;
     reg [31:0] nonce_cur, nonce_next;
 
-    // Pipeline registers for hash state
-    reg [255:0] pipe_state   [0:PIPE_DEPTH];  // example width
+    // Pipeline nonce tracking and valid flags for compressor output alignment.
     reg [31:0]  pipe_nonce   [0:PIPE_DEPTH];
     reg         pipe_valid   [0:PIPE_DEPTH];
+
+    reg [255:0] compress_in_state;
+    reg         compress_in_valid;
+    wire [255:0] compress_out_state;
+    wire         compress_out_valid;
 
     integer i;
 
@@ -54,9 +60,10 @@ module odocrypt_core (
             busy       <= 1'b0;
             found      <= 1'b0;
             found_nonce<= 32'd0;
+            compress_in_state <= 256'd0;
+            compress_in_valid <= 1'b0;
 
             for (i = 0; i <= PIPE_DEPTH; i = i + 1) begin
-                pipe_state[i] <= {256{1'b0}};
                 pipe_nonce[i] <= 32'd0;
                 pipe_valid[i] <= 1'b0;
             end
@@ -64,11 +71,32 @@ module odocrypt_core (
             state     <= state_next;
             nonce_cur <= nonce_next;
 
-            // Shift pipeline
+            // Shift nonce tracking for pipeline alignment.
             for (i = PIPE_DEPTH; i > 0; i = i - 1) begin
-                pipe_state[i] <= pipe_state[i-1];
                 pipe_nonce[i] <= pipe_nonce[i-1];
                 pipe_valid[i] <= pipe_valid[i-1];
+            end
+
+            if (state == ST_LOAD || (state == ST_RUN && nonce_cur < nonce_end)) begin
+                compress_in_state <= build_initial_state(header_words, nonce_cur);
+                compress_in_valid <= 1'b1;
+                pipe_nonce[0] <= nonce_cur;
+                pipe_valid[0] <= 1'b1;
+            end else begin
+                compress_in_valid <= 1'b0;
+                pipe_valid[0] <= 1'b0;
+            end
+
+            if (compress_out_valid && pipe_valid[PIPE_DEPTH]) begin
+                if (!found && hash_meets_target(compress_out_state)) begin
+                    found       <= 1'b1;
+                    found_nonce <= pipe_nonce[PIPE_DEPTH];
+                end
+            end
+
+            if (state == ST_IDLE && start) begin
+                found       <= 1'b0;
+                found_nonce <= 32'd0;
             end
         end
     end
@@ -81,7 +109,6 @@ module odocrypt_core (
         nonce_next  = nonce_cur;
 
         busy        = (state != ST_IDLE && state != ST_DONE);
-        // found is latched when we hit a good nonce; cleared on new start
 
         case (state)
             ST_IDLE: begin
@@ -92,12 +119,10 @@ module odocrypt_core (
             end
 
             ST_LOAD: begin
-                // Load first nonce into pipeline input
                 state_next = ST_RUN;
             end
 
             ST_RUN: begin
-                // Keep feeding nonces until we reach end
                 if (nonce_cur < nonce_end) begin
                     nonce_next = nonce_cur + 1;
                     state_next = ST_RUN;
@@ -107,14 +132,12 @@ module odocrypt_core (
             end
 
             ST_CHECK: begin
-                // Wait for pipeline to drain and check last outputs
-                // Once pipe_valid[PIPE_DEPTH] has been low for a while,
-                // we can go to DONE. For now, just go straight to DONE.
-                state_next = ST_DONE;
+                if (!pipe_valid[PIPE_DEPTH])
+                    state_next = ST_DONE;
             end
 
             ST_DONE: begin
-                if (!start) // wait for start to deassert
+                if (!start)
                     state_next = ST_IDLE;
             end
 
@@ -123,97 +146,38 @@ module odocrypt_core (
     end
 
     // -------------------------------------------------------------------------
-    // Pipeline input (stage 0)
+    // Compressor instance for the OdoCrypt round pipeline.
     // -------------------------------------------------------------------------
-    always @(posedge clk or negedge reset_n) begin
-        if (!reset_n) begin
-            pipe_state[0] <= {256{1'b0}};
-            pipe_nonce[0] <= 32'd0;
-            pipe_valid[0] <= 1'b0;
-            found         <= 1'b0;
-            found_nonce   <= 32'd0;
-        end else begin
-            // Clear found on new start
-            if (state == ST_IDLE && start) begin
-                found       <= 1'b0;
-                found_nonce <= 32'd0;
-            end
-
-            if (state == ST_LOAD || state == ST_RUN) begin
-                // Build initial state from header + nonce
-                pipe_state[0] <= build_initial_state(header_words, nonce_cur);
-                pipe_nonce[0] <= nonce_cur;
-                pipe_valid[0] <= 1'b1;
-            end else begin
-                pipe_valid[0] <= 1'b0;
-            end
-
-            // Check pipeline output for valid hash
-            if (pipe_valid[PIPE_DEPTH]) begin
-                if (hash_meets_target(pipe_state[PIPE_DEPTH])) begin
-                    found       <= 1'b1;
-                    found_nonce <= pipe_nonce[PIPE_DEPTH];
-                end
-            end
-        end
-    end
+    odocrypt_compress #(.ROUNDS(16)) compress_inst (
+        .clk       (clk),
+        .reset_n   (reset_n),
+        .in_state  (compress_in_state),
+        .epoch     (epoch),
+        .in_valid  (compress_in_valid),
+        .out_state (compress_out_state),
+        .out_valid (compress_out_valid)
+    );
 
     // -------------------------------------------------------------------------
-    // Round pipeline (stages 1..PIPE_DEPTH)
-    // -------------------------------------------------------------------------
-    genvar gi;
-    generate
-        for (gi = 1; gi <= PIPE_DEPTH; gi = gi + 1) begin : GEN_ROUNDS
-            always @(posedge clk or negedge reset_n) begin
-                if (!reset_n) begin
-                    // already cleared in main reset loop
-                end else if (pipe_valid[gi-1]) begin
-                    pipe_state[gi] <= odocrypt_round(pipe_state[gi-1]);
-                    pipe_nonce[gi] <= pipe_nonce[gi-1];
-                    pipe_valid[gi] <= 1'b1;
-                end else begin
-                    pipe_valid[gi] <= 1'b0;
-                end
-            end
-        end
-    endgenerate
-
-    // -------------------------------------------------------------------------
-    // Functions: initial state, round, target check
+    // Functions: initial state and target compare.
     // -------------------------------------------------------------------------
     function [255:0] build_initial_state;
-        input [31:0] hdr [0:23];
+        input [31:0] hdr [0:19];
         input [31:0] nonce;
         reg   [255:0] s;
         integer k;
         begin
-            // Simple placeholder: pack first 7 words + nonce
             s = {256{1'b0}};
-            for (k = 0; k < 7; k = k + 1)
+            for (k = 0; k < 20; k = k + 1)
                 s[k*32 +: 32] = hdr[k];
             s[7*32 +: 32] = nonce;
             build_initial_state = s;
         end
     endfunction
 
-    function [255:0] odocrypt_round;
-        input [255:0] in_state;
-        reg   [255:0] out_state;
-        begin
-            // *** REPLACE THIS WITH REAL ODOCRYPT ROUND ***
-            // Example: simple rotation + xor (placeholder)
-            out_state = {in_state[126:0], in_state[255:127]} ^ 256'hA5A5_5A5A_A5A5_5A5A_A5A5_5A5A_A5A5_5A5A;
-            odocrypt_round = out_state;
-        end
-    endfunction
-
     function hash_meets_target;
         input [255:0] hash_state;
-        reg   [255:0] target;
         begin
-            // *** REPLACE WITH REAL TARGET COMPARISON ***
-            // Example: require top 16 bits to be zero
-            target = 256'h0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF;
             hash_meets_target = (hash_state <= target);
         end
     endfunction
