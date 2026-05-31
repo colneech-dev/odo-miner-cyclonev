@@ -6,7 +6,7 @@
 // - Designed for Cyclone V 5CSXFC6C6U23 timing
 // -----------------------------------------------------------------------------
 module odocrypt_compress #(
-    parameter ROUNDS = 16
+    parameter ROUNDS = 84
 )(
     input  wire         clk,
     input  wire         reset_n,
@@ -23,10 +23,21 @@ module odocrypt_compress #(
     // Pipeline registers
     // -------------------------------------------------------------------------
     reg [255:0] stage_state [0:ROUNDS];
-    reg [31:0]  stage_epoch [0:ROUNDS];
     reg         stage_valid [0:ROUNDS];
 
+    wire [63:0] round_const [0:ROUNDS-1];
+    wire [5:0]  rot_amount  [0:ROUNDS-1];
+
     integer i;
+
+    // -------------------------------------------------------------------------
+    // Epoch mutation generator
+    // -------------------------------------------------------------------------
+    odocrypt_epoch_mutator #(.ROUNDS(ROUNDS)) mut (
+        .epoch      (epoch),
+        .round_const(round_const),
+        .rot_amount (rot_amount)
+    );
 
     // -------------------------------------------------------------------------
     // Stage 0 input
@@ -34,11 +45,9 @@ module odocrypt_compress #(
     always @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             stage_state[0] <= 256'd0;
-            stage_epoch[0] <= 32'd0;
             stage_valid[0] <= 1'b0;
         end else begin
             stage_state[0] <= in_state;
-            stage_epoch[0] <= epoch;
             stage_valid[0] <= in_valid;
         end
     end
@@ -53,18 +62,18 @@ module odocrypt_compress #(
 
             odocrypt_round round_inst (
                 .in_state (stage_state[gi-1]),
-                .epoch    (stage_epoch[gi-1]),
+                .epoch    (epoch),
+                .rc       (round_const[gi-1]),
+                .rot      (rot_amount[gi-1]),
                 .out_state(round_out)
             );
 
             always @(posedge clk or negedge reset_n) begin
                 if (!reset_n) begin
                     stage_state[gi] <= 256'd0;
-                    stage_epoch[gi] <= 32'd0;
                     stage_valid[gi] <= 1'b0;
                 end else begin
                     stage_state[gi] <= round_out;
-                    stage_epoch[gi] <= stage_epoch[gi-1];
                     stage_valid[gi] <= stage_valid[gi-1];
                 end
             end

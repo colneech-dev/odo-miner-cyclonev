@@ -32,6 +32,33 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 - `scripts/` — build and deployment helpers
 - `services/` — init/service unit files
 
+## Current status
+
+- The FPGA RTL now includes `hdl/src/odocrypt_top.v` as the Avalon-MM register wrapper.
+- The mining core has a single-core 84-round pipeline in `hdl/src/odocrypt_compress.v` and `hdl/src/odocrypt_round.v`.
+- `hdl/src/odocrypt_core.v` implements a job FSM, runtime nonce injection, header-folding state builder, target compare, and hash capture.
+- Epoch-dependent round constants are generated in `hdl/src/odocrypt_epoch_mutator.v`.
+- The HPS software already streams the 80-byte job header, target, and epoch into the FPGA registers.
+
+## Recent progress
+
+- Added a stronger initial-state mixer for header+nonce/epoch in `hdl/src/odocrypt_core.v`.
+- Expanded the nonlinear DSP layer in `hdl/src/odocrypt_sbox_dsp.v` for richer FPGA-friendly mixing.
+- Updated `hdl/src/odocrypt_round.v` to use multiple epoch/key-dependent operations and lane rotations.
+- Captured final pipeline hash results in top-level hash registers for verification.
+
+## Validation focus
+
+- Confirm `hdl/src/odocrypt_top.v` register mapping matches `hps/hps_regs.h` and HPS software assumptions.
+- Verify `hash_meets_target()` comparison semantics are correct for the little-endian target format.
+- Add a smoke-test or simple HDL simulation for the start/status/clear and register access sequence.
+- Integrate the RTL into the Quartus SoC project and assign a stable LWH2F base address.
+
+## Notes
+
+- `docs/TODO.md` now tracks current RTL progress and pending integration/validation items.
+- `docs/register-map.md` should be reviewed and updated as the wrapper register layout stabilizes.
+
 ## Next steps
 
 1. Review `docs/architecture.md` for the high-level plan.

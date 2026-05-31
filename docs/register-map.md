@@ -29,24 +29,30 @@ Effective virtual address = `mmap(LWH2F_base + slave_offset)`.
 
 ## 2. Register Map
 
-Word offsets are relative to the slave base. Byte offset = word offset × 4.
+Byte offsets are relative to the slave base. The current RTL and HPS helper use
+byte-addressed Avalon offsets, not word indexes.
 
-| Word | Byte | Name | Dir | Description |
-|---|---|---|---|---|
-| 0x00 | 0x00 | `CONTROL` | R/W | Start/stop, reset, enable. See §3. |
-| 0x01 | 0x04 | `STATUS` | RO | Busy, found, lock, pipeline-valid flags. See §3. |
-| 0x02 | 0x08 | `NONCE_FOUND` | RO | Winning nonce, latched on `found` (CDC-synced). |
-| 0x03 | 0x0C | `EPOCH` | R/W | Current OdoCrypt epoch number (tweak selector). |
-| 0x04–0x1B | 0x10–0x6C | `HEADER[0..23]` | R/W | 80-byte block header (24 × 32-bit words; word 23 holds tail/padding). |
-| 0x1C–0x23 | 0x70–0x8C | `TARGET[0..7]` | R/W | 256-bit difficulty target, word 0 = LSW. |
-| 0x24 | 0x90 | `NONCE_START` | R/W | Base nonce; cores stripe upward from here. |
-| 0x25 | 0x94 | `HASH_COUNT_LO` | RO | Performance counter, low 32 bits. |
-| 0x26 | 0x98 | `HASH_COUNT_HI` | RO | Performance counter, high 32 bits. |
-| 0x27 | 0x9C | `SHARE_COUNT` | RO | Shares (target hits) since last reset. |
+| Offset | Name | Dir | Description |
+|---|---|---|---|
+| 0x000 | `CONTROL` | R/W | Start/stop, reset, enable. See §3. |
+| 0x004 | `STATUS` | RO | Busy, found, lock, pipeline-valid flags. See §3. |
+| 0x008 | `VERSION` | RO | Build/version identifier. |
+| 0x00C | `EPOCH` | R/W | Current OdoCrypt epoch number (tweak selector). |
+| 0x010 | `NONCE_START` | R/W | Starting nonce for the search range. |
+| 0x014 | `NONCE_END` | R/W | Ending nonce (exclusive). |
+| 0x018 | `NONCE_FOUND` | RO | Winning nonce, valid when `STATUS.FOUND` is set. |
+| 0x01C | `CORE_FOUND` | RO | Optional core ID/index that produced the match. |
+| 0x020–0x03C | `TARGET[0..7]` | R/W | 256-bit difficulty target, little-endian words. |
+| 0x040–0x08C | `HEADER[0..19]` | R/W | 80-byte block header, 20 × 32-bit words. |
+| 0x090–0x0AC | `HASH[0..7]` | RO | 256-bit hash result captured from the pipeline. |
+| 0x0B0 | `PERF_HASHES_LO` | RO | Hash count low 32 bits. |
+| 0x0B4 | `PERF_HASHES_HI` | RO | Hash count high 32 bits. |
+| 0x0B8 | `PERF_SHARES` | RO | Shares found since reset. |
+| 0x0BC | `PERF_UPTIME` | RO | Uptime in clock-derived ticks. |
 
-> **Header word count:** the OdoCrypt header is 80 bytes = 20 words, but the map
-> reserves 24 words (`HEADER[0..23]`) so the daemon can write the full pre-padded
-> input block in one contiguous burst without a separate padding register.
+> **Header word count:** the OdoCrypt header is 80 bytes = 20 words, and the RTL
+> accepts exactly 20 header words at `HEADER[0..19]`. The HPS job loader currently
+> writes just those 20 words.
 
 ---
 
@@ -70,44 +76,19 @@ Word offsets are relative to the slave base. Byte offset = word offset × 4.
 |---|---|---|
 | 0 | `BUSY` | 1 = core array actively hashing. |
 | 1 | `FOUND` | 1 = a nonce meeting target was found; `NONCE_FOUND` is valid. CDC-synced from hash domain. |
-| 2 | `PLL_LOCKED` | 1 = hash-pipeline PLL locked (relevant once clocks are split; see §6). |
-| 3 | `PIPE_VALID` | 1 = pipeline primed / first valid results available. |
+| 2 | `CORE_READY` | 1 = core pipeline is ready. Currently tied high in RTL. |
+| 3 | `EPOCH_LOCK` | 1 = epoch register is stable / lock condition met. Currently tied high in RTL. |
 | 31:4 | reserved | Reads 0. |
 
 ---
 
-## 4. Known Caveat — 4-bit Address Decode
-
-The current `odocrypt_top.v` decodes the Avalon `address` with a **narrow case
-statement** that only resolves the low address bits. If the RTL declares
-`address[3:0]` (4 bits), it can uniquely select **only 16 word locations
-(0x00–0x0F)**.
-
-This is a real mismatch with the map above, which extends to word 0x27:
-
-- Registers at **0x10 and beyond** (the `HEADER`, `TARGET`, counters) either
-  **alias** back onto 0x00–0x0F, or hit the `default` branch and silently
-  read 0 / drop writes — depending on how the `case` default is coded.
-- This will not surface in a simple CONTROL/STATUS smoke test, but **will** break
-  header/target loading and counter readback during real mining.
-
-**Required fix (RTL side):** widen the decode to cover the full map. With 0x27 as
-the top offset you need at least `address[5:0]` (6 bits → 64 words). Update the
-port/wire width and the `case (address[...])` selector together, and add a
-`default` that drives `readdata <= 32'h0` so unmapped reads are deterministic.
-
-Until that fix lands, the daemon must treat anything ≥ 0x10 as **not yet wired**.
-Track this as a blocking bring-up item.
-
----
-
-## 5. Access Sequences
+## 4. Access Sequences
 
 **Load a job and start (daemon order):**
 
 1. Clear: write `CONTROL = SOFT_RESET` (bit 1), then `CONTROL = 0`.
 2. Write `EPOCH`.
-3. Write `HEADER[0..23]` (full pre-padded block).
+3. Write `HEADER[0..19]` (80-byte block header, 20 words).
 4. Write `TARGET[0..7]` (word 0 = LSW).
 5. Write `NONCE_START`.
 6. Start: write `CONTROL = ENABLE | START` (bits 2 and 0).

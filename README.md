@@ -15,7 +15,7 @@ The project targets an autonomous appliance and may optionally include an extern
 
 - upstream/odo-miner/ — vendored upstream baseline source and original host/FPGA design
 - hdl/ — FPGA/RTL sources
-- hps/ — HPS Linux daemon and register definitions
+- hps/ — HPS Linux daemon, register definitions, and FPGA smoke-test utilities
 - boot/ — bootloader, device-tree, SD card build artifacts
 - linux/ — Buildroot and rootfs image scripts
 - sw/ — user-space software and services

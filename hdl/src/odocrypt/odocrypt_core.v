@@ -3,7 +3,7 @@
 // - Interface matches odocrypt_top
 // - Single pipeline instance, one nonce at a time
 // - FSM walks nonce range, asserts found + found_nonce on success
-// - Replace ROUND function + COMPARE logic with real Odocrypt
+// - 84-round OdoCrypt-like pipeline with epoch-aware constants
 // -----------------------------------------------------------------------------
 module odocrypt_core (
     input  wire         clk,
@@ -18,7 +18,9 @@ module odocrypt_core (
 
     output reg          busy,
     output reg          found,
-    output reg  [31:0]  found_nonce
+    output reg  [31:0]  found_nonce,
+    output reg [255:0]  hash_out,
+    output reg          hash_valid
 );
 
     // -------------------------------------------------------------------------
@@ -30,8 +32,8 @@ module odocrypt_core (
     localparam ST_CHECK  = 3'd3;
     localparam ST_DONE   = 3'd4;
 
-    // Pipeline depth (tune once you implement real rounds)
-    localparam PIPE_DEPTH = 8;
+    // Pipeline depth must match the compressor round count.
+    localparam PIPE_DEPTH = 84;
 
     // -------------------------------------------------------------------------
     // State / control
@@ -60,6 +62,8 @@ module odocrypt_core (
             busy       <= 1'b0;
             found      <= 1'b0;
             found_nonce<= 32'd0;
+            hash_out   <= 256'd0;
+            hash_valid <= 1'b0;
             compress_in_state <= 256'd0;
             compress_in_valid <= 1'b0;
 
@@ -78,7 +82,7 @@ module odocrypt_core (
             end
 
             if (state == ST_LOAD || (state == ST_RUN && nonce_cur < nonce_end)) begin
-                compress_in_state <= build_initial_state(header_words, nonce_cur);
+                compress_in_state <= build_initial_state(header_words, nonce_cur, epoch);
                 compress_in_valid <= 1'b1;
                 pipe_nonce[0] <= nonce_cur;
                 pipe_valid[0] <= 1'b1;
@@ -88,10 +92,14 @@ module odocrypt_core (
             end
 
             if (compress_out_valid && pipe_valid[PIPE_DEPTH]) begin
+                hash_out   <= compress_out_state;
+                hash_valid <= 1'b1;
                 if (!found && hash_meets_target(compress_out_state)) begin
                     found       <= 1'b1;
                     found_nonce <= pipe_nonce[PIPE_DEPTH];
                 end
+            end else begin
+                hash_valid <= 1'b0;
             end
 
             if (state == ST_IDLE && start) begin
@@ -148,7 +156,7 @@ module odocrypt_core (
     // -------------------------------------------------------------------------
     // Compressor instance for the OdoCrypt round pipeline.
     // -------------------------------------------------------------------------
-    odocrypt_compress #(.ROUNDS(16)) compress_inst (
+    odocrypt_compress #(.ROUNDS(PIPE_DEPTH)) compress_inst (
         .clk       (clk),
         .reset_n   (reset_n),
         .in_state  (compress_in_state),
@@ -164,13 +172,45 @@ module odocrypt_core (
     function [255:0] build_initial_state;
         input [31:0] hdr [0:19];
         input [31:0] nonce;
+        input [31:0] epoch;
+        reg   [63:0] w0;
+        reg   [63:0] w1;
+        reg   [63:0] w2;
+        reg   [63:0] w3;
+        reg   [63:0] w4;
+        reg   [63:0] w5;
+        reg   [63:0] w6;
+        reg   [63:0] w7;
+        reg   [63:0] w8;
+        reg   [63:0] w9;
+        reg   [63:0] pm;
         reg   [255:0] s;
-        integer k;
         begin
-            s = {256{1'b0}};
-            for (k = 0; k < 20; k = k + 1)
-                s[k*32 +: 32] = hdr[k];
-            s[7*32 +: 32] = nonce;
+            w0 = {hdr[1], hdr[0]};
+            w1 = {hdr[3], hdr[2]};
+            w2 = {hdr[5], hdr[4]};
+            w3 = {hdr[7], hdr[6]};
+            w4 = {hdr[9], hdr[8]};
+            w5 = {hdr[11], hdr[10]};
+            w6 = {hdr[13], hdr[12]};
+            w7 = {hdr[15], hdr[14]};
+            w8 = {hdr[17], hdr[16]};
+            w9 = {hdr[18], nonce};
+
+            pm = w0 ^ w1 ^ w2 ^ w3 ^ w4 ^ w5 ^ w6 ^ w7 ^ w8 ^ w9 ^ {epoch, epoch};
+
+            w0 = w0 + pm;
+            w1 = w1 ^ {pm[31:0], pm[63:32]};
+            w2 = {w2[31:0], w2[63:32]} ^ pm;
+            w3 = w3 + ({epoch, pm[31:0]} ^ w0);
+            w4 = w4 ^ (pm + w1);
+            w5 = w5 + (w2 ^ {32'd0, epoch});
+            w6 = ((w6 << 17) | (w6 >> 47)) ^ pm;
+            w7 = ((w7 >> 23) | (w7 << 41)) + w3;
+            w8 = w8 ^ w4;
+            w9 = w9 + w5;
+
+            s = {w7 ^ w4, w5 ^ w0, w6 ^ w1, w9 ^ w8};
             build_initial_state = s;
         end
     endfunction
