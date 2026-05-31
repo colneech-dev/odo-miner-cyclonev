@@ -39,8 +39,8 @@ static void install_signal_handlers(void);
 static void on_signal(int sig);
 static int  fpga_map(void);
 static void fpga_unmap(void);
-static inline uint32_t reg_rd(uint32_t off);
-static inline void     reg_wr(uint32_t off, uint32_t val);
+static inline uint32_t mmio_rd(uint32_t off);
+static inline void     mmio_wr(uint32_t off, uint32_t val);
 static void fpga_stop(void);
 static void fpga_start(void);
 static int  fpga_load_job(const job_t *job);
@@ -175,26 +175,28 @@ static void fpga_unmap(void)
     }
 }
 
-static inline uint32_t reg_rd(uint32_t off)
+static inline uint32_t mmio_rd(uint32_t off)
 {
     return g_regs[off >> 2];
 }
 
-static inline void reg_wr(uint32_t off, uint32_t val)
+static inline void mmio_wr(uint32_t off, uint32_t val)
 {
     g_regs[off >> 2] = val;
 }
 
 static void fpga_stop(void)
 {
-    reg_wr(REG_CONTROL, CTRL_RESET);
-    reg_wr(REG_CONTROL, 0);
+    mmio_wr(REG_CONTROL, CTRL_RESET);
+    mmio_wr(REG_CONTROL, 0);
     g_job_loaded = false;
 }
 
 static void fpga_start(void)
 {
-    reg_wr(REG_CONTROL, CTRL_ENABLE | CTRL_START);
+    /* Clear any previously latched found state before starting a new search. */
+    mmio_wr(REG_CONTROL, CTRL_CLEAR_FOUND);
+    mmio_wr(REG_CONTROL, CTRL_ENABLE | CTRL_START);
 }
 
 static int fpga_load_job(const job_t *job)
@@ -223,7 +225,7 @@ static int fpga_load_job(const job_t *job)
                         ((uint32_t)header[i * 4 + 1] << 8) |
                         ((uint32_t)header[i * 4 + 2] << 16) |
                         ((uint32_t)header[i * 4 + 3] << 24);
-        reg_wr(REG_HEADER_BASE + (uint32_t)(i * 4), word);
+        mmio_wr(REG_HEADER_BASE + (uint32_t)(i * 4), word);
     }
 
     for (int i = 0; i < 8; ++i) {
@@ -231,10 +233,12 @@ static int fpga_load_job(const job_t *job)
                         ((uint32_t)job->target[i * 4 + 1] << 8) |
                         ((uint32_t)job->target[i * 4 + 2] << 16) |
                         ((uint32_t)job->target[i * 4 + 3] << 24);
-        reg_wr(REG_TARGET_BASE + (uint32_t)(i * 4), word);
+        mmio_wr(REG_TARGET_BASE + (uint32_t)(i * 4), word);
     }
 
-    reg_wr(REG_EPOCH, job->epoch);
+    mmio_wr(REG_EPOCH, job->epoch);
+    mmio_wr(REG_NONCE_START, job->nonce_start);
+    mmio_wr(REG_NONCE_END, job->nonce_end);
     g_job_loaded = true;
     return 0;
 }
@@ -244,12 +248,12 @@ static int fpga_check_found(uint32_t *nonce_out)
     if (!nonce_out)
         return 0;
 
-    uint32_t status = reg_rd(REG_STATUS);
+    uint32_t status = mmio_rd(REG_STATUS);
     if ((status & STAT_FOUND) == 0)
         return 0;
 
-    *nonce_out = reg_rd(REG_NONCE_FOUND);
-    reg_wr(REG_CONTROL, CTRL_CLEAR_FOUND);
+    *nonce_out = mmio_rd(REG_NONCE_FOUND);
+    mmio_wr(REG_CONTROL, CTRL_CLEAR_FOUND);
     return 1;
 }
 

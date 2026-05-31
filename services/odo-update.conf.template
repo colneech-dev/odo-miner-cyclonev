@@ -1,0 +1,11 @@
+# odo-update service configuration
+# This file is loaded by the odo-update.service EnvironmentFile directive.
+# Configure any runtime settings needed by odo-update.
+# Currently the updater is a placeholder and should be implemented as required.
+
+# Example settings:
+# ODO_UPDATE_URL=https://example.com/odocrypt/bitstreams
+# ODO_UPDATE_CHECK_INTERVAL=3600
+
+ODO_UPDATE_URL=
+ODO_UPDATE_CHECK_INTERVAL=3600

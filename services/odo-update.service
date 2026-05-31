@@ -1,0 +1,18 @@
+[Unit]
+Description=OdoCrypt FPGA mutation epoch updater
+Documentation=man:systemd.exec
+After=network-online.target syslog.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/odo-update.conf
+ExecStart=/usr/bin/odo-update
+Restart=on-failure
+RestartSec=30
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=odo-update
+
+[Install]
+WantedBy=multi-user.target

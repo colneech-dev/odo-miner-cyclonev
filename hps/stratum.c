@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200112L
+
 #include "stratum.h"
 #include "odocrypt_header.h"
 
@@ -9,6 +11,7 @@
 #include <ctype.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -76,7 +79,7 @@ static int send_line(stratum_ctx_t *ctx, const char *line)
         if (n > 0) {
             off += (size_t)n;
         } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            struct timespec ts = { 0, 1000000 };
+            struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000 };
             nanosleep(&ts, NULL);
         } else {
             return -1;
@@ -242,7 +245,8 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
     job_t job;
     job_init(&job);
 
-    snprintf(job.job_id, sizeof(job.job_id), "%s", tokens[0]);
+    strncpy(job.job_id, tokens[0], sizeof(job.job_id) - 1);
+    job.job_id[sizeof(job.job_id) - 1] = '\0';
     job.version = parse_hex_u32(tokens[5]);
     job.nbits = parse_hex_u32(tokens[6]);
     job.ntime = parse_hex_u32(tokens[7]);
@@ -283,25 +287,34 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
         return -1;
     coinbase_len += coinb2_len;
 
-    uint8_t root[32];
-    odocrypt_build_header(&job, job.header);
-    if (hex_to_bytes(tokens[4], job.header + 4, 32) != 32) {
-        ;
-    }
-
-    if (keys[0] == NULL)
-        return -1;
+    /* TODO: derive the merkle root from the coinbase and branch list. */
+    memset(job.merkle_root, 0, sizeof(job.merkle_root));
 
     if (job_target_from_nbits(&job) != 0)
         return -1;
 
-    const size_t merkle_start = 4;
-    const size_t merkle_end = token_count - 3;
-    uint8_t branch[32];
-    size_t branch_len;
-    uint8_t root_hash[32];
     odocrypt_build_header(&job, job.header);
     return 0;
+}
+
+static void handle_result(stratum_ctx_t *ctx, const char *line)
+{
+    if (strstr(line, "\"result\":[") != NULL) {
+        if (handle_subscribe_result(ctx, line) == 0)
+            return;
+    }
+
+    bool ok = false;
+    if (parse_json_bool(line, "result", &ok)) {
+        if (ok) {
+            if (!ctx->authorized) {
+                ctx->authorized = true;
+                fprintf(stderr, "[stratum] authorized\n");
+            }
+        } else {
+            fprintf(stderr, "[stratum] result=false for line: %s\n", line);
+        }
+    }
 }
 
 int stratum_init(stratum_ctx_t *ctx,
