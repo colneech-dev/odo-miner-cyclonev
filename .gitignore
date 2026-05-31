@@ -1,0 +1,37 @@
+# HPS build artifacts
+hps/*.o
+hps/odod
+hps/fpga_smoke_test
+
+# Quartus build output
+hdl/quartus/output_files/
+hdl/quartus/db/
+hdl/quartus/incremental_db/
+hdl/quartus/*.rpt
+hdl/quartus/*.smsg
+hdl/quartus/*.summary
+hdl/quartus/*.pin
+hdl/quartus/*.sof
+hdl/quartus/*.pof
+hdl/quartus/*.jdi
+hdl/quartus/*.qws
+
+# Qsys/Platform Designer generated files
+hdl/qsys/*_generated/
+hdl/qsys/*.sopcinfo
+hdl/qsys/*.bsp
+
+# Bitstreams (tracked via Git LFS, not plain git)
+*.rbf
+*.sof
+*.pof
+
+# Logs
+logs/
+*.log
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+*~

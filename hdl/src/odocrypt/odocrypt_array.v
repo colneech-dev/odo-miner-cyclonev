@@ -14,7 +14,7 @@ module odocrypt_array #(
     input  wire         start,
     input  wire [31:0]  nonce_start,
     input  wire [31:0]  nonce_end,
-    input  wire [31:0]  header_words [0:23],
+    input  wire [31:0]  header_words [0:19],
     input  wire [255:0] target,
     input  wire [31:0]  epoch,
 

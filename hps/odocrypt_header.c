@@ -169,14 +169,6 @@ static size_t hex_to_bytes(const char *hex, uint8_t *out, size_t max_out)
     return len / 2;
 }
 
-static void reverse_bytes(uint8_t *data, size_t len)
-{
-    for (size_t i = 0; i < len / 2; ++i) {
-        uint8_t tmp = data[i];
-        data[i] = data[len - 1 - i];
-        data[len - 1 - i] = tmp;
-    }
-}
 
 void odocrypt_double_sha256(const uint8_t *data, size_t len, uint8_t out[32])
 {

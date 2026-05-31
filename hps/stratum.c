@@ -235,34 +235,101 @@ static int handle_subscribe_result(stratum_ctx_t *ctx, const char *body)
     return 0;
 }
 
+/*
+ * Parse a mining.notify params array.
+ *
+ * Stratum format:
+ *   ["job_id","prevhash","coinb1","coinb2",["branch",...],
+ *    "version","nbits","ntime",clean_jobs]
+ *
+ * The inner branch array is variable length; we parse positionally.
+ */
 static int handle_notify(stratum_ctx_t *ctx, const char *params)
 {
-    char tokens[64][128];
-    size_t token_count = collect_quoted_strings(params, tokens, 64);
-    if (token_count < 7)
-        return -1;
-
     job_t job;
     job_init(&job);
 
-    strncpy(job.job_id, tokens[0], sizeof(job.job_id) - 1);
-    job.job_id[sizeof(job.job_id) - 1] = '\0';
-    job.version = parse_hex_u32(tokens[5]);
-    job.nbits = parse_hex_u32(tokens[6]);
-    job.ntime = parse_hex_u32(tokens[7]);
-    job.clean_jobs = false;
+    /* Walk params character by character, extracting the structured fields. */
+    const char *p = params;
 
-    if (token_count >= 9) {
-        const char *clean_pos = strstr(params, "clean_jobs");
-        if (clean_pos)
-            job.clean_jobs = (strstr(clean_pos, "true") != NULL);
+    /* helper: skip to and past the next '"', copy content, return ptr after closing '"' */
+#define NEXT_STR(dst, dst_sz) do { \
+    while (*p && *p != '"') p++;   \
+    if (!*p) return -1;            \
+    p++;                           \
+    size_t _len = 0;               \
+    while (*p && *p != '"' && _len + 1 < (dst_sz)) { dst[_len++] = *p++; } \
+    dst[_len] = '\0';              \
+    while (*p && *p != '"') p++;   \
+    if (*p == '"') p++;            \
+} while (0)
+
+    char job_id_buf [JOB_MAX_JOBID_LEN] = {0};
+    char prevhash_hex[68]  = {0};
+    char coinb1_hex  [2048] = {0};
+    char coinb2_hex  [2048] = {0};
+
+    /* Skip the outer '[' */
+    while (*p && *p != '[') p++;
+    if (!*p) return -1;
+    p++;
+
+    NEXT_STR(job_id_buf,  sizeof(job_id_buf));
+    NEXT_STR(prevhash_hex, sizeof(prevhash_hex));
+    NEXT_STR(coinb1_hex,  sizeof(coinb1_hex));
+    NEXT_STR(coinb2_hex,  sizeof(coinb2_hex));
+
+    /* Merkle branch array */
+    while (*p && *p != '[') p++;
+    if (!*p) return -1;
+    p++; /* skip inner '[' */
+
+    char branches[32][72]; /* 32-byte hashes = 64 hex chars + NUL */
+    size_t branch_count = 0;
+    while (*p && *p != ']' && branch_count < 32) {
+        if (*p == '"') {
+            p++;
+            size_t len = 0;
+            while (*p && *p != '"' && len + 1 < sizeof(branches[0]))
+                branches[branch_count][len++] = *p++;
+            branches[branch_count][len] = '\0';
+            if (*p == '"') p++;
+            branch_count++;
+        } else {
+            p++;
+        }
     }
+    while (*p && *p != ']') p++;
+    if (*p == ']') p++;
 
-    job.epoch = job.ntime / (10u * 24u * 60u * 60u);
-    memset(job.extranonce2, 0, sizeof(job.extranonce2));
+    char version_hex[12] = {0};
+    char nbits_hex  [12] = {0};
+    char ntime_hex  [12] = {0};
+    NEXT_STR(version_hex, sizeof(version_hex));
+    NEXT_STR(nbits_hex,   sizeof(nbits_hex));
+    NEXT_STR(ntime_hex,   sizeof(ntime_hex));
+
+    /* clean_jobs boolean follows the ntime string */
+    const char *clean_pos = p;
+    while (*clean_pos && *clean_pos != 't' && *clean_pos != 'f' && *clean_pos != ']')
+        clean_pos++;
+    job.clean_jobs = (strncmp(clean_pos, "true", 4) == 0);
+
+#undef NEXT_STR
+
+    /* Populate numeric fields */
+    snprintf(job.job_id, sizeof(job.job_id), "%s", job_id_buf);
+    job.version = parse_hex_u32(version_hex);
+    job.nbits   = parse_hex_u32(nbits_hex);
+    job.ntime   = parse_hex_u32(ntime_hex);
+    /* epoch is block_height/2048; the pool doesn't send height in standard
+     * Stratum — the daemon must supply it separately.  Leave 0 for now. */
+    job.epoch           = 0;
     job.extranonce2_len = (size_t)ctx->extranonce2_size;
 
-    if (hex_to_bytes(tokens[1], job.prevhash, sizeof(job.prevhash)) != sizeof(job.prevhash))
+    /* prevhash: pool sends big-endian, reverse to LE for header construction */
+    if (hex_to_bytes(prevhash_hex, job.prevhash, sizeof(job.prevhash))
+            != sizeof(job.prevhash))
         return -1;
     for (size_t i = 0; i < sizeof(job.prevhash) / 2; ++i) {
         uint8_t tmp = job.prevhash[i];
@@ -270,30 +337,47 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
         job.prevhash[31 - i] = tmp;
     }
 
+    /* Build coinbase: coinb1 + extranonce1 + extranonce2 + coinb2 */
     uint8_t coinbase[4096];
-    size_t coinbase_len = 0;
-    size_t coinb1_len = hex_to_bytes(tokens[2], coinbase, sizeof(coinbase));
-    if (coinb1_len == 0)
-        return -1;
-    coinbase_len += coinb1_len;
+    size_t  coinbase_len = 0;
+    size_t n;
+
+    n = hex_to_bytes(coinb1_hex, coinbase, sizeof(coinbase));
+    if (!n && coinb1_hex[0]) return -1;
+    coinbase_len += n;
+
     if (coinbase_len + ctx->extranonce1_len + job.extranonce2_len > sizeof(coinbase))
         return -1;
     memcpy(coinbase + coinbase_len, ctx->extranonce1, ctx->extranonce1_len);
     coinbase_len += ctx->extranonce1_len;
     memcpy(coinbase + coinbase_len, job.extranonce2, job.extranonce2_len);
     coinbase_len += job.extranonce2_len;
-    size_t coinb2_len = hex_to_bytes(tokens[3], coinbase + coinbase_len, sizeof(coinbase) - coinbase_len);
-    if (coinb2_len == 0)
+
+    n = hex_to_bytes(coinb2_hex, coinbase + coinbase_len, sizeof(coinbase) - coinbase_len);
+    coinbase_len += n;
+
+    /* Compute merkle root from coinbase + branch list */
+    if (odocrypt_build_merkle_root(coinbase, coinbase_len,
+                                   (const char (*)[128])branches,
+                                   branch_count,
+                                   job.merkle_root) != 0)
         return -1;
-    coinbase_len += coinb2_len;
 
-    /* TODO: derive the merkle root from the coinbase and branch list. */
-    memset(job.merkle_root, 0, sizeof(job.merkle_root));
-
+    /* Derive 256-bit target from nbits */
     if (job_target_from_nbits(&job) != 0)
         return -1;
 
+    /* Build the 80-byte header template (nonce field zeroed) */
     odocrypt_build_header(&job, job.header);
+
+    /* Commit to context */
+    ctx->current_job = job;
+    ctx->have_job    = true;
+    if (ctx->state < STRATUM_READY)
+        ctx->state = STRATUM_READY;
+
+    fprintf(stderr, "[stratum] job %s nbits=%s ntime=%08x branches=%zu clean=%d\n",
+            job.job_id, nbits_hex, job.ntime, branch_count, job.clean_jobs);
     return 0;
 }
 
@@ -476,6 +560,29 @@ int stratum_submit_share(stratum_ctx_t *ctx,
              job->job_id,
              extranonce2_hex,
              job->ntime,
+             nonce);
+
+    return send_line(ctx, line);
+}
+
+int stratum_submit(stratum_ctx_t *ctx,
+                   const job_t *job,
+                   uint32_t nonce,
+                   const char *ntime_hex,
+                   const char *extranonce2_hex)
+{
+    if (!ctx || !job || ctx->fd < 0 || !ctx->authorized)
+        return -1;
+
+    char line[1024];
+    snprintf(line, sizeof(line),
+             "{\"id\":%llu,\"method\":\"mining.submit\","
+             "\"params\":[\"%s\",\"%s\",\"%s\",\"%s\",\"%08x\"]}\n",
+             (unsigned long long)ctx->next_id++,
+             ctx->user,
+             job->job_id,
+             extranonce2_hex ? extranonce2_hex : "",
+             ntime_hex ? ntime_hex : "00000000",
              nonce);
 
     return send_line(ctx, line);
