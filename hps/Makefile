@@ -4,7 +4,7 @@ CFLAGS ?= -std=c11 -O2 -Wall -Wextra -pedantic $(CPPFLAGS)
 LDFLAGS ?=
 TARGET ?= odod
 
-SRCS = miner_daemon.c stratum.c job.c odocrypt_header.c
+SRCS = miner_daemon.c stratum.c job.c odocrypt_header.c odocrypt_state.c miner_io.c
 OBJS = $(SRCS:.c=.o)
 
 SMOKE_SRCS = fpga_smoke_test.c

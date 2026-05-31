@@ -70,14 +70,20 @@ byte-addressed Avalon offsets, not word indexes.
 > **Latch clearing:** after reading `NONCE_FOUND`, pulse `SOFT_RESET` (or the
 > dedicated ack bit if present in RTL) so `STATUS.FOUND` re-arms for the next hit.
 
-### `STATUS` (0x01, RO)
+### `STATUS` (0x04, RO)
+
+> **Known RTL bug (BUG-1):** In the current `odocrypt_top.v`, `EPOCH_LOCK` (bit 3)
+> always reads **0** due to a Verilog concatenation width error. `STAT_EPOCH_LOCK`
+> is a 32-bit constant (`1u << 3`); using it inside `{28'h0, STAT_EPOCH_LOCK, …}`
+> makes the concat 63 bits wide and after truncation bit 3 is always 0.
+> Fix tracked in `docs/TODO.md` as BUG-1.
 
 | Bit | Name | Description |
 |---|---|---|
 | 0 | `BUSY` | 1 = core array actively hashing. |
 | 1 | `FOUND` | 1 = a nonce meeting target was found; `NONCE_FOUND` is valid. CDC-synced from hash domain. |
-| 2 | `CORE_READY` | 1 = core pipeline is ready. Currently tied high in RTL. |
-| 3 | `EPOCH_LOCK` | 1 = epoch register is stable / lock condition met. Currently tied high in RTL. |
+| 2 | `CORE_READY` | 1 = core pipeline is ready. Tied high in RTL (reads 1 always). |
+| 3 | `EPOCH_LOCK` | 1 = epoch register stable. Intended to be tied high; **currently reads 0 due to BUG-1.** |
 | 31:4 | reserved | Reads 0. |
 
 ---
@@ -125,3 +131,26 @@ point:
 
 No register offsets or bitfields change between the two modes — only the CDC
 paths become active. This keeps `odo_regs.h` stable across the transition.
+
+> **CDC note (BUG-7):** `cdc_bus.v` currently assigns `ready_src = ready_dst`
+> directly — a domain-crossing without a synchronizer. Harmless in single-clock
+> mode; must be fixed before enabling the PLL hash clock.
+
+---
+
+## 7. Known Issues (as of 2026-05-31)
+
+| ID | Severity | Description |
+|---|---|---|
+| BUG-1 | Medium | `STATUS.EPOCH_LOCK` (bit 3) always reads 0 — concatenation width bug in `odocrypt_top.v:212`. |
+| BUG-2 | Low | `odocrypt_core.v`: `busy` driven from two always blocks (multi-driver violation). |
+| BUG-3 | High | `odocrypt_array.v` declares 24 header words; core expects 20 — synthesis error. |
+| BUG-4 | High | `core_start_pulse` is a one-cycle combinatorial signal; lost if core is busy. |
+| BUG-7 | Low | `cdc_bus.v:33` `ready_src = ready_dst` is an unsynced cross-domain signal. |
+| ALGO-1 | Critical | `odocrypt_epoch_mutator.v` uses a synthetic formula, not the real Keccak-800 PRNG. |
+| ALGO-2 | Critical | `odocrypt_round.v` / `odocrypt_sbox_dsp.v` are approximations; won't produce valid shares. |
+| ALGO-3 | High | Target endianness in HPS write vs RTL `<=` comparison is unvalidated. |
+| ALGO-4 | Medium | Pipeline nonce alignment (off-by-one risk) needs simulation verification. |
+| PERF-1 | Low | `PERF_HASHES` counts busy cycles, not completed hashes — fix to increment on `core_hash_valid`. |
+
+All issues are tracked with fixes in `docs/TODO.md`.

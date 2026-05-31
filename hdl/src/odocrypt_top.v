@@ -70,6 +70,7 @@ module odocrypt_top (
     localparam ADDR_PERF_SHARES    = 8'hB8;
     localparam ADDR_PERF_UPTIME    = 8'hBC;
 
+    reg         start_latch;
     wire        core_start_pulse;
     wire        core_reset_n;
     wire        core_busy;
@@ -84,10 +85,19 @@ module odocrypt_top (
     assign target_256 = { target_reg[7], target_reg[6], target_reg[5], target_reg[4],
                          target_reg[3], target_reg[2], target_reg[1], target_reg[0] };
 
-    // Start pulse generated on writes to the control register with the START bit set.
-    assign core_start_pulse = avs_write && (avs_address == ADDR_CONTROL) &&
-                              (avs_writedata[0] == 1'b1) &&
-                              (avs_writedata[2] == 1'b1);
+    // Latch the start request so it survives until the core is idle.
+    // Clears once core_busy goes high (core has accepted the start).
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n)
+            start_latch <= 1'b0;
+        else if (avs_write && (avs_address == ADDR_CONTROL) &&
+                 avs_writedata[0] && avs_writedata[2])
+            start_latch <= 1'b1;
+        else if (core_busy)
+            start_latch <= 1'b0;
+    end
+
+    assign core_start_pulse = start_latch && !core_busy;
 
     // -------------------------------------------------------------------------
     // Core instance
@@ -184,8 +194,8 @@ module odocrypt_top (
                 endcase
             end
 
-            // count cycles while core is active; simple proxy for work done
-            if (core_busy) begin
+            // count completed hash evaluations (one per valid pipeline output)
+            if (core_hash_valid) begin
                 {perf_hashes_hi, perf_hashes_lo} <= {perf_hashes_hi, perf_hashes_lo} + 64'h1;
             end
 
@@ -209,7 +219,7 @@ module odocrypt_top (
         avs_readdata = 32'h0000_0000;
         case (avs_address)
             ADDR_CONTROL:       avs_readdata = control_reg;
-            ADDR_STATUS:        avs_readdata = {28'h0, STAT_EPOCH_LOCK, 1'b1, found_latched, core_busy};
+            ADDR_STATUS:        avs_readdata = {28'h0, 1'b1 /*EPOCH_LOCK*/, 1'b1 /*CORE_READY*/, found_latched, core_busy};
             ADDR_VERSION:       avs_readdata = version_reg;
             ADDR_EPOCH:         avs_readdata = epoch_reg;
             ADDR_NONCE_START:   avs_readdata = nonce_start_reg;

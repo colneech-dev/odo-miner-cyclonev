@@ -39,6 +39,15 @@ typedef struct {
 } job_t;
 
 void     job_init(job_t *job);
+int      job_from_notify(job_t *job,
+                         const char *job_id,
+                         uint32_t version,
+                         const uint8_t *prevhash,
+                         const uint8_t *merkle_root,
+                         uint32_t ntime,
+                         uint32_t nbits,
+                         uint32_t epoch,
+                         bool clean_jobs);
 int      job_target_from_nbits(job_t *job);
 void     job_set_nonce_range(job_t *job, uint32_t start, uint32_t end);
 bool     job_same(const job_t *a, const job_t *b);

@@ -30,6 +30,9 @@ module cdc_bus #(
         end
     end
 
-    assign ready_src = ready_dst;
+    // Sync ready_dst back into the source clock domain before exposing as ready_src.
+    wire ready_src_sync;
+    cdc_sync sync_ready (.clk_dst(clk_src), .in_src(ready_dst), .out_dst(ready_src_sync));
+    assign ready_src = ready_src_sync;
 
 endmodule

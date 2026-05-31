@@ -1,23 +1,8 @@
 #include "job.h"
 #include <string.h>
 #include <limits.h>
+#include <stdio.h>
 
-static bool hex_digit_to_value(char digit, uint8_t *value)
-{
-    if (digit >= '0' && digit <= '9') {
-        *value = (uint8_t)(digit - '0');
-        return true;
-    }
-    if (digit >= 'a' && digit <= 'f') {
-        *value = (uint8_t)(10 + digit - 'a');
-        return true;
-    }
-    if (digit >= 'A' && digit <= 'F') {
-        *value = (uint8_t)(10 + digit - 'A');
-        return true;
-    }
-    return false;
-}
 
 void job_init(job_t *job)
 {
@@ -75,6 +60,34 @@ void job_set_nonce_range(job_t *job, uint32_t start, uint32_t end)
         return;
     job->nonce_start = start;
     job->nonce_end = end;
+}
+
+int job_from_notify(job_t *job,
+                    const char *job_id,
+                    uint32_t version,
+                    const uint8_t *prevhash,
+                    const uint8_t *merkle_root,
+                    uint32_t ntime,
+                    uint32_t nbits,
+                    uint32_t epoch,
+                    bool clean_jobs)
+{
+    if (!job || !job_id || !prevhash || !merkle_root)
+        return -1;
+
+    job_init(job);
+
+    snprintf(job->job_id, sizeof(job->job_id), "%s", job_id);
+    job->version    = version;
+    job->ntime      = ntime;
+    job->nbits      = nbits;
+    job->epoch      = epoch;
+    job->clean_jobs = clean_jobs;
+
+    memcpy(job->prevhash,    prevhash,    sizeof(job->prevhash));
+    memcpy(job->merkle_root, merkle_root, sizeof(job->merkle_root));
+
+    return job_target_from_nbits(job);
 }
 
 bool job_same(const job_t *a, const job_t *b)

@@ -16,7 +16,7 @@ module odocrypt_core (
     input  wire [255:0]  target,
     input  wire [31:0]  epoch,
 
-    output reg          busy,
+    output wire         busy,
     output reg          found,
     output reg  [31:0]  found_nonce,
     output reg [255:0]  hash_out,
@@ -59,7 +59,6 @@ module odocrypt_core (
         if (!reset_n) begin
             state      <= ST_IDLE;
             nonce_cur  <= 32'd0;
-            busy       <= 1'b0;
             found      <= 1'b0;
             found_nonce<= 32'd0;
             hash_out   <= 256'd0;
@@ -145,8 +144,13 @@ module odocrypt_core (
             end
 
             ST_DONE: begin
-                if (!start)
+                if (start) begin
+                    // new job queued while previous was finishing — restart immediately
+                    nonce_next = nonce_start;
+                    state_next = ST_LOAD;
+                end else begin
                     state_next = ST_IDLE;
+                end
             end
 
             default: state_next = ST_IDLE;
