@@ -75,6 +75,8 @@ module odocrypt_top (
     wire        core_busy;
     wire        core_found;
     wire [31:0] core_found_nonce;
+    wire [255:0] core_hash;
+    wire        core_hash_valid;
 
     assign avs_waitrequest = 1'b0;
     assign core_reset_n = reset_n & ~control_reg[1];
@@ -101,7 +103,9 @@ module odocrypt_top (
         .epoch      (epoch_value),
         .busy       (core_busy),
         .found      (core_found),
-        .found_nonce(core_found_nonce)
+        .found_nonce(core_found_nonce),
+        .hash_out   (core_hash),
+        .hash_valid (core_hash_valid)
     );
 
     // -------------------------------------------------------------------------
@@ -183,6 +187,11 @@ module odocrypt_top (
             // count cycles while core is active; simple proxy for work done
             if (core_busy) begin
                 {perf_hashes_hi, perf_hashes_lo} <= {perf_hashes_hi, perf_hashes_lo} + 64'h1;
+            end
+
+            if (core_hash_valid) begin
+                for (i = 0; i < 8; i = i + 1)
+                    hash_reg[i] <= core_hash[32*i +: 32];
             end
 
             if (core_found && !found_latched) begin
