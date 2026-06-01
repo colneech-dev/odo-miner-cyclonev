@@ -1,0 +1,5 @@
+QUARTUS_VERSION = "21.1"
+DATE = "2026-05-31"
+
+# Revisions
+PROJECT_REVISION = "odo_miner"

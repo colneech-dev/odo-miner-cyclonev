@@ -20,6 +20,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "hps_regs.h"
 
 /* --- Algorithm dimensions (must match odocrypt.h) --- */
 #define ODO_ROUNDS           84
@@ -82,5 +83,23 @@ void odo_encrypt(const odo_epoch_state_t *state,
  * Matches the DigiByte network constant.
  */
 #define ODO_KEY_PERIOD  2048u
+
+/*
+ * Stream all epoch tables to the FPGA via the REG_EPOCH_WR_DATA register.
+ *
+ * Call sequence:
+ *   odo_epoch_generate(&state, epoch_key);
+ *   odo_fpga_load_epoch(&state, io);      // streams 5964 words
+ *   reg_wr(io, REG_EPOCH_COMMIT, 1);      // activates new tables
+ *   // Wait for STATUS.TABLES_VALID before starting cores.
+ *
+ * The function writes exactly REG_EPOCH_WR_TOTAL (5964) words in the order
+ * expected by odocrypt_epoch_tables.v. The caller must ensure:
+ *   - cores are stopped (CTRL_RESET) before calling,
+ *   - REG_EPOCH_COMMIT is written after this function returns.
+ *
+ * Returns 0 on success, -1 if io is NULL or state is NULL.
+ */
+int odo_fpga_load_epoch(const odo_epoch_state_t *state, const miner_io_t *io);
 
 #endif /* ODOCRYPT_STATE_H */

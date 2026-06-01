@@ -66,6 +66,19 @@
 #define REG_PERF_SHARES      0x0B8   /* R: shares found */
 #define REG_PERF_UPTIME      0x0BC   /* R: uptime in clock-derived ticks */
 
+/* Epoch table streaming write interface.
+ * Load sequence:
+ *   1. Write REG_EPOCH_WR_DATA 5964 times (see odocrypt_state.h for ordering).
+ *   2. Write REG_EPOCH_COMMIT (any value) to activate new tables.
+ *   3. Monitor STATUS.TABLES_VALID (bit 4) — goes high after first commit.
+ *   4. Core will not start hashing until TABLES_VALID is set.
+ * Use REG_EPOCH_WR_ADDR to verify the write pointer between transfers. */
+#define REG_EPOCH_WR_DATA    0x0C0   /* W: streaming write (auto-increments address) */
+#define REG_EPOCH_WR_RESET   0x0C4   /* W: any write resets the write pointer to 0   */
+#define REG_EPOCH_COMMIT     0x0C8   /* W: any write commits loading buffer → active  */
+#define REG_EPOCH_WR_ADDR    0x0CC   /* R: current write address (0..5963)            */
+#define REG_EPOCH_WR_TOTAL   5964    /* Total 32-bit words per epoch load             */
+
 /* ----------------------------------------------------------------------
  * Control bit masks
  * --------------------------------------------------------------------*/
@@ -78,6 +91,7 @@
 #define STAT_FOUND           (1u << 1)
 #define STAT_CORE_READY      (1u << 2)
 #define STAT_EPOCH_LOCK      (1u << 3)
+#define STAT_TABLES_VALID    (1u << 4)  /* 1 = epoch tables committed, safe to start */
 
 /* ----------------------------------------------------------------------
  * mmap helper handle

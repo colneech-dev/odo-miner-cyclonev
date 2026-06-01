@@ -48,27 +48,33 @@ module odocrypt_top (
     localparam CTRL_CLEAR_FOUND  = 1u << 3;
 
     // Status bits
-    localparam STAT_BUSY         = 1u << 0;
-    localparam STAT_FOUND        = 1u << 1;
-    localparam STAT_CORE_READY   = 1u << 2;
-    localparam STAT_EPOCH_LOCK   = 1u << 3;
+    localparam STAT_BUSY          = 1u << 0;
+    localparam STAT_FOUND         = 1u << 1;
+    localparam STAT_CORE_READY    = 1u << 2;
+    localparam STAT_EPOCH_LOCK    = 1u << 3;
+    localparam STAT_TABLES_VALID  = 1u << 4;
 
     // Avalon register addresses
-    localparam ADDR_CONTROL      = 8'h00;
-    localparam ADDR_STATUS       = 8'h04;
-    localparam ADDR_VERSION      = 8'h08;
-    localparam ADDR_EPOCH        = 8'h0C;
-    localparam ADDR_NONCE_START  = 8'h10;
-    localparam ADDR_NONCE_END    = 8'h14;
-    localparam ADDR_NONCE_FOUND  = 8'h18;
-    localparam ADDR_CORE_FOUND   = 8'h1C;
-    localparam ADDR_TARGET_BASE  = 8'h20;
-    localparam ADDR_HEADER_BASE  = 8'h40;
-    localparam ADDR_HASH_BASE    = 8'h90;
+    localparam ADDR_CONTROL        = 8'h00;
+    localparam ADDR_STATUS         = 8'h04;
+    localparam ADDR_VERSION        = 8'h08;
+    localparam ADDR_EPOCH          = 8'h0C;
+    localparam ADDR_NONCE_START    = 8'h10;
+    localparam ADDR_NONCE_END      = 8'h14;
+    localparam ADDR_NONCE_FOUND    = 8'h18;
+    localparam ADDR_CORE_FOUND     = 8'h1C;
+    localparam ADDR_TARGET_BASE    = 8'h20;
+    localparam ADDR_HEADER_BASE    = 8'h40;
+    localparam ADDR_HASH_BASE      = 8'h90;
     localparam ADDR_PERF_HASHES_LO = 8'hB0;
     localparam ADDR_PERF_HASHES_HI = 8'hB4;
     localparam ADDR_PERF_SHARES    = 8'hB8;
     localparam ADDR_PERF_UPTIME    = 8'hBC;
+    // Epoch table streaming write registers
+    localparam ADDR_EPOCH_WR_DATA  = 8'hC0;  // WO: write one word, auto-increments ptr
+    localparam ADDR_EPOCH_WR_RESET = 8'hC4;  // WO: any write resets the write pointer to 0
+    localparam ADDR_EPOCH_COMMIT   = 8'hC8;  // WO: any write commits loading → active buffer
+    localparam ADDR_EPOCH_WR_ADDR  = 8'hCC;  // RO: current write address (debug)
 
     reg         start_latch;
     wire        core_start_pulse;
@@ -78,6 +84,19 @@ module odocrypt_top (
     wire [31:0] core_found_nonce;
     wire [255:0] core_hash;
     wire        core_hash_valid;
+
+    // Epoch table wires from odocrypt_epoch_tables
+    wire [20479:0]  et_sbox1;
+    wire [163839:0] et_sbox2;
+    wire [38399:0]  et_pmask;
+    wire [299:0]    et_prot;
+    wire [35:0]     et_rot;
+    wire [839:0]    et_rk;
+    wire            et_tables_valid;
+
+    // Epoch table write strobes (combinatorial from Avalon write decode)
+    reg  et_wr_en;
+    reg  et_commit;
 
     assign avs_waitrequest = 1'b0;
     assign core_reset_n = reset_n & ~control_reg[1];
@@ -100,23 +119,59 @@ module odocrypt_top (
     assign core_start_pulse = start_latch && !core_busy;
 
     // -------------------------------------------------------------------------
+    // Epoch table storage
+    // -------------------------------------------------------------------------
+    wire [12:0] et_wr_addr_out;
+
+    odocrypt_epoch_tables epoch_tables_inst (
+        .clk          (clk),
+        .reset_n      (reset_n),
+        .wr_en        (et_wr_en),
+        .wr_data      (avs_writedata),
+        .commit       (et_commit),
+        .sbox1_out    (et_sbox1),
+        .sbox2_out    (et_sbox2),
+        .pmask_out    (et_pmask),
+        .prot_out     (et_prot),
+        .rot_out      (et_rot),
+        .rk_out       (et_rk),
+        .tables_valid (et_tables_valid),
+        .wr_addr_out  (et_wr_addr_out)
+    );
+
+    // -------------------------------------------------------------------------
     // Core instance
     // -------------------------------------------------------------------------
     odocrypt_core core_inst (
-        .clk        (clk),
-        .reset_n    (core_reset_n),
-        .start      (core_start_pulse),
-        .nonce_start(nonce_start_reg),
-        .nonce_end  (nonce_end_reg),
-        .header_words(header_reg),
-        .target     (target_256),
-        .epoch      (epoch_value),
-        .busy       (core_busy),
-        .found      (core_found),
-        .found_nonce(core_found_nonce),
-        .hash_out   (core_hash),
-        .hash_valid (core_hash_valid)
+        .clk          (clk),
+        .reset_n      (core_reset_n),
+        .start        (core_start_pulse),
+        .nonce_start  (nonce_start_reg),
+        .nonce_end    (nonce_end_reg),
+        .header_words (header_reg),
+        .target       (target_256),
+        .epoch        (epoch_value),
+        .sbox1_flat   (et_sbox1),
+        .sbox2_flat   (et_sbox2),
+        .pmask_flat   (et_pmask),
+        .prot_flat    (et_prot),
+        .rot_flat     (et_rot),
+        .rk_flat      (et_rk),
+        .tables_valid (et_tables_valid),
+        .busy         (core_busy),
+        .found        (core_found),
+        .found_nonce  (core_found_nonce),
+        .hash_out     (core_hash),
+        .hash_valid   (core_hash_valid)
     );
+
+    // -------------------------------------------------------------------------
+    // Epoch write strobes: combinatorial decode from Avalon write
+    // -------------------------------------------------------------------------
+    always @(*) begin
+        et_wr_en  = avs_write && (avs_address == ADDR_EPOCH_WR_DATA);
+        et_commit = avs_write && (avs_address == ADDR_EPOCH_COMMIT);
+    end
 
     // -------------------------------------------------------------------------
     // Register write logic
@@ -219,7 +274,7 @@ module odocrypt_top (
         avs_readdata = 32'h0000_0000;
         case (avs_address)
             ADDR_CONTROL:       avs_readdata = control_reg;
-            ADDR_STATUS:        avs_readdata = {28'h0, 1'b1 /*EPOCH_LOCK*/, 1'b1 /*CORE_READY*/, found_latched, core_busy};
+            ADDR_STATUS:        avs_readdata = {27'h0, et_tables_valid, 1'b1 /*EPOCH_LOCK*/, 1'b1 /*CORE_READY*/, found_latched, core_busy};
             ADDR_VERSION:       avs_readdata = version_reg;
             ADDR_EPOCH:         avs_readdata = epoch_reg;
             ADDR_NONCE_START:   avs_readdata = nonce_start_reg;
@@ -272,6 +327,10 @@ module odocrypt_top (
             ADDR_PERF_HASHES_HI: avs_readdata = perf_hashes_hi;
             ADDR_PERF_SHARES:    avs_readdata = perf_shares;
             ADDR_PERF_UPTIME:    avs_readdata = perf_uptime;
+            ADDR_EPOCH_WR_DATA:  avs_readdata = 32'h0000_0000;  // WO
+            ADDR_EPOCH_WR_RESET: avs_readdata = 32'h0000_0000;  // WO
+            ADDR_EPOCH_COMMIT:   avs_readdata = 32'h0000_0000;  // WO
+            ADDR_EPOCH_WR_ADDR:  avs_readdata = {19'd0, et_wr_addr_out};
             default: avs_readdata = 32'h0000_0000;
         endcase
     end
