@@ -311,19 +311,21 @@ int odo_fpga_load_epoch(const odo_epoch_state_t *s, const miner_io_t *io)
         }
     }
 
-    /* Pbox masks (both P-boxes): lo word then hi word for each 64-bit mask */
+    /* P-boxes: write per-pbox (masks then rotations for each pbox separately).
+     * RTL address map: pbox-0 masks [5760..5819], pbox-0 rots [5820..5844],
+     *                  pbox-1 masks [5845..5904], pbox-1 rots [5905..5929].
+     * Writing all masks then all rotations (as done previously) would place
+     * pbox-1 masks at the pbox-0 rotation addresses — silent wrong tables. */
     for (int p = 0; p < 2; p++) {
+        /* Masks: 6 subrounds × 5 lanes × 2 words (lo then hi of each 64-bit mask) */
         for (int j = 0; j < ODO_PBOX_SUBROUNDS; j++) {
             for (int k = 0; k < ODO_STATE_SIZE / 2; k++) {
                 uint64_t m = s->pbox[p].mask[j][k];
-                WR((uint32_t)m);           /* low 32 bits */
-                WR((uint32_t)(m >> 32));   /* high 32 bits */
+                WR((uint32_t)m);
+                WR((uint32_t)(m >> 32));
             }
         }
-    }
-
-    /* Pbox rotations (both P-boxes): one 32-bit word per 6-bit rotation */
-    for (int p = 0; p < 2; p++) {
+        /* Rotations: (PBOX_SUBROUNDS-1)=5 subrounds × 5 lanes, one word each */
         for (int j = 0; j < ODO_PBOX_SUBROUNDS - 1; j++) {
             for (int k = 0; k < ODO_STATE_SIZE / 2; k++) {
                 WR((uint32_t)s->pbox[p].rotation[j][k]);
