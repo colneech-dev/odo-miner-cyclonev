@@ -27,11 +27,11 @@ set_global_assignment -name VERILOG_FILE ../src/odocrypt_top.v
 
 # OdoCrypt core
 set_global_assignment -name VERILOG_FILE ../src/odocrypt/odocrypt_core.v
-set_global_assignment -name VERILOG_FILE ../src/odocrypt/odocrypt_compress.v
-set_global_assignment -name VERILOG_FILE ../src/odocrypt/odocrypt_round.v
 set_global_assignment -name VERILOG_FILE ../src/odocrypt/odocrypt_epoch_mutator.v
-set_global_assignment -name VERILOG_FILE ../src/odocrypt/odocrypt_sbox_dsp.v
 set_global_assignment -name VERILOG_FILE ../src/odocrypt/odocrypt_array.v
+set_global_assignment -name VERILOG_FILE ../src/odocrypt/odocrypt_epoch_tables.v
+# odocrypt_compress.v, odocrypt_round.v, odocrypt_sbox_dsp.v are superseded by
+# the sequential odocrypt_core.v and archived in hdl/src/odocrypt/archive/
 set_global_assignment -name VERILOG_FILE ../src/odocrypt/difficulty_compare.v
 set_global_assignment -name VERILOG_FILE ../src/odocrypt/perf_counter.v
 set_global_assignment -name VERILOG_FILE ../src/odocrypt/nonce_scheduler.v
