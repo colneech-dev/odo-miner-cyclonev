@@ -1,5 +1,6 @@
 /*
  * test_odo_upstream.cpp — Cross-check wrapper around the upstream OdoCrypt C++
+ * Outputs both odo_encrypt result and full PoW hash to match test_odo.c format.
  *
  * Produces the same test vectors as test_odo.c using the authoritative
  * upstream implementation. Diff the two outputs to verify our C port is correct.
@@ -13,6 +14,9 @@
  */
 
 #include "../upstream/odo-miner/src/crypto/odocrypt.h"
+extern "C" {
+#include "../upstream/odo-miner/src/crypto/KeccakP-800-SnP.h"
+}
 
 #include <cstdio>
 #include <cstring>
@@ -41,18 +45,34 @@ int main(void)
     uint32_t test_nonces[] = { 0, 1, 0xCAFEBABEu };
 
     for (size_t ki = 0; ki < sizeof(test_keys)/sizeof(test_keys[0]); ki++) {
-        OdoCrypt cipher(test_keys[ki]);
+        OdoCrypt ciph(test_keys[ki]);
 
         for (size_t ni = 0; ni < sizeof(test_nonces)/sizeof(test_nonces[0]); ni++) {
             uint8_t hdr[80];
             make_header(hdr, test_nonces[ni]);
 
-            char out[OdoCrypt::DIGEST_SIZE];
-            cipher.Encrypt(out, reinterpret_cast<const char *>(hdr));
-
+            /* odo_encrypt output */
+            char enc[OdoCrypt::DIGEST_SIZE];
+            ciph.Encrypt(enc, reinterpret_cast<const char *>(hdr));
             printf("key=%08x nonce=%08x out=", test_keys[ki], test_nonces[ni]);
             for (int i = 0; i < OdoCrypt::DIGEST_SIZE; i++)
-                printf("%02x", (unsigned char)out[i]);
+                printf("%02x", (unsigned char)enc[i]);
+            printf("\n");
+
+            /* Full PoW hash: replicate hashodo.h inline to avoid cassert issue */
+            uint8_t hash[32];
+            make_header(hdr, test_nonces[ni]);
+            {
+                char state[KeccakP800_stateSizeInBytes] = {};
+                memcpy(state, hdr, OdoCrypt::DIGEST_SIZE);
+                state[OdoCrypt::DIGEST_SIZE] = 1;
+                ciph.Encrypt(state, state);
+                KeccakP800_Permute_12rounds(state);
+                memcpy(hash, state, 32);
+            }
+            printf("key=%08x nonce=%08x pow=", test_keys[ki], test_nonces[ni]);
+            for (int i = 0; i < 32; i++)
+                printf("%02x", hash[i]);
             printf("\n");
         }
     }
