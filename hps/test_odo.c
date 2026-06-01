@@ -1,24 +1,24 @@
 /*
  * test_odo.c — Self-test and cross-check harness for odocrypt_state.c
  *
- * Validates that our C port of OdoCrypt:
- *   1. Produces deterministic output (same input → same output).
- *   2. Produces different output for different epoch keys.
- *   3. Produces different output for different nonces (i.e., the initial
- *      state build is nonce-sensitive).
- *   4. Prints the encrypt output as hex so it can be compared manually
- *      with the upstream C++ reference (see test_odo_upstream.cpp).
+ * Validates our C port of OdoCrypt and computes the full PoW hash:
+ *   odo_encrypt(header) → KeccakP800_Permute_12rounds → 256-bit hash
  *
- * Build (native host or cross-compiled for ARM):
- *   make test_odo
+ * The "pow:" lines in the output are the ground-truth expected values
+ * used by the Verilog testbench (hdl/tb/odocrypt_core_tb.v).
+ *
+ * Build:
+ *   make test_odo          (C self-test only)
+ *   make check             (cross-check vs upstream C++)
  *
  * Cross-check workflow:
- *   ./test_odo          → prints our output
- *   ./test_odo_upstream → prints upstream C++ output (same test vectors)
- *   diff <(./test_odo) <(./test_odo_upstream)   → must produce no output
+ *   diff <(./test_odo) <(./test_odo_upstream)  → must produce no output
  */
 
 #include "odocrypt_state.h"
+
+/* Keccak-800 reference implementation from upstream submodule. */
+#include "../upstream/odo-miner/src/crypto/KeccakP-800-SnP.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -46,6 +46,29 @@ static void make_header(uint8_t hdr[80], uint32_t nonce)
     uint32_t nbits = 0x1d00ffff;
     memcpy(hdr + 72, &nbits, 4);
     memcpy(hdr + 76, &nonce, 4);
+}
+
+/* Compute the full OdoCrypt PoW hash:
+ *   state[0..79]  = header (80 bytes)
+ *   state[80]     = 0x01   (domain separation, set before odo_encrypt)
+ *   state[81..99] = 0x00
+ *   odo_encrypt in-place on state[0..79]
+ *   KeccakP800_Permute_12rounds on full 100-byte state
+ *   hash = state[0..31]
+ *
+ * Matches hashodo.h from the upstream odo-miner exactly.
+ */
+static void pow_hash(const odo_epoch_state_t *st,
+                     const uint8_t header[ODO_DIGEST_SIZE],
+                     uint8_t hash_out[32])
+{
+    uint8_t state[KeccakP800_stateSizeInBytes];   /* 100 bytes */
+    memset(state, 0, sizeof(state));
+    memcpy(state, header, ODO_DIGEST_SIZE);
+    state[ODO_DIGEST_SIZE] = 0x01;                /* domain separation byte */
+    odo_encrypt(st, state, state);
+    KeccakP800_Permute_12rounds(state);
+    memcpy(hash_out, state, 32);
 }
 
 /* Run one encrypt and print the result. Returns pointer to static buffer. */
@@ -116,7 +139,7 @@ int main(void)
     int expected = 640 + 5120 + 120 + 50 + 6 + 28;
     CHECK(expected == 5964, "table word count matches REG_EPOCH_WR_TOTAL (5964)");
 
-    /* --- Cross-check vectors: print for comparison with upstream --- */
+    /* --- Cross-check vectors: odo_encrypt output + full PoW hash --- */
     printf("\n--- Cross-check vectors (compare with test_odo_upstream) ---\n");
 
     uint32_t test_keys[]   = { 0, 1, 12345, 0xDEADBEEF };
@@ -127,14 +150,22 @@ int main(void)
         odo_epoch_generate(&st, test_keys[ki]);
 
         for (size_t ni = 0; ni < sizeof(test_nonces)/sizeof(test_nonces[0]); ni++) {
-            uint8_t hdr[80];
+            uint8_t hdr[80], hash[32];
             make_header(hdr, test_nonces[ni]);
 
-            const uint8_t *out = run_encrypt(&st, hdr);
-
+            /* odo_encrypt output — for cross-checking algorithm only */
+            const uint8_t *enc = run_encrypt(&st, hdr);
             printf("key=%08x nonce=%08x out=", test_keys[ki], test_nonces[ni]);
             for (int i = 0; i < ODO_DIGEST_SIZE; i++)
-                printf("%02x", out[i]);
+                printf("%02x", enc[i]);
+            printf("\n");
+
+            /* Full PoW hash (odo_encrypt → Keccak-800 → 32 bytes) */
+            make_header(hdr, test_nonces[ni]);   /* fresh header for pow_hash */
+            pow_hash(&st, hdr, hash);
+            printf("key=%08x nonce=%08x pow=", test_keys[ki], test_nonces[ni]);
+            for (int i = 0; i < 32; i++)
+                printf("%02x", hash[i]);
             printf("\n");
         }
     }

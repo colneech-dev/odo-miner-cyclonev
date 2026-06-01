@@ -12,11 +12,15 @@ OBJS = $(SRCS:.c=.o)
 SMOKE_SRCS   = fpga_smoke_test.c
 SMOKE_TARGET = fpga_smoke_test
 
-TEST_C_SRCS       = test_odo.c odocrypt_state.c miner_io.c
-TEST_C_TARGET     = test_odo
+UPSTREAM_CRYPTO   ?= ../upstream/odo-miner/src/crypto
+TEST_C_SRCS        = test_odo.c odocrypt_state.c miner_io.c \
+                     $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
+TEST_C_TARGET      = test_odo
+TEST_C_CFLAGS      = $(CFLAGS) -I$(UPSTREAM_CRYPTO)
 
 UPSTREAM_CRYPTO   = ../upstream/odo-miner/src/crypto
-TEST_UP_SRCS      = test_odo_upstream.cpp $(UPSTREAM_CRYPTO)/odocrypt.cpp
+TEST_UP_SRCS      = test_odo_upstream.cpp $(UPSTREAM_CRYPTO)/odocrypt.cpp \
+                    $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
 TEST_UP_TARGET    = test_odo_upstream
 TEST_UP_CXXFLAGS  = $(CXXFLAGS) -I$(UPSTREAM_CRYPTO)
 
@@ -35,14 +39,15 @@ test: $(TEST_C_TARGET)
 	./$(TEST_C_TARGET)
 
 $(TEST_C_TARGET): $(TEST_C_SRCS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(TEST_C_CFLAGS) -o $@ $^
 
 # Upstream C++ cross-check (requires g++ and upstream submodule)
 test_upstream: $(TEST_UP_TARGET)
 	./$(TEST_UP_TARGET)
 
 $(TEST_UP_TARGET): $(TEST_UP_SRCS)
-	$(CXX) $(TEST_UP_CXXFLAGS) -o $@ $^
+	$(CC)  $(CFLAGS) -I$(UPSTREAM_CRYPTO) -c $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c -o /tmp/keccak800_ref.o
+	$(CXX) $(TEST_UP_CXXFLAGS) -o $@ test_odo_upstream.cpp $(UPSTREAM_CRYPTO)/odocrypt.cpp /tmp/keccak800_ref.o
 
 # Run both and diff — no output means our port matches the upstream
 check: $(TEST_C_TARGET) $(TEST_UP_TARGET)
