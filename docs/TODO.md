@@ -1,7 +1,8 @@
 # Project TODO — odo-miner-cyclonev
 
-**Last updated:** 2026-05-31 (after full deep-inspection of all source files)
+**Last updated:** 2026-05-31
 **Owner:** colneech-dev / Claude
+**Device confirmed:** `5CSXFC6C6U23` — Cyclone V SX F6, 110K LE, 204 M10K, 112 DSP, 484-ball BGA
 
 ---
 
@@ -116,7 +117,14 @@ ready signal back into the source domain without a synchronizer. Harmless now
 > upstream design bakes these as hardcoded ROM and resynthesises per epoch. Our
 > design computes them on the HPS and loads them into FPGA BRAM over MMIO.
 
-### ALGO-1: Implement real LCG (OdoRandom) on HPS + load epoch tables into FPGA
+### ALGO-1: Real LCG + epoch table loading — DONE
+`hps/odocrypt_state.c` implements `odo_epoch_generate()` (faithful LCG port) and
+`odo_fpga_load_epoch()` (streams 5964 words to `REG_EPOCH_WR_DATA`).
+`hdl/src/odocrypt/odocrypt_epoch_tables.v` stores all tables with auto-commit.
+`REG_EPOCH_WR_DATA/RESET/COMMIT/WR_ADDR` added to both RTL and `hps/hps_regs.h`.
+`STAT_TABLES_VALID` (bit 4) added to STATUS — core will not start until set.
+
+### ALGO-1 (historical description, now implemented)
 **Current:** `odocrypt_epoch_mutator.v` uses a placeholder XOR formula.
 **Correct approach:** Run the epoch-table generation on the HPS (it's just C),
 then write the resulting tables into new FPGA BRAM-backed registers over MMIO.
@@ -142,10 +150,19 @@ is still correct in outline.
 - Round key array: 84 × 10-bit values (packed)
 - An `EPOCH_LOAD_DONE` strobe to commit the tables
 
-### ALGO-2: Implement real OdoCrypt round function
-**Files to rewrite:** `hdl/src/odocrypt/odocrypt_round.v`,
-`hdl/src/odocrypt/odocrypt_sbox_dsp.v`
-**Real round structure per `odocrypt.cpp:Encrypt()`:**
+### ALGO-2: Real OdoCrypt round function — DONE
+`hdl/src/odocrypt/odocrypt_core.v` rewritten as a **sequential FSM**:
+- One hash per 111 cycles: 1 (PreMix) + 84 (rounds) + 1 (Keccak feed) + 25 (Keccak wait)
+- 640-bit state (10 × 64-bit words), real PreMix (XOR-fold)
+- Full round: `apply_pbox → apply_sboxes → apply_pbox → apply_rotations → apply_round_key`
+- All sub-functions implemented as Verilog functions (combinatorial, 1 cycle per round)
+- Epoch tables read from `odocrypt_epoch_tables` via flat packed input wires
+- `odocrypt_compress.v` and `odocrypt_round.v` are superseded but left in place
+
+**Throughput at 50 MHz:** 50M/111 ≈ 450 KH/s per core; 4 cores ≈ 1.8 MH/s.
+To increase: raise clock frequency or instantiate more cores.
+
+### ALGO-2 (historical description, now implemented)
 
 Each of the 84 rounds applies (in order):
 1. **Pbox0** (`ApplyPbox`): 6 subrounds of masked-swap → word-shuffle(×3) → rotation
@@ -163,15 +180,13 @@ Each of the 84 rounds applies (in order):
 - Bits [31:22] → large S-box → 10-bit output at [31:22]
 - (repeat for high 32 bits using next small-sbox indices, same large sbox)
 
-### ALGO-3: Add Keccak-800 post-processing stage
-**Current:** Missing entirely. The current design compares `compress_out_state`
-directly against the target. This is wrong — the odo_encrypt output must be
-hashed by Keccak-800 first.
-**Reference:** `upstream/odo-miner/src/verilog/keccak800.v` — the upstream Keccak
-RTL is already available in the submodule.
-**Action:** Port/adapt `keccak800.v` into the project. Wire it between the 84-round
-compress pipeline output and the target comparator. The Keccak stage adds latency
-(number of Keccak rounds) to the pipeline.
+### ALGO-3: Keccak-800 post-processing stage — DONE
+`hdl/src/keccak/keccak800.v` ported from upstream (MIT-compatible GPL v3).
+`odocrypt_core.v` wired: compress_out → keccak_hasher (WIDTH=256, THROUGHPUT=1,
+latency=25 cycles) → 256-bit hash → target compare.
+Total pipeline depth: 84 + 25 = 109 clock cycles.
+**Remaining:** Change WIDTH from 256 to 640 when the real 640-bit state is implemented
+(ALGO-1/ALGO-2). The keccak_hasher is parameterised and will not need structural changes.
 
 ### ALGO-4: Validate pipeline nonce alignment (off-by-one risk)
 **Files:** `odocrypt_core.v`, `odocrypt_compress.v`
@@ -305,10 +320,21 @@ references in docs or Makefiles.
 
 ## Integration and build
 
-### BUILD-1: Generate Quartus project targeting exact QMTECH device
-Confirm SoC part number printed on chip. Likely `5CSEBA6U23I7` or similar 5CSE-class.
-Set in `.qsf`. Add all RTL sources. Run Analysis & Elaboration first to catch port
-errors before full synthesis.
+### BUILD-1: Complete Quartus project and generate Platform Designer system
+**Device confirmed: `5CSXFC6C6U23`** (Cyclone V SX F6 C6 U23 484-ball BGA).
+`hdl/quartus/odo_miner.qpf` and `odo_miner.qsf` are created with all RTL sources.
+`hdl/src/soc_top.v` is the top-level wrapper (soc_system instantiation commented
+out until Platform Designer generates it).
+
+**Remaining steps:**
+1. Open the QMTECH GHRD in Platform Designer to get the correct HPS/DDR3/EMAC
+   pin-mux config. Do NOT invent pin assignments — use the QMTECH reference.
+2. Create the Qsys system in `hdl/qsys/soc_system.qsys`: add HPS component,
+   connect LWH2F bridge master to `odocrypt_top` slave at base offset 0x0.
+3. Run Platform Designer → generate HDL → uncomment soc_system in soc_top.v.
+4. Run Analysis & Elaboration first (catches port errors without full compile).
+5. Full synthesis → verify timing closes at 50 MHz Avalon clock.
+6. Confirm `CLOCK_50` pin (currently set to PIN_V11 in .qsf — verify vs schematic).
 
 ### BUILD-2: Run `make` in `hps/` after fixing broken includes
 Current `hps/` build works for `fpga_smoke_test`. After fixing `miner_daemon.c` API

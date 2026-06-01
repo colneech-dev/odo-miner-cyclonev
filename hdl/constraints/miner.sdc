@@ -2,7 +2,7 @@
 # CLOCK DEFINITIONS
 # ------------------------------------------------------------------------------
 
-# 50 MHz base clock from board
+# 50 MHz base clock from board (QMTECH 5CSXFC6C6U23 — verify pin against schematic)
 create_clock -name clk_50 -period 20.000 [get_ports {CLOCK_50}]
 
 # Internal PLL output for hash pipeline (target 150–200 MHz)

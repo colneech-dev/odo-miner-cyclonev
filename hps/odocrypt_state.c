@@ -7,6 +7,7 @@
  */
 
 #include "odocrypt_state.h"
+/* hps_regs.h is included via odocrypt_state.h */
 
 #include <string.h>
 #include <stdint.h>
@@ -266,6 +267,84 @@ static void odo_apply_round_key(uint64_t state[ODO_STATE_SIZE], uint16_t rk)
 {
     for (int i = 0; i < ODO_STATE_SIZE; i++)
         state[i] ^= (rk >> i) & 1u;
+}
+
+/* -----------------------------------------------------------------------
+ * FPGA epoch table loader
+ *
+ * Streams 5964 32-bit words into REG_EPOCH_WR_DATA in the exact order
+ * expected by odocrypt_epoch_tables.v:
+ *
+ *   [   0.. 639]  Small S-boxes:   640 words  (40 × 64 entries, 4 × 8-bit per word)
+ *   [ 640..5759]  Large S-boxes:  5120 words  (10 × 1024 entries, 2 × 16-bit per word)
+ *   [5760..5819]  Pbox-0 masks:     60 words  (6 rounds × 5 lanes, 2 words / 64-bit)
+ *   [5820..5844]  Pbox-0 rotations: 25 words  (5 rounds × 5 lanes, 6-bit each)
+ *   [5845..5904]  Pbox-1 masks:     60 words
+ *   [5905..5929]  Pbox-1 rotations: 25 words
+ *   [5930..5935]  Global rotations:  6 words  (6-bit each)
+ *   [5936..5963]  Round keys:       28 words  (3 × 10-bit per word)
+ * ---------------------------------------------------------------------- */
+int odo_fpga_load_epoch(const odo_epoch_state_t *s, const miner_io_t *io)
+{
+    if (!s || !io)
+        return -1;
+
+#define WR(val) reg_wr(io, REG_EPOCH_WR_DATA, (uint32_t)(val))
+
+    /* Small S-boxes: 4 entries per word, 8-bit each */
+    for (int si = 0; si < ODO_SMALL_SBOX_COUNT; si++) {
+        for (int e = 0; e < ODO_SMALL_SBOX_ENTRIES; e += 4) {
+            uint32_t w = (uint32_t)s->sbox1[si][e+0]
+                       | ((uint32_t)s->sbox1[si][e+1] << 8)
+                       | ((uint32_t)s->sbox1[si][e+2] << 16)
+                       | ((uint32_t)s->sbox1[si][e+3] << 24);
+            WR(w);
+        }
+    }
+
+    /* Large S-boxes: 2 entries per word, 16-bit each (10-bit values) */
+    for (int si = 0; si < ODO_LARGE_SBOX_COUNT; si++) {
+        for (int e = 0; e < ODO_LARGE_SBOX_ENTRIES; e += 2) {
+            uint32_t w = (uint32_t)s->sbox2[si][e+0]
+                       | ((uint32_t)s->sbox2[si][e+1] << 16);
+            WR(w);
+        }
+    }
+
+    /* Pbox masks (both P-boxes): lo word then hi word for each 64-bit mask */
+    for (int p = 0; p < 2; p++) {
+        for (int j = 0; j < ODO_PBOX_SUBROUNDS; j++) {
+            for (int k = 0; k < ODO_STATE_SIZE / 2; k++) {
+                uint64_t m = s->pbox[p].mask[j][k];
+                WR((uint32_t)m);           /* low 32 bits */
+                WR((uint32_t)(m >> 32));   /* high 32 bits */
+            }
+        }
+    }
+
+    /* Pbox rotations (both P-boxes): one 32-bit word per 6-bit rotation */
+    for (int p = 0; p < 2; p++) {
+        for (int j = 0; j < ODO_PBOX_SUBROUNDS - 1; j++) {
+            for (int k = 0; k < ODO_STATE_SIZE / 2; k++) {
+                WR((uint32_t)s->pbox[p].rotation[j][k]);
+            }
+        }
+    }
+
+    /* Global rotations: one word each */
+    for (int r = 0; r < ODO_ROTATION_COUNT; r++)
+        WR((uint32_t)s->rotations[r]);
+
+    /* Round keys: 3 × 10-bit packed per word */
+    for (int r = 0; r < ODO_ROUNDS; r += 3) {
+        uint32_t w = (uint32_t)s->round_key[r];
+        if (r + 1 < ODO_ROUNDS) w |= (uint32_t)s->round_key[r+1] << 10;
+        if (r + 2 < ODO_ROUNDS) w |= (uint32_t)s->round_key[r+2] << 20;
+        WR(w);
+    }
+
+#undef WR
+    return 0;
 }
 
 void odo_encrypt(const odo_epoch_state_t *s,

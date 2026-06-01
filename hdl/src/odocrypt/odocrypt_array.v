@@ -18,6 +18,15 @@ module odocrypt_array #(
     input  wire [255:0] target,
     input  wire [31:0]  epoch,
 
+    // Epoch tables (shared across all cores, driven by odocrypt_epoch_tables)
+    input  wire [20479:0]  sbox1_flat,
+    input  wire [163839:0] sbox2_flat,
+    input  wire [38399:0]  pmask_flat,
+    input  wire [299:0]    prot_flat,
+    input  wire [35:0]     rot_flat,
+    input  wire [839:0]    rk_flat,
+    input  wire            tables_valid,
+
     output wire         busy,
     output reg          found,
     output reg  [31:0]  found_nonce
@@ -65,9 +74,18 @@ module odocrypt_array #(
                 .header_words (header_words),
                 .target       (target),
                 .epoch        (epoch),
+                .sbox1_flat   (sbox1_flat),
+                .sbox2_flat   (sbox2_flat),
+                .pmask_flat   (pmask_flat),
+                .prot_flat    (prot_flat),
+                .rot_flat     (rot_flat),
+                .rk_flat      (rk_flat),
+                .tables_valid (tables_valid),
                 .busy         (core_busy[gi]),
                 .found        (core_found[gi]),
-                .found_nonce  (core_found_nonce[gi])
+                .found_nonce  (core_found_nonce[gi]),
+                .hash_out     (),
+                .hash_valid   ()
             );
         end
     endgenerate
