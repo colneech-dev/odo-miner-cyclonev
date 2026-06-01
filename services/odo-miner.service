@@ -1,0 +1,95 @@
+# services/odo-miner.service
+# Systemd unit to run the Odo Miner HPS binary (miner_with_watcher / odo-miner)
+#
+# Install:
+# 1. Copy this file to /etc/systemd/system/odo-miner.service
+# 2. Create an environment file /etc/default/odo-miner (see example below)
+# 3. Ensure the executable exists and is executable, e.g. /usr/local/bin/odo-miner
+# 4. systemctl daemon-reload
+# 5. systemctl enable --now odo-miner
+#
+# Notes:
+# - This unit uses an EnvironmentFile for runtime configuration and a dedicated
+#   runtime directory under /run/odo-miner. It applies conservative resource
+#   limits and automatic restart on failure.
+# - Adjust User/Group and paths to match your installation.
+
+[Unit]
+Description=Odo Miner (FPGA) HPS service
+Documentation=https://github.com/colneech-dev/odo-miner-cyclonev
+After=network-online.target local-fs.target syslog.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runtime configuration comes from /etc/default/odo-miner (see example)
+EnvironmentFile=-/etc/default/odo-miner
+
+# The user and group to run the miner as. If using a system user, create it:
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin miner
+# Defaults are set in /etc/default/odo-miner
+User=${MINER_USER:-miner}
+Group=${MINER_GROUP:-miner}
+
+# Directory where the binary will run. Use an installation path or repo path.
+WorkingDirectory=${WORK_DIR:-/usr/local/bin}
+
+# Ensure the executable exists before trying to start
+ExecStartPre=/usr/bin/test -x ${EXECUTABLE:-/usr/local/bin/odo-miner}
+
+# Create runtime directory (owned by the miner user). Uses systemd runtime dir support.
+RuntimeDirectory=odo-miner
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+
+# Start command. You can pass additional options via DAEMON_OPTS in the env file
+ExecStart=${EXECUTABLE:-/usr/local/bin/odo-miner} ${DAEMON_OPTS:-}
+
+# Restart policy: restart on non-zero exit, with a small backoff
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Resource limits and scheduling
+Nice=5
+IOSchedulingClass=2
+IOSchedulingPriority=4
+LimitNOFILE=65536
+LimitNPROC=4096
+LimitCORE=infinity
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=odo-miner
+
+# Control and shutdown behaviour
+KillMode=control-group
+TimeoutStartSec=120
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
+
+# ----------------------------
+# Example environment file (/etc/default/odo-miner)
+# (Create this file and edit values to match your install)
+# ----------------------------
+# MINER_USER=miner
+# MINER_GROUP=miner
+# WORK_DIR=/opt/odo-miner/hps
+# EXECUTABLE=/opt/odo-miner/hps/miner_with_watcher
+# DAEMON_OPTS="--uio /dev/uio0 --config /etc/odo-miner/config.json"
+# ----------------------------
+# Security suggestions (optional): consider adding the following to the
+# [Service] section for additional sandboxing on systems that support them:
+#PrivateTmp=yes
+#NoNewPrivileges=yes
+#ProtectSystem=full
+#ProtectHome=yes
+#RestrictAddressFamilies=AF_INET AF_INET6
+#SystemCallFilter=~@clock @cpu-emulation
+#AmbientCapabilities=CAP_NET_BIND_SERVICE
+#Note: enabling these may break functionality depending on how the miner talks
+# to devices (e.g., /dev/uio0 or /dev/mem). Test after enabling.
