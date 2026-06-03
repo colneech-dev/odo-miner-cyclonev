@@ -1,33 +1,110 @@
-# hps/Makefile - simple build rules for HPS utilities
-# Adjust source filenames as needed to match repository layout.
+CC       ?= gcc
+CXX      ?= g++
+CPPFLAGS ?= -I.
+CFLAGS   ?= -std=c11   -O2 -Wall -Wextra -pedantic -pthread $(CPPFLAGS)
+CXXFLAGS ?= -std=c++14 -O2 -Wall -Wextra -pthread $(CPPFLAGS)
+LDFLAGS  ?= -lpthread
 
-CC := gcc
-CFLAGS := -O2 -Wall -pthread
-LDFLAGS :=
+UPSTREAM_CRYPTO = ../upstream/odo-miner/src/crypto
 
-# Sources - adjust if your real repo uses different filenames
-MINER_SRCS := hps.minerc.c hps.minor_io.c hps_epoch_watcher.c
-TEST_SRCS := hps.minor_io_test.c hps.minor_io.c
+# -----------------------------------------------------------------------
+# Targets
+# -----------------------------------------------------------------------
 
-.PHONY: all clean
-all: miner miner_io_test
+# 1. odod — legacy miner daemon (miner_daemon.c)
+DAEMON_SRCS = miner_daemon.c stratum.c job.c odocrypt_header.c \
+              odocrypt_state.c miner_io.c
+DAEMON_OBJS = $(DAEMON_SRCS:.c=.o)
 
-miner: $(MINER_SRCS)
-	$(CC) $(CFLAGS) -o $@ $(MINER_SRCS) $(LDFLAGS)
+# 2. odo-miner — new integrated miner (miner.c + epoch_watcher)
+MINER_SRCS = miner.c epoch_watcher.c stratum.c job.c odocrypt_header.c \
+             odocrypt_state.c miner_io.c
+MINER_OBJS = $(MINER_SRCS:.c=.o)
 
-miner_io_test: $(TEST_SRCS)
-	$(CC) $(CFLAGS) -o $@ $(TEST_SRCS) $(LDFLAGS)
+# 3. odo-miner-watcher — miner with integrated epoch watcher thread
+WATCHER_SRCS = miner_with_watcher.c epoch_watcher.c stratum.c job.c \
+               odocrypt_header.c odocrypt_state.c miner_io.c
+WATCHER_OBJS = $(WATCHER_SRCS:.c=.o)
 
+# 4. Smoke test — FPGA MMIO register validation
+SMOKE_TARGET = fpga_smoke_test
+
+# 5. miner_io_test — hardware bring-up test for miner_io layer
+MINER_IO_TEST_SRCS = minor_io_test.c miner_io.c odocrypt_state.c
+
+# 6. Algorithm self-test (C implementation vs upstream C++)
+TEST_C_SRCS  = test_odo.c odocrypt_state.c miner_io.c \
+               $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
+TEST_C_FLAGS = $(CFLAGS) -I$(UPSTREAM_CRYPTO)
+
+TEST_UP_SRCS = test_odo_upstream.cpp $(UPSTREAM_CRYPTO)/odocrypt.cpp
+
+# -----------------------------------------------------------------------
+# Default target
+# -----------------------------------------------------------------------
+.PHONY: all
+all: odod odo-miner odo-miner-watcher $(SMOKE_TARGET)
+
+# -----------------------------------------------------------------------
+# Binaries
+# -----------------------------------------------------------------------
+.PHONY: odod odo-miner odo-miner-watcher smoke_test miner_io_test
+
+odod: $(DAEMON_OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^
+
+odo-miner: $(MINER_OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^
+
+odo-miner-watcher: $(WATCHER_OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^
+
+smoke_test $(SMOKE_TARGET): fpga_smoke_test.c
+	$(CC) $(CFLAGS) -o $(SMOKE_TARGET) $<
+
+miner_io_test: $(MINER_IO_TEST_SRCS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+# -----------------------------------------------------------------------
+# Algorithm tests
+# -----------------------------------------------------------------------
+.PHONY: test test_upstream check
+
+test: test_odo
+	./test_odo
+
+test_odo: $(TEST_C_SRCS)
+	$(CC) $(TEST_C_FLAGS) -o $@ $^
+
+test_upstream: test_odo_upstream
+	./test_odo_upstream
+
+test_odo_upstream: $(TEST_UP_SRCS)
+	$(CC) $(CFLAGS) -I$(UPSTREAM_CRYPTO) -c $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c \
+	      -o /tmp/keccak800_ref.o
+	$(CXX) $(CXXFLAGS) -I$(UPSTREAM_CRYPTO) -o $@ \
+	      test_odo_upstream.cpp $(UPSTREAM_CRYPTO)/odocrypt.cpp /tmp/keccak800_ref.o
+
+check: test_odo test_odo_upstream
+	@echo "--- Diffing C port against upstream C++ ---"
+	@bash -c "diff <(./test_odo 2>/dev/null | grep '^key=') \
+	               <(./test_odo_upstream 2>/dev/null | grep '^key=') \
+	           && echo 'MATCH: our implementation agrees with upstream' \
+	           || echo 'MISMATCH: see diff above'"
+
+# -----------------------------------------------------------------------
+# Compilation rules
+# -----------------------------------------------------------------------
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# -----------------------------------------------------------------------
+# Housekeeping
+# -----------------------------------------------------------------------
+.PHONY: clean
 clean:
-	rm -f miner miner_io_test *.o *~
-
-# Additional targets for miner integration
-.PHONY: miner miner_io_test
-miner: $(MINER_SRCS)
-	$(CC) $(CFLAGS) -o $@ $(MINER_SRCS) $(LDFLAGS)
-
-miner_io_test: $(TEST_SRCS)
-	$(CC) $(CFLAGS) -o $@ $(TEST_SRCS) $(LDFLAGS)
-
-clean-miner:
-	rm -f miner miner_io_test
+	rm -f $(DAEMON_OBJS) $(MINER_OBJS) $(WATCHER_OBJS) \
+	      odod odo-miner odo-miner-watcher \
+	      $(SMOKE_TARGET) miner_io_test \
+	      test_odo test_odo_upstream \
+	      *.o /tmp/keccak800_ref.o

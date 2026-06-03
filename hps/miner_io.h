@@ -1,36 +1,116 @@
+/*
+ * miner_io.h — FPGA MMIO bridge API for the odo-miner-cyclonev HPS
+ *
+ * The implementation (miner_io.c) uses /dev/mem to reach the FPGA register
+ * block via the LWH2F bridge at 0xFF200000.  A UIO alternative is available
+ * in miner_io_uio.c.
+ *
+ * Typical call sequence:
+ *
+ *   miner_io_init(NULL);                    // open /dev/mem, mmap LWH2F
+ *   miner_io_load_epoch(epoch_key);         // stream epoch tables to FPGA
+ *
+ *   // For each new stratum job:
+ *   miner_io_dispatch_job(hdr, 80, target, nonce_start, nonce_count);
+ *
+ *   // Poll loop:
+ *   uint32_t nonce;  uint8_t hash[32];
+ *   int rc = miner_io_poll_result(&nonce, hash, 2000);
+ *   if (rc == 0) { ... submit share ... }
+ *
+ *   miner_io_shutdown();
+ */
+
 #ifndef MINER_IO_H
 #define MINER_IO_H
 
 #include <stdint.h>
 #include <stddef.h>
+#include "odocrypt_state.h"  /* for odo_epoch_state_t used by load_epoch */
 
-/* Initialize the miner IO layer.
- * If uio_dev is NULL, uses "/dev/uio0".
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* -----------------------------------------------------------------------
+ * Lifecycle
+ * ---------------------------------------------------------------------- */
+
+/*
+ * Open /dev/mem and mmap the FPGA register window.
+ * dev is ignored (reserved for future UIO path); pass NULL.
  * Returns 0 on success, negative errno on failure.
  */
-int miner_io_init(const char *uio_dev);
+int miner_io_init(const char *dev);
 
-/* Convenience default initializer (uses /dev/uio0) */
-static inline int miner_io_init_default(void) { return miner_io_init(NULL); }
+/* Release mmap and close file descriptor. Safe to call on an uninitialised handle. */
+void miner_io_shutdown(void);
 
-/* Dispatch a header and nonce range to the FPGA.
- * header: pointer to header bytes (typically 80 bytes)
- * header_len: length in bytes of header (<= 256)
- * nonce_start: starting nonce (u32)
- * nonce_count: number of nonces to test
- * Returns 0 on success, negative errno on failure.
+/* -----------------------------------------------------------------------
+ * Epoch loading
+ * ---------------------------------------------------------------------- */
+
+/*
+ * Generate OdoCrypt tables for epoch_key and stream them to the FPGA.
+ * Blocks until STATUS.TABLES_VALID is set.
+ * Must be called before the first dispatch, and again on each epoch change.
+ * Returns 0 on success, -ETIMEDOUT if the FPGA does not acknowledge.
+ */
+int miner_io_load_epoch(uint32_t epoch_key);
+
+/* -----------------------------------------------------------------------
+ * Job dispatch
+ * ---------------------------------------------------------------------- */
+
+/*
+ * Write a complete mining job and start the FPGA hashing core.
+ *
+ * header     : 80-byte OdoCrypt block header (nonce field zeroed; FPGA sweeps it).
+ * header_len : must be 80.
+ * target     : 32-byte big-endian difficulty target, or NULL to accept any hash.
+ * nonce_start: first nonce value.
+ * nonce_count: number of nonces to sweep (end = start + count - 1).
+ * Returns 0 on success.
+ */
+int miner_io_dispatch_job(const uint8_t *header, size_t header_len,
+                          const uint8_t *target,
+                          uint32_t nonce_start, uint32_t nonce_count);
+
+/*
+ * Convenience wrapper: dispatch without an explicit target (accepts any hash).
+ * Matches the simpler miner_io API used by existing callers.
  */
 int miner_io_dispatch_range(const uint8_t *header, size_t header_len,
                             uint32_t nonce_start, uint32_t nonce_count);
 
-/* Poll for a result from FPGA.
- * On success (return 0) writes found nonce to out_nonce and 32-byte digest to out_digest.
- * If no result in the timeout, returns >0 (timeout).
- * On error returns negative errno.
- */
-int miner_io_poll_result(uint32_t *out_nonce, uint8_t out_digest[32], uint32_t timeout_ms);
+/* -----------------------------------------------------------------------
+ * Result polling
+ * ---------------------------------------------------------------------- */
 
-/* Graceful shutdown and resource release */
-void miner_io_shutdown(void);
+/*
+ * Wait up to timeout_ms for the FPGA to find a qualifying nonce.
+ *
+ * Returns:
+ *   0         — nonce found; *out_nonce filled; out_hash (32 B) filled if non-NULL.
+ *   ETIMEDOUT — no result in time.
+ *   negative  — I/O error.
+ *
+ * Clears the FOUND latch on success so the next dispatch starts clean.
+ * out_hash receives the 32-byte Keccak PoW hash from the HASH registers.
+ */
+int miner_io_poll_result(uint32_t *out_nonce, uint8_t out_hash[32],
+                         uint32_t timeout_ms);
+
+/* -----------------------------------------------------------------------
+ * Core control
+ * ---------------------------------------------------------------------- */
+
+void     miner_io_stop(void);    /* halt hashing (registers preserved) */
+void     miner_io_start(void);   /* resume with current registers */
+uint32_t miner_io_status(void);  /* raw STATUS register value */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* MINER_IO_H */

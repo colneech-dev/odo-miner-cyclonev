@@ -187,7 +187,7 @@ module keccak_round (
     assign rkey[0] = in[807:800];
 
     keccak_theta  theta  (mid[0], mid[1]);
-    keccak_buffer buf    (clk, mid[1], rkey[0], mid[2], rkey[1]);
+    keccak_buffer buffer (clk, mid[1], rkey[0], mid[2], rkey[1]);
     keccak_rho    rho    (mid[2], mid[3]);
     keccak_pi     pi     (mid[3], mid[4]);
     keccak_chi    chi    (mid[4], mid[5]);
