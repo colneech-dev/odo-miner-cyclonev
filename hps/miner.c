@@ -1,26 +1,25 @@
-/* miner.c
- *
- * High-level mining control loop for odo-miner-cyclonev HPS.
+/*
+ * miner.c — High-level mining control loop for odo-miner-cyclonev HPS.
  *
  * Responsibilities:
- *  - Connect to stratum server and receive jobs
- *  - Ensure FPGA epoch tables are loaded when epoch changes
- *  - Dispatch nonce ranges to FPGA via miner_io
- *  - Poll FPGA for results and submit valid shares
- *  - Graceful shutdown on signals
- *
- * Integration notes:
- *  - Expects existing headers: stratum.h, miner_io.h, odocrypt_state.h, job.h
- *  - Where signatures differ, adapt the calls in dispatch/poll/epoch load areas.
+ *   1. Open the FPGA bridge via miner_io_init().
+ *   2. Load the initial epoch tables via miner_io_load_epoch().
+ *   3. Connect to the Stratum pool via stratum_ctx_t / stratum_connect().
+ *   4. On each new job: dispatch the header + nonce range to the FPGA.
+ *   5. Poll for a found nonce and submit the share.
+ *   6. Reload epoch tables when the epoch changes.
+ *   7. Restart cleanly on network disconnects.
  *
  * Build:
- *  - Add to existing HPS Makefile: hps/miner.c -> compiled into main miner binary
+ *   make odo-miner
  */
 
 #define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <string.h>
 #include <signal.h>
 #include <time.h>
@@ -29,280 +28,263 @@
 #include <unistd.h>
 #include <inttypes.h>
 
-/* Project headers (adapt as needed) */
-#include "stratum.h"         /* stratum_connect(), stratum_wait_job(), stratum_submit() */
-#include "miner_io.h"        /* miner_io_init(), miner_io_dispatch_range(), miner_io_poll_result() */
-#include "odocrypt_state.h"  /* odo_fpga_load_epoch() */
-#include "job.h"             /* job_t structure (header, target, epoch, job_id, ...) */
+#include "stratum.h"
+#include "miner_io.h"
+#include "job.h"
+#include "epoch_watcher.h"
 
-/* --- Fallback minimal definitions if project headers differ --- */
-/* Remove or adapt these if the real headers are present. */
-#ifndef JOB_H
-typedef struct {
-    uint8_t header[80];    /* block header (up to 80 bytes) */
-    uint8_t target[32];    /* target / difficulty bytes (big-endian) */
-    uint32_t epoch;        /* epoch number for odocrypt */
-    char job_id[64];       /* job identifier string */
-    uint32_t extra_nonce;  /* extra nonce or nonce prefix */
-} job_t;
-#endif
-
-#ifndef MINER_IO_H
-/* miner_io functions (expected, adapt names if different) */
-int miner_io_init(void);
-int miner_io_dispatch_range(const uint8_t *header, uint32_t header_len,
-                            uint32_t nonce_start, uint32_t nonce_count);
-int miner_io_poll_result(uint32_t *out_nonce, uint8_t *out_digest /* 32 bytes */, uint32_t timeout_ms);
-#endif
-
-#ifndef STRATUM_H
-int stratum_connect(const char *url);
-int stratum_wait_job(job_t *out_job); /* blocks until job available, or returns <=0 on error */
-int stratum_submit(const char *job_id, uint32_t nonce, const uint8_t *digest);
-#endif
-
-#ifndef ODOCrypt_STATE_H
-int odo_fpga_load_epoch(uint32_t epoch, const void *epoch_data, size_t epoch_words);
-#endif
-
-/* --- Configuration constants --- */
-#define NONCE_RANGE_SIZE 1000000U    /* nonces to dispatch per batch (tune to FPGA geometry) */
-#define POLL_TIMEOUT_MS 2000U        /* timeout for FPGA result polling */
-#define EPOCH_LOAD_TIMEOUT_S 10      /* seconds to wait after epoch load */
-#define HEARTBEAT_INTERVAL_S 5       /* log heartbeat interval */
-
-/* --- Global runtime flags --- */
-static volatile sig_atomic_t g_terminate = 0;
-static pthread_mutex_t g_epoch_lock = PTHREAD_MUTEX_INITIALIZER;
-static uint32_t g_current_epoch = UINT32_MAX; /* unknown at startup */
-
-/* --- Simple logging helpers --- */
-static void log_info(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fprintf(stdout, "[INFO] ");
-    vfprintf(stdout, fmt, ap);
-    fprintf(stdout, "\n");
-    va_end(ap);
-}
-static void log_warn(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fprintf(stderr, "[WARN] ");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
-    va_end(ap);
-}
-static void log_error(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    fprintf(stderr, "[ERROR] ");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
-    va_end(ap);
+/* -----------------------------------------------------------------------
+ * Configuration (from environment variables or defaults)
+ * ---------------------------------------------------------------------- */
+static uint32_t get_env_u32(const char *var, uint32_t def)
+{
+    const char *val = getenv(var);
+    return val ? (uint32_t)strtoul(val, NULL, 10) : def;
 }
 
-/* --- Signal handling --- */
-static void handle_signal(int sig) {
-    (void)sig;
-    g_terminate = 1;
-}
-
-/* --- Target check: compare 32-byte digest (big-endian) vs target (big-endian).
- * Returns 1 if digest <= target (i.e., valid), 0 otherwise.
+/* Read at startup; can be overridden via environment variables:
+ *   ODOMIN_NONCE_RANGE=2000000
+ *   ODOMIN_POLL_TIMEOUT_MS=3000
+ *   ODOMIN_EPOCH_POLL_S=5
+ *   ODOMIN_HEARTBEAT_S=60
  */
-static int check_target_le(const uint8_t digest[32], const uint8_t target[32]) {
-    for (int i = 0; i < 32; ++i) {
-        if (digest[i] < target[i]) return 1;
-        if (digest[i] > target[i]) return 0;
-    }
-    /* Equal counts as valid */
-    return 1;
+#define NONCE_RANGE_SIZE      1000000u   /* nonces dispatched per batch */
+#define POLL_TIMEOUT_MS       2000u      /* max wait for an FPGA result */
+#define EPOCH_POLL_INTERVAL_S 10u        /* how often to check epoch */
+#define HEARTBEAT_INTERVAL_S  30         /* status log interval */
+
+/* -----------------------------------------------------------------------
+ * Globals
+ * ---------------------------------------------------------------------- */
+static volatile sig_atomic_t g_terminate   = 0;
+static uint32_t              g_cur_epoch   = UINT32_MAX;
+static pthread_mutex_t       g_epoch_lock  = PTHREAD_MUTEX_INITIALIZER;
+
+/* -----------------------------------------------------------------------
+ * Logging
+ * ---------------------------------------------------------------------- */
+static void log_msg(FILE *f, const char *tag, const char *fmt, va_list ap)
+{
+    fprintf(f, "[%s] ", tag);
+    vfprintf(f, fmt, ap);
+    fputc('\n', f);
+    fflush(f);
+}
+static void log_info(const char *fmt, ...)
+    { va_list ap; va_start(ap, fmt); log_msg(stdout, "INFO",  fmt, ap); va_end(ap); }
+static void log_warn(const char *fmt, ...)
+    { va_list ap; va_start(ap, fmt); log_msg(stderr, "WARN",  fmt, ap); va_end(ap); }
+static void log_error(const char *fmt, ...)
+    { va_list ap; va_start(ap, fmt); log_msg(stderr, "ERROR", fmt, ap); va_end(ap); }
+
+/* -----------------------------------------------------------------------
+ * Sleep helper
+ * ---------------------------------------------------------------------- */
+static void sleep_ms_local(unsigned ms)
+{
+    struct timespec ts = { .tv_sec = ms / 1000,
+                           .tv_nsec = (long)(ms % 1000) * 1000000L };
+    nanosleep(&ts, NULL);
 }
 
-/* --- Load epoch tables into FPGA if epoch changed.
- * This wraps odo_fpga_load_epoch() and protects against concurrent loads.
- * epoch_data pointer and epoch_words are project-specific; here we expect
- * the caller to provide the epoch image (e.g., from odocrypt_state or disk).
- */
-static int load_epoch_if_needed(uint32_t epoch, const void *epoch_data, size_t epoch_words) {
-    int rc = 0;
+/* -----------------------------------------------------------------------
+ * Signal handling
+ * ---------------------------------------------------------------------- */
+static void handle_signal(int sig) { (void)sig; g_terminate = 1; }
+
+/* -----------------------------------------------------------------------
+ * Epoch getter for epoch_watcher (reads from stratum job / external source)
+ * Returns the current epoch based on the job we last processed.
+ * A more robust implementation would track block height from the pool.
+ * ---------------------------------------------------------------------- */
+static uint32_t epoch_getter(void *ctx)
+{
+    (void)ctx;
     pthread_mutex_lock(&g_epoch_lock);
-    if (g_current_epoch != epoch) {
-        log_info("Epoch change detected: %" PRIu32 " -> %" PRIu32, g_current_epoch, epoch);
-        /* Call into odocrypt state loader: adapt signature as needed */
-        rc = odo_fpga_load_epoch(epoch, epoch_data, epoch_words);
-        if (rc == 0) {
-            g_current_epoch = epoch;
-            log_info("Epoch %" PRIu32 " loaded successfully", epoch);
-            /* Give FPGA a short time to stabilize/commit */
-            sleep(EPOCH_LOAD_TIMEOUT_S);
-        } else {
-            log_error("Failed to load epoch %" PRIu32 " (rc=%d)", epoch, rc);
-        }
-    }
+    uint32_t e = g_cur_epoch;
     pthread_mutex_unlock(&g_epoch_lock);
-    return rc;
+    return e;
 }
 
-/* --- Simple nonce allocator: returns successive ranges on each call.
- * This is a single-threaded incrementing allocator. For multi-FPGA/core setups
- * replace with per-core allocation or atomic counters in shared memory.
- */
-typedef struct {
-    uint32_t next_nonce;
-} nonce_allocator_t;
-
-static void nonce_alloc_init(nonce_allocator_t *a, uint32_t start) {
-    a->next_nonce = start;
-}
-
-static uint32_t nonce_alloc_get(nonce_allocator_t *a, uint32_t *out_count) {
-    uint32_t start = a->next_nonce;
-    uint32_t n = NONCE_RANGE_SIZE;
-    /* wrap-around guard (simple) */
-    if (start + n < start) { /* overflow */
-        start = 0;
-        a->next_nonce = n;
-    } else {
-        a->next_nonce = start + n;
+/* -----------------------------------------------------------------------
+ * Target comparison: returns 1 if hash <= target (both big-endian, 32 B)
+ * ---------------------------------------------------------------------- */
+static int target_met(const uint8_t hash[32], const uint8_t target[32])
+{
+    for (int i = 0; i < 32; i++) {
+        if (hash[i] < target[i]) return 1;
+        if (hash[i] > target[i]) return 0;
     }
-    *out_count = n;
-    return start;
+    return 1;  /* equal counts as met */
 }
 
-/* --- Main control loop */
-int main(int argc, char **argv) {
-    (void)argc; (void)argv;
-    int rc;
+/* -----------------------------------------------------------------------
+ * Nonce allocator — simple linear counter
+ * ---------------------------------------------------------------------- */
+typedef struct { uint32_t next; } nonce_alloc_t;
 
-    /* Setup signals */
+static void   nonce_init(nonce_alloc_t *a)              { a->next = 0; }
+static uint32_t nonce_get(nonce_alloc_t *a, uint32_t *cnt)
+{
+    uint32_t s = a->next;
+    *cnt = NONCE_RANGE_SIZE;
+    uint32_t next = s + NONCE_RANGE_SIZE;
+    if (next < s) {
+        log_warn("nonce counter wrapped (searched 0x00000000–0x%08x, restarting)", s);
+        a->next = 0;
+    } else {
+        a->next = next;
+    }
+    return s;
+}
+
+/* -----------------------------------------------------------------------
+ * main
+ * ---------------------------------------------------------------------- */
+int main(int argc, char **argv)
+{
+    const char *pool_host = argc > 1 ? argv[1] : getenv("STRATUM_HOST");
+    const char *pool_port = argc > 2 ? argv[2] : getenv("STRATUM_PORT");
+    const char *worker    = argc > 3 ? argv[3] : getenv("STRATUM_WORKER");
+    const char *password  = argc > 4 ? argv[4] : "x";
+
+    if (!pool_host) pool_host = "127.0.0.1";
+    if (!pool_port) pool_port = "3333";
+    if (!worker)    worker    = "miner";
+
+    /* Read tuning parameters from environment (optional) */
+    uint32_t nonce_range_size      = get_env_u32("ODOMIN_NONCE_RANGE", NONCE_RANGE_SIZE);
+    uint32_t poll_timeout_ms       = get_env_u32("ODOMIN_POLL_TIMEOUT_MS", POLL_TIMEOUT_MS);
+    uint32_t epoch_poll_interval_s = get_env_u32("ODOMIN_EPOCH_POLL_S", EPOCH_POLL_INTERVAL_S);
+    uint32_t heartbeat_interval_s  = get_env_u32("ODOMIN_HEARTBEAT_S", HEARTBEAT_INTERVAL_S);
+
+    /* Signals */
     struct sigaction sa = {0};
     sa.sa_handler = handle_signal;
-    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+    signal(SIGPIPE, SIG_IGN);
 
-    log_info("Starting odo-miner HPS controller");
+    log_info("odo-miner starting (pool=%s:%s worker=%s)", pool_host, pool_port, worker);
 
-    /* Initialize miner I/O (FPGA bridge / UIO / device) */
-    rc = miner_io_init();
-    if (rc != 0) {
-        log_error("miner_io_init failed: %d", rc);
+    /* FPGA bridge */
+    if (miner_io_init(NULL) != 0) {
+        log_error("miner_io_init failed");
         return 1;
     }
-    log_info("miner_io initialized");
+    log_info("FPGA bridge opened");
 
-    /* Connect to stratum */
-    const char *stratum_url = getenv("STRATUM_URL");
-    if (!stratum_url) stratum_url = "stratum+tcp://127.0.0.1:3333"; /* default test */
-    rc = stratum_connect(stratum_url);
-    if (rc != 0) {
-        log_error("stratum_connect failed (%s): %d", stratum_url, rc);
-        /* proceed in offline/test mode or exit — here we exit */
-        return 2;
-    }
-    log_info("Connected to stratum server %s", stratum_url);
+    /* Epoch watcher — will load tables when epoch is known */
+    log_info("configuration: nonce_range=%u poll_timeout_ms=%u epoch_poll_s=%u heartbeat_s=%u",
+             nonce_range_size, poll_timeout_ms, epoch_poll_interval_s, heartbeat_interval_s);
+    epoch_watcher_start(epoch_getter, NULL, epoch_poll_interval_s);
 
-    /* Epoch state preload (optional): attempt to load epoch 0 / current known epoch */
-    /* TODO: Replace with code to fetch epoch_data from odocrypt_state module or disk.
-     * For now we assume odo_fpga_load_epoch() can handle NULL / on-demand loads.
-     */
-    uint32_t initial_epoch = 0;
-    rc = load_epoch_if_needed(initial_epoch, NULL, 0);
-    if (rc != 0) {
-        log_warn("Initial epoch load returned %d; continuing (may be handled later)", rc);
+    /* Stratum context */
+    stratum_ctx_t st;
+    if (stratum_init(&st, pool_host, pool_port, worker, password) != 0) {
+        log_error("stratum_init failed");
+        return 1;
     }
 
-    /* Nonce allocator */
-    nonce_allocator_t alloc;
-    nonce_alloc_init(&alloc, 0);
-
-    /* Main loop: wait for job -> dispatch -> poll results -> submit */
-    job_t job;
-    time_t last_heartbeat = time(NULL);
+    nonce_alloc_t alloc;
+    nonce_init(&alloc);
+    time_t last_hb = time(NULL);
+    job_t  job;
+    int    have_job = 0;
 
     while (!g_terminate) {
-        /* Heartbeat log */
+        /* Heartbeat */
         time_t now = time(NULL);
-        if ((now - last_heartbeat) >= HEARTBEAT_INTERVAL_S) {
-            log_info("Heartbeat: epoch=%" PRIu32 " next_nonce=%" PRIu32,
-                     g_current_epoch, alloc.next_nonce);
-            last_heartbeat = now;
+        if (now - last_hb >= heartbeat_interval_s) {
+            log_info("heartbeat: epoch=%" PRIu32 " nonce_next=%" PRIu32,
+                     g_cur_epoch, alloc.next);
+            last_hb = now;
         }
 
-        /* Block until we have a job */
-        memset(&job, 0, sizeof(job));
-        rc = stratum_wait_job(&job);
-        if (rc <= 0) {
-            if (g_terminate) break;
-            /* stratum_wait_job failed or timed out; sleep briefly and retry */
-            log_warn("stratum_wait_job returned %d; retrying in 1s", rc);
-            sleep(1);
+        /* Connect / reconnect */
+        if (stratum_connect(&st) != 0) {
+            log_warn("stratum connect failed; retrying in 5 s");
+            sleep(5);
             continue;
         }
+        log_info("connected to %s:%s", pool_host, pool_port);
+        have_job = 0;
 
-        log_info("Received job id='%s' epoch=%" PRIu32, job.job_id, job.epoch);
-
-        /* Ensure epoch loaded */
-        /* TODO: get epoch_data & epoch_words from odocrypt_state for job.epoch */
-        rc = load_epoch_if_needed(job.epoch, NULL, 0);
-        if (rc != 0) {
-            log_warn("Failed to ensure epoch %" PRIu32 " loaded; skipping job", job.epoch);
-            continue;
-        }
-
-        /* Dispatch a nonce range to FPGA */
-        uint32_t nonce_count = 0;
-        uint32_t nonce_start = nonce_alloc_get(&alloc, &nonce_count);
-
-        log_info("Dispatching nonce range start=%" PRIu32 " count=%" PRIu32, nonce_start, nonce_count);
-
-        /* Header length may vary; using 80 by default */
-        rc = miner_io_dispatch_range(job.header, sizeof(job.header), nonce_start, nonce_count);
-        if (rc != 0) {
-            log_error("miner_io_dispatch_range failed: %d; will retry later", rc);
-            /* back off a bit */
-            sleep(1);
-            continue;
-        }
-
-        /* Poll FPGA for results until timeout or until g_terminate */
-        uint32_t found_nonce = 0;
-        uint8_t found_digest[32] = {0};
-        rc = miner_io_poll_result(&found_nonce, found_digest, POLL_TIMEOUT_MS);
-        if (rc == 0) {
-            /* Got a result — check target and submit */
-            log_info("FPGA result nonce=%" PRIu32, found_nonce);
-            if (check_target_le(found_digest, job.target)) {
-                log_info("Result meets target; submitting share job_id=%s nonce=%" PRIu32, job.job_id, found_nonce);
-int submit_rc = stratum_submit(job.job_id, found_nonce, found_digest);
-            if (submit_rc == 0) {
-                log_info("Share submitted successfully (job=%s nonce=%" PRIu32 ")", job.job_id, found_nonce);
-            } else {
-                log_warn("stratum_submit failed (rc=%d) for job=%s nonce=%" PRIu32, submit_rc, job.job_id, found_nonce);
+        /* Inner work loop */
+        while (!g_terminate) {
+            int n = stratum_poll(&st, 100 /*ms*/);
+            if (n < 0) {
+                log_warn("stratum poll error; reconnecting");
+                break;
             }
-        } else {
-            log_info("FPGA result did not meet target; ignoring (nonce=%" PRIu32 ")", found_nonce);
+
+            /* Check for new job */
+            job_t new_job;
+            if (stratum_get_job(&st, &new_job)) {
+                memcpy(&job, &new_job, sizeof(job));
+                have_job = 1;
+                nonce_init(&alloc);  /* reset nonce on clean job */
+                log_info("new job id=%s epoch=%" PRIu32, job.job_id, job.epoch);
+
+                /* Update epoch tracking for watcher */
+                pthread_mutex_lock(&g_epoch_lock);
+                if (job.epoch != g_cur_epoch) {
+                    g_cur_epoch = job.epoch;
+                    log_info("epoch set to %" PRIu32, g_cur_epoch);
+                }
+                pthread_mutex_unlock(&g_epoch_lock);
+            }
+
+            if (!have_job) continue;
+
+            /* Wait for epoch tables to be valid */
+            if (!(miner_io_status() & STAT_TABLES_VALID)) {
+                sleep_ms_local(50);
+                continue;
+            }
+
+            /* Dispatch next nonce batch */
+            uint32_t cnt, start = nonce_get(&alloc, &cnt);
+            if (miner_io_dispatch_job(job.header, sizeof(job.header),
+                                      job.target, start, cnt) != 0) {
+                log_error("dispatch_job failed");
+                sleep(1);
+                continue;
+            }
+
+            /* Poll for a result */
+            uint32_t found_nonce;
+            uint8_t  found_hash[32];
+            int rc = miner_io_poll_result(&found_nonce, found_hash, poll_timeout_ms);
+            if (rc == 0) {
+                log_info("found nonce=0x%08" PRIx32, found_nonce);
+                if (target_met(found_hash, job.target)) {
+                    char ntime_hex[16], en2_hex[64];
+                    snprintf(ntime_hex, sizeof(ntime_hex), "%08x", job.ntime);
+                    /* extranonce2 as hex */
+                    for (size_t i = 0; i < job.extranonce2_len && i < 8; i++)
+                        snprintf(en2_hex + i*2, 3, "%02x", job.extranonce2[i]);
+                    en2_hex[job.extranonce2_len * 2] = '\0';
+
+                    if (stratum_submit_share(&st, &job, found_nonce) == 0)
+                        log_info("share submitted (job=%s nonce=0x%08" PRIx32 ")",
+                                 job.job_id, found_nonce);
+                    else
+                        log_warn("stratum_submit_share failed");
+                } else {
+                    log_info("hash did not meet target; continuing");
+                }
+            }
+            /* ETIMEDOUT or no result — loop and dispatch next range */
         }
-    } else if (rc > 0) {
-        /* rc > 0 indicates poll timeout / no result in this range */
-        log_info("No result from FPGA for nonce range start=%" PRIu32 " (timeout)", nonce_start);
-    } else {
-        /* rc < 0 indicates an I/O or internal error from miner_io_poll_result */
-        log_error("miner_io_poll_result error (rc=%d); will retry later", rc);
-        sleep(1);
+
+        stratum_disconnect(&st);
+        if (!g_terminate) sleep(5);
     }
 
-    /* brief yield to avoid tight loop; adjust as appropriate for throughput */
-    if (!g_terminate) usleep(10000); /* 10 ms */
-} /* end main while */
-
-log_info("Termination requested, shutting down");
-
-/* Optional cleanup hooks - adapt to real project APIs if present */
-
-#ifdef HAVE_STRATUM_DISCONNECT stratum_disconnect(); #endif #ifdef HAVE_MINER_IO_SHUTDOWN miner_io_shutdown(); #endif
-
-log_info("odo-miner HPS controller exited cleanly");
-return 0;
+    log_info("shutting down");
+    epoch_watcher_stop();
+    stratum_disconnect(&st);
+    miner_io_shutdown();
+    return 0;
 }

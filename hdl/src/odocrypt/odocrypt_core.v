@@ -24,9 +24,9 @@ module odocrypt_core (
     input  wire         start,
     input  wire [31:0]  nonce_start,
     input  wire [31:0]  nonce_end,
-    input  wire [31:0]  header_words [0:19],
+    input  wire [639:0] header_words,   // 20 x 32-bit words packed as single 640-bit value
     input  wire [255:0] target,
-    input  wire [31:0]  epoch,          // kept for interface compat; tables supersede it
+    input  wire [31:0]  epoch,         // kept for interface compat; tables supersede it
 
     // Epoch tables from odocrypt_epoch_tables
     input  wire [20479:0]  sbox1_flat,
@@ -82,7 +82,7 @@ module odocrypt_core (
     // PreMix: total = XOR all words; total ^= total>>32; each word ^= total
     // -------------------------------------------------------------------------
     function [639:0] premix_state;
-        input [31:0] hdr [0:19];
+        input [639:0] hdr;  // 20 x 32-bit words packed
         input [31:0] nonce;
         reg [639:0] s;
         reg [63:0] total;
@@ -90,7 +90,7 @@ module odocrypt_core (
         begin
             // Unpack: word[i] = {hdr[2i+1], hdr[2i]} little-endian
             for (fi = 0; fi < 9; fi = fi + 1)
-                s[64*fi +: 64] = {hdr[2*fi+1], hdr[2*fi]};
+                s[64*fi +: 64] = {hdr[32*(2*fi+1) +: 32], hdr[32*(2*fi) +: 32]};
             // Word 9: bytes 72-75 = hdr[18], bytes 76-79 = nonce
             s[64*9 +: 64] = {nonce, hdr[18]};
 
@@ -221,11 +221,11 @@ module odocrypt_core (
                 for (fj = 0; fj < 4; fj = fj + 1) begin
                     // 6-bit small sbox at bits [5:0] of current 16-bit chunk
                     addr1 = w[16*fj +: 6];
-                    next_w[16*fj +: 6] = sb1[8*(small_idx*64 + addr1) +: 8][5:0];
+                    next_w[16*fj +: 6] = (sb1[8*(small_idx*64 + addr1) +: 8]) & 6'h3F;
 
                     // 10-bit large sbox at bits [15:6] of current 16-bit chunk
                     addr2 = w[16*fj+6 +: 10];
-                    next_w[16*fj+6 +: 10] = sb2[16*(fw*1024 + addr2) +: 16][9:0];
+                    next_w[16*fj+6 +: 10] = (sb2[16*(fw*1024 + addr2) +: 16]) & 10'h3FF;
 
                     small_idx = small_idx + 1;
                 end

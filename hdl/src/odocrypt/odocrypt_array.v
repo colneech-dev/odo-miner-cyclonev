@@ -14,7 +14,7 @@ module odocrypt_array #(
     input  wire         start,
     input  wire [31:0]  nonce_start,
     input  wire [31:0]  nonce_end,
-    input  wire [31:0]  header_words [0:19],
+    input  wire [639:0] header_words,  // 20 x 32-bit words packed
     input  wire [255:0] target,
     input  wire [31:0]  epoch,
 
@@ -35,12 +35,14 @@ module odocrypt_array #(
     // -------------------------------------------------------------------------
     // Internal signals
     // -------------------------------------------------------------------------
+    localparam ARRAY_WIDTH = CORES * 32 - 1;
+
     wire [CORES-1:0] core_busy;
     wire [CORES-1:0] core_found;
-    wire [31:0]      core_found_nonce [0:CORES-1];
+    wire [ARRAY_WIDTH:0]  core_found_nonce;
 
-    reg  [31:0]      core_nonce_start [0:CORES-1];
-    reg  [31:0]      core_nonce_end   [0:CORES-1];
+    reg  [ARRAY_WIDTH:0]  core_nonce_start;
+    reg  [ARRAY_WIDTH:0]  core_nonce_end;
 
     integer i;
 
@@ -54,8 +56,8 @@ module odocrypt_array #(
     // -------------------------------------------------------------------------
     always @(*) begin
         for (i = 0; i < CORES; i = i + 1) begin
-            core_nonce_start[i] = nonce_start + i;
-            core_nonce_end[i]   = nonce_end;
+            core_nonce_start[32*i +: 32] = nonce_start + i;
+            core_nonce_end[32*i +: 32]   = nonce_end;
         end
     end
 
@@ -69,8 +71,8 @@ module odocrypt_array #(
                 .clk          (clk),
                 .reset_n      (reset_n),
                 .start        (start),
-                .nonce_start  (core_nonce_start[gi]),
-                .nonce_end    (core_nonce_end[gi]),
+                .nonce_start  (core_nonce_start[32*gi +: 32]),
+                .nonce_end    (core_nonce_end[32*gi +: 32]),
                 .header_words (header_words),
                 .target       (target),
                 .epoch        (epoch),
@@ -83,7 +85,7 @@ module odocrypt_array #(
                 .tables_valid (tables_valid),
                 .busy         (core_busy[gi]),
                 .found        (core_found[gi]),
-                .found_nonce  (core_found_nonce[gi]),
+                .found_nonce  (core_found_nonce[32*gi +: 32]),
                 .hash_out     (),
                 .hash_valid   ()
             );

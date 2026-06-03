@@ -13,8 +13,8 @@ module nonce_scheduler #(
     input  wire        reset_n,
     input  wire        enable,        // asserted when a job is active
 
-    output reg  [63:0] nonce_out   [0:CORES-1],
-    output reg         nonce_valid [0:CORES-1]
+    output reg  [CORES*64-1:0] nonce_out,    // CORES x 64-bit packed
+    output reg  [CORES-1:0]    nonce_valid   // CORES x 1-bit packed
 );
 
     reg [63:0] global_nonce;
@@ -25,14 +25,14 @@ module nonce_scheduler #(
         if (!reset_n) begin
             global_nonce <= 64'd0;
             for (i = 0; i < CORES; i = i + 1) begin
-                nonce_out[i]   <= 64'd0;
+                nonce_out[64*i +: 64]   <= 64'd0;
                 nonce_valid[i] <= 1'b0;
             end
         end else begin
             if (enable) begin
                 // Assign one nonce per core per cycle
                 for (i = 0; i < CORES; i = i + 1) begin
-                    nonce_out[i]   <= global_nonce + i;
+                    nonce_out[64*i +: 64]   <= global_nonce + i;
                     nonce_valid[i] <= 1'b1;
                 end
 

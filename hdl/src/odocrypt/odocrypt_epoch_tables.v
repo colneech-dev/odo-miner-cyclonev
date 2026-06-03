@@ -244,39 +244,51 @@ module odocrypt_epoch_tables (
     genvar gs, ge, gp, gj, gk, gr;
 
     generate
-        for (gs = 0; gs < 40; gs = gs+1)
-            for (ge = 0; ge < 64; ge = ge+1)
+        for (gs = 0; gs < 40; gs = gs+1) begin : gs_loop1
+            for (ge = 0; ge < 64; ge = ge+1) begin : ge_loop1
                 assign sbox1_out[8*(gs*64+ge) +: 8] = act_sbox1[gs][ge];
+            end
+        end
     endgenerate
 
     generate
-        for (gs = 0; gs < 10; gs = gs+1)
-            for (ge = 0; ge < 1024; ge = ge+1)
+        for (gs = 0; gs < 10; gs = gs+1) begin : gs_loop2
+            for (ge = 0; ge < 1024; ge = ge+1) begin : ge_loop2
                 assign sbox2_out[16*(gs*1024+ge) +: 16] = act_sbox2[gs][ge];
+            end
+        end
     endgenerate
 
     generate
-        for (gp = 0; gp < 2; gp = gp+1)
-            for (gj = 0; gj < 6; gj = gj+1)
-                for (gk = 0; gk < 5; gk = gk+1)
+        for (gp = 0; gp < 2; gp = gp+1) begin : gp_loop
+            for (gj = 0; gj < 6; gj = gj+1) begin : gj_loop
+                for (gk = 0; gk < 5; gk = gk+1) begin : gk_loop
                     assign pmask_out[64*((gp*6+gj)*5+gk) +: 64] = act_pmask[gp][gj][gk];
+                end
+            end
+        end
     endgenerate
 
     generate
-        for (gp = 0; gp < 2; gp = gp+1)
-            for (gj = 0; gj < 5; gj = gj+1)
-                for (gk = 0; gk < 5; gk = gk+1)
+        for (gp = 0; gp < 2; gp = gp+1) begin : gp_loop2
+            for (gj = 0; gj < 5; gj = gj+1) begin : gj_loop2
+                for (gk = 0; gk < 5; gk = gk+1) begin : gk_loop2
                     assign prot_out[6*((gp*5+gj)*5+gk) +: 6] = act_prot[gp][gj][gk];
+                end
+            end
+        end
     endgenerate
 
     generate
-        for (gr = 0; gr < 6; gr = gr+1)
+        for (gr = 0; gr < 6; gr = gr+1) begin : gr_loop
             assign rot_out[6*gr +: 6] = act_rot[gr];
+        end
     endgenerate
 
     generate
-        for (gr = 0; gr < 84; gr = gr+1)
+        for (gr = 0; gr < 84; gr = gr+1) begin : gr_loop2
             assign rk_out[10*gr +: 10] = act_rk[gr];
+        end
     endgenerate
 
 endmodule
