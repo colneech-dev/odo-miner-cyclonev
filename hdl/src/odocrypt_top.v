@@ -23,7 +23,7 @@ module odocrypt_top (
     reg [31:0] nonce_start_reg;
     reg [31:0] nonce_end_reg;
     reg [31:0] target_reg [0:7];
-    reg [31:0] header_reg [0:19];
+    reg [639:0] header_reg;  // 20 x 32-bit words packed as 640 bits
 
     reg        found_latched;
     reg [31:0] found_nonce_reg;
@@ -42,17 +42,17 @@ module odocrypt_top (
     // -------------------------------------------------------------------------
     // Control bit definitions
     // -------------------------------------------------------------------------
-    localparam CTRL_START        = 1u << 0;
-    localparam CTRL_RESET        = 1u << 1;
-    localparam CTRL_ENABLE       = 1u << 2;
-    localparam CTRL_CLEAR_FOUND  = 1u << 3;
+    localparam CTRL_START        = 1 << 0;
+    localparam CTRL_RESET        = 1 << 1;
+    localparam CTRL_ENABLE       = 1 << 2;
+    localparam CTRL_CLEAR_FOUND  = 1 << 3;
 
     // Status bits
-    localparam STAT_BUSY          = 1u << 0;
-    localparam STAT_FOUND         = 1u << 1;
-    localparam STAT_CORE_READY    = 1u << 2;
-    localparam STAT_EPOCH_LOCK    = 1u << 3;
-    localparam STAT_TABLES_VALID  = 1u << 4;
+    localparam STAT_BUSY          = 1 << 0;
+    localparam STAT_FOUND         = 1 << 1;
+    localparam STAT_CORE_READY    = 1 << 2;
+    localparam STAT_EPOCH_LOCK    = 1 << 3;
+    localparam STAT_TABLES_VALID  = 1 << 4;
 
     // Avalon register addresses
     localparam ADDR_CONTROL        = 8'h00;
@@ -193,13 +193,13 @@ module odocrypt_top (
 
             for (i = 0; i < 8; i = i + 1)
                 target_reg[i] <= 32'h0000_0000;
-            for (i = 0; i < 20; i = i + 1)
-                header_reg[i] <= 32'h0000_0000;
+            header_reg <= 640'h0;
             for (i = 0; i < 8; i = i + 1)
                 hash_reg[i] <= 32'h0000_0000;
         end else begin
             // uptime increments every cycle while the design is powered
             perf_uptime <= perf_uptime + 1;
+            version_reg <= version_reg;  // read-only after reset
 
             if (avs_write) begin
                 case (avs_address)
@@ -221,7 +221,7 @@ module odocrypt_top (
                     ADDR_TARGET_BASE + 8'h14,
                     ADDR_TARGET_BASE + 8'h18,
                     ADDR_TARGET_BASE + 8'h1C: begin
-                        target_reg[(avs_address - ADDR_TARGET_BASE) >> 2] <= avs_writedata;
+                        target_reg[32*((avs_address - ADDR_TARGET_BASE) >> 2) +: 32] <= avs_writedata;
                     end
                     ADDR_HEADER_BASE,
                     ADDR_HEADER_BASE + 8'h04,
@@ -243,7 +243,7 @@ module odocrypt_top (
                     ADDR_HEADER_BASE + 8'h44,
                     ADDR_HEADER_BASE + 8'h48,
                     ADDR_HEADER_BASE + 8'h4C: begin
-                        header_reg[(avs_address - ADDR_HEADER_BASE) >> 2] <= avs_writedata;
+                        header_reg[32*((avs_address - ADDR_HEADER_BASE) >> 2) +: 32] <= avs_writedata;
                     end
                     default: ;
                 endcase
@@ -289,7 +289,7 @@ module odocrypt_top (
             ADDR_TARGET_BASE + 8'h14,
             ADDR_TARGET_BASE + 8'h18,
             ADDR_TARGET_BASE + 8'h1C: begin
-                avs_readdata = target_reg[(avs_address - ADDR_TARGET_BASE) >> 2];
+                avs_readdata = target_reg[32*((avs_address - ADDR_TARGET_BASE) >> 2) +: 32];
             end
             ADDR_HEADER_BASE,
             ADDR_HEADER_BASE + 8'h04,
@@ -311,7 +311,7 @@ module odocrypt_top (
             ADDR_HEADER_BASE + 8'h44,
             ADDR_HEADER_BASE + 8'h48,
             ADDR_HEADER_BASE + 8'h4C: begin
-                avs_readdata = header_reg[(avs_address - ADDR_HEADER_BASE) >> 2];
+                avs_readdata = header_reg[32*((avs_address - ADDR_HEADER_BASE) >> 2) +: 32];
             end
             ADDR_HASH_BASE,
             ADDR_HASH_BASE + 8'h04,
@@ -321,7 +321,7 @@ module odocrypt_top (
             ADDR_HASH_BASE + 8'h14,
             ADDR_HASH_BASE + 8'h18,
             ADDR_HASH_BASE + 8'h1C: begin
-                avs_readdata = hash_reg[(avs_address - ADDR_HASH_BASE) >> 2];
+                avs_readdata = hash_reg[32*((avs_address - ADDR_HASH_BASE) >> 2) +: 32];
             end
             ADDR_PERF_HASHES_LO: avs_readdata = perf_hashes_lo;
             ADDR_PERF_HASHES_HI: avs_readdata = perf_hashes_hi;
