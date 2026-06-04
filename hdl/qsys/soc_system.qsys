@@ -25,14 +25,6 @@
          type = "int";
       }
    }
-   element odocrypt_top_0
-   {
-      datum _sortIndex
-      {
-         value = "2";
-         type = "int";
-      }
-   }
 }
 ]]></parameter>
  <parameter name="clockCrossingAdapter" value="HANDSHAKE" />
@@ -260,7 +252,7 @@
   <parameter name="MEM_DEVICE" value="MISSING_MODEL" />
   <parameter name="MEM_DLL_EN" value="true" />
   <parameter name="MEM_DQ_PER_DQS" value="8" />
-  <parameter name="MEM_DQ_WIDTH" value="8" />
+  <parameter name="MEM_DQ_WIDTH" value="32" />
   <parameter name="MEM_DRV_STR" value="RZQ/6" />
   <parameter name="MEM_FORMAT" value="DISCRETE" />
   <parameter name="MEM_GUARANTEED_WRITE_INIT" value="false" />
@@ -277,7 +269,7 @@
   <parameter name="MEM_PD" value="DLL off" />
   <parameter name="MEM_RANK_MULTIPLICATION_FACTOR" value="1" />
   <parameter name="MEM_ROW_ADDR_WIDTH" value="12" />
-  <parameter name="MEM_RTT_NOM" value="ODT Disabled" />
+  <parameter name="MEM_RTT_NOM" value="RZQ/4" />
   <parameter name="MEM_RTT_WR" value="Dynamic ODT off" />
   <parameter name="MEM_SRT" value="Normal" />
   <parameter name="MEM_TCL" value="7" />
@@ -593,8 +585,7 @@
   <parameter name="usb_mp_clk_div" value="0" />
   <parameter name="use_default_mpu_clk" value="true" />
  </module>
- <module name="odocrypt_top_0" kind="odocrypt_top" version="1.0" enabled="1" />
- <connection
+  <connection
    kind="clock"
    version="25.1"
    start="clk_0.clk"
