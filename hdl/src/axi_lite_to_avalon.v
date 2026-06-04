@@ -103,16 +103,13 @@ module axi_lite_to_avalon (
     end
 
     // Read path: Latch address and issue read
-    reg [31:0] rd_addr_latched;
     reg        rd_valid;
 
     always @(posedge clk or negedge reset_n) begin
         if (~reset_n) begin
-            rd_addr_latched <= 32'h0;
             rd_valid <= 1'b0;
         end else begin
             if (ARVALID && ARREADY) begin
-                rd_addr_latched <= ARADDR;
                 rd_valid <= 1'b1;
             end else if (avs_read && ~avs_waitrequest) begin
                 rd_valid <= 1'b0;

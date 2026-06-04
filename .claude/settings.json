@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem *.c, *.h, Makefile* -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object Name)",
+      "Bash(make clean *)",
+      "PowerShell(gcc --version 2>&1)",
+      "PowerShell(head -1)",
+      "Bash(wsl bash *)",
+      "Bash(pdftotext /tmp/qmtech_schematic.pdf -)"
+    ]
+  }
+}

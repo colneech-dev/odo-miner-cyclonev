@@ -125,3 +125,6 @@ BR2_PACKAGE_WPA_CLI=y
 BR2_JLEVEL=8
 BR2_CCACHE=y
 BR2_CCACHE_USE_ENVVAR=y
+
+# Use system CMake (skip building broken host-cmake with DAP)
+BR2_CMAKE=y
