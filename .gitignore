@@ -35,6 +35,12 @@ logs/
 Thumbs.db
 *.swp
 *~
+.claude/
+*.backup*
+*.with_*
+
+# Qsys generated files (editor state, synthesis output, parameters)
+hdl/qsys/.qsys_edit/
 hdl/qsys/**/*.cmp
 hdl/qsys/**/*.html
 hdl/qsys/**/*.xml
@@ -43,6 +49,18 @@ hdl/qsys/**/*.qip
 hdl/qsys/**/*.debuginfo
 hdl/qsys/**/*.sv
 hdl/qsys/**/*.v
+hdl/qsys/**/*.ppf
+hdl/qsys/**/*.pre.*
+hdl/qsys/**/*.hex
+hdl/qsys/**/*.nlv
+hdl/qsys/**/*.rpt
+hdl/qsys/**/hps_sdram_p0*
+
+# Quartus generated files
+hdl/quartus/.qsys_edit/
+hdl/quartus/hps_isw_handoff/
+hdl/quartus/hps_sdram_p0_*
+hdl/quartus/c5_pin_model_dump.txt
 hdl/quartus/*.sopcinfo
 hdl/quartus/db/
 hdl/quartus/output_files/
