@@ -47,6 +47,22 @@
  <parameter name="useTestBenchNamingPattern" value="false" />
  <instanceScript></instanceScript>
  <interface name="clk" internal="clk_0.clk_in" type="clock" dir="end" />
+ <interface
+   name="h2f_lw_axi_master"
+   internal="hps_0.h2f_lw_axi_master"
+   type="axi"
+   dir="start" />
+ <interface
+   name="h2f_mpu_events"
+   internal="hps_0.h2f_mpu_events"
+   type="conduit"
+   dir="end" />
+ <interface
+   name="hps_0_h2f_reset"
+   internal="hps_0.h2f_reset"
+   type="reset"
+   dir="start" />
+ <interface name="hps_io" internal="hps_0.hps_io" type="conduit" dir="end" />
  <interface name="memory" internal="hps_0.memory" type="conduit" dir="end" />
  <interface name="reset" internal="clk_0.clk_in_reset" type="reset" dir="end" />
  <module name="clk_0" kind="clock_source" version="25.1" enabled="1">
@@ -119,7 +135,7 @@
   <parameter name="DAT_DATA_WIDTH" value="32" />
   <parameter name="DEBUGAPB_Enable" value="false" />
   <parameter name="DEBUG_MODE" value="false" />
-  <parameter name="DEVICE_DEPTH" value="1" />
+  <parameter name="DEVICE_DEPTH" value="2" />
   <parameter name="DEVICE_FAMILY_PARAM" value="" />
   <parameter name="DISABLE_CHILD_MESSAGING" value="false" />
   <parameter name="DISCRETE_FLY_BY" value="true" />
@@ -132,9 +148,9 @@
   <parameter name="EMAC0_Mode" value="N/A" />
   <parameter name="EMAC0_PTP" value="false" />
   <parameter name="EMAC0_PinMuxing" value="Unused" />
-  <parameter name="EMAC1_Mode" value="N/A" />
+  <parameter name="EMAC1_Mode" value="RGMII" />
   <parameter name="EMAC1_PTP" value="false" />
-  <parameter name="EMAC1_PinMuxing" value="Unused" />
+  <parameter name="EMAC1_PinMuxing" value="HPS I/O Set 0" />
   <parameter name="ENABLE_ABS_RAM_MEM_INIT" value="false" />
   <parameter name="ENABLE_BONDING" value="false" />
   <parameter name="ENABLE_BURST_MERGE" value="false" />
@@ -218,10 +234,10 @@
   <parameter name="HHP_HPS_VERIFICATION" value="false" />
   <parameter name="HLGPI_Enable" value="false" />
   <parameter name="HPS_PROTOCOL" value="DDR3" />
-  <parameter name="I2C0_Mode" value="N/A" />
-  <parameter name="I2C0_PinMuxing" value="Unused" />
-  <parameter name="I2C1_Mode" value="N/A" />
-  <parameter name="I2C1_PinMuxing" value="Unused" />
+  <parameter name="I2C0_Mode" value="I2C" />
+  <parameter name="I2C0_PinMuxing" value="HPS I/O Set 0" />
+  <parameter name="I2C1_Mode" value="I2C" />
+  <parameter name="I2C1_PinMuxing" value="HPS I/O Set 0" />
   <parameter name="I2C2_Mode" value="N/A" />
   <parameter name="I2C2_PinMuxing" value="Unused" />
   <parameter name="I2C3_Mode" value="N/A" />
@@ -247,7 +263,7 @@
   <parameter name="MEM_CLK_EN_WIDTH" value="1" />
   <parameter name="MEM_CLK_FREQ" value="300.0" />
   <parameter name="MEM_CLK_FREQ_MAX" value="400.0" />
-  <parameter name="MEM_COL_ADDR_WIDTH" value="8" />
+  <parameter name="MEM_COL_ADDR_WIDTH" value="10" />
   <parameter name="MEM_CS_WIDTH" value="1" />
   <parameter name="MEM_DEVICE" value="MISSING_MODEL" />
   <parameter name="MEM_DLL_EN" value="true" />
@@ -268,8 +284,8 @@
   <parameter name="MEM_NUMBER_OF_RANKS_PER_DIMM" value="1" />
   <parameter name="MEM_PD" value="DLL off" />
   <parameter name="MEM_RANK_MULTIPLICATION_FACTOR" value="1" />
-  <parameter name="MEM_ROW_ADDR_WIDTH" value="12" />
-  <parameter name="MEM_RTT_NOM" value="RZQ/4" />
+  <parameter name="MEM_ROW_ADDR_WIDTH" value="14" />
+  <parameter name="MEM_RTT_NOM" value="RZQ/6" />
   <parameter name="MEM_RTT_WR" value="Dynamic ODT off" />
   <parameter name="MEM_SRT" value="Normal" />
   <parameter name="MEM_TCL" value="7" />
@@ -428,15 +444,15 @@
   <parameter name="S2FINTERRUPT_USB_Enable" value="false" />
   <parameter name="S2FINTERRUPT_WATCHDOG_Enable" value="false" />
   <parameter name="S2F_Width" value="2" />
-  <parameter name="SDIO_Mode" value="N/A" />
-  <parameter name="SDIO_PinMuxing" value="Unused" />
+  <parameter name="SDIO_Mode" value="8-bit Data" />
+  <parameter name="SDIO_PinMuxing" value="HPS I/O Set 0" />
   <parameter name="SEQUENCER_TYPE" value="NIOS" />
   <parameter name="SEQ_MODE" value="0" />
   <parameter name="SKIP_MEM_INIT" value="true" />
   <parameter name="SOPC_COMPAT_RESET" value="false" />
   <parameter name="SPEED_GRADE" value="7" />
-  <parameter name="SPIM0_Mode" value="N/A" />
-  <parameter name="SPIM0_PinMuxing" value="Unused" />
+  <parameter name="SPIM0_Mode" value="Single Slave Select" />
+  <parameter name="SPIM0_PinMuxing" value="HPS I/O Set 0" />
   <parameter name="SPIM1_Mode" value="N/A" />
   <parameter name="SPIM1_PinMuxing" value="Unused" />
   <parameter name="SPIS0_Mode" value="N/A" />
@@ -497,14 +513,14 @@
   <parameter name="TRACKING_WATCH_TEST" value="false" />
   <parameter name="TREFI" value="35100" />
   <parameter name="TRFC" value="350" />
-  <parameter name="UART0_Mode" value="N/A" />
-  <parameter name="UART0_PinMuxing" value="Unused" />
+  <parameter name="UART0_Mode" value="No Flow Control" />
+  <parameter name="UART0_PinMuxing" value="HPS I/O Set 0" />
   <parameter name="UART1_Mode" value="N/A" />
   <parameter name="UART1_PinMuxing" value="Unused" />
   <parameter name="USB0_Mode" value="N/A" />
   <parameter name="USB0_PinMuxing" value="Unused" />
-  <parameter name="USB1_Mode" value="N/A" />
-  <parameter name="USB1_PinMuxing" value="Unused" />
+  <parameter name="USB1_Mode" value="SDR" />
+  <parameter name="USB1_PinMuxing" value="HPS I/O Set 0" />
   <parameter name="USER_DEBUG_LEVEL" value="1" />
   <parameter name="USE_AXI_ADAPTOR" value="false" />
   <parameter name="USE_FAKE_PHY" value="false" />
@@ -585,7 +601,7 @@
   <parameter name="usb_mp_clk_div" value="0" />
   <parameter name="use_default_mpu_clk" value="true" />
  </module>
-  <connection
+ <connection
    kind="clock"
    version="25.1"
    start="clk_0.clk"
