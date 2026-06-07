@@ -35,3 +35,14 @@ logs/
 Thumbs.db
 *.swp
 *~
+hdl/qsys/**/*.cmp
+hdl/qsys/**/*.html
+hdl/qsys/**/*.xml
+hdl/qsys/**/*.bsf
+hdl/qsys/**/*.qip
+hdl/qsys/**/*.debuginfo
+hdl/qsys/**/*.sv
+hdl/qsys/**/*.v
+hdl/quartus/*.sopcinfo
+hdl/quartus/db/
+hdl/quartus/output_files/
