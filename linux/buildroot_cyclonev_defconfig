@@ -19,10 +19,10 @@ BR2_OPTIMIZE_FOR_BUILD=y
 # C Library (musl: lightweight, modern, no kernel version conflicts)
 BR2_LIBC_MUSL=y
 
-# Linux Kernel (6.6 LTS with FPGA Manager support, supported until Dec 2028)
+# Linux Kernel (5.15 LTS with FPGA Manager support, supported until Oct 2026)
 BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION=y
-BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.6.26"
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="5.15.170"
 BR2_LINUX_KERNEL_DEFCONFIG="multi_v7"
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
 BR2_LINUX_KERNEL_INTREE_DTS_NAME="socfpga_cyclone5"
