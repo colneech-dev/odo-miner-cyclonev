@@ -16,10 +16,9 @@ BR2_ARM_EABI=y
 BR2_ARM_INSTRUCTIONS_THUMB2=y
 BR2_OPTIMIZE_FOR_BUILD=y
 
-# C Library (glibc: standard, compatible with kernel 6.6)
-BR2_PACKAGE_GLIBC=y
-# BR2_PACKAGE_UCLIBC is not set
-# BR2_PACKAGE_MUSL is not set
+# C Library (glibc: standard, widely tested, compatible with kernel 6.6)
+BR2_TOOLCHAIN_BUILDROOT_LIBC="glibc"
+# BR2_TOOLCHAIN_USES_UCLIBC is not set
 
 # Linux Kernel (6.6 LTS with FPGA Manager support, supported until Dec 2028)
 BR2_LINUX_KERNEL=y
