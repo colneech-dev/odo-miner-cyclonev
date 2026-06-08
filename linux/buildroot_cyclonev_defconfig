@@ -18,6 +18,7 @@ BR2_OPTIMIZE_FOR_BUILD=y
 
 # C Library (musl: lightweight, modern, no kernel version conflicts)
 BR2_LIBC_MUSL=y
+# BR2_UCLIBC is not set
 
 # Linux Kernel (6.6 LTS with FPGA Manager support, supported until Dec 2028)
 BR2_LINUX_KERNEL=y
