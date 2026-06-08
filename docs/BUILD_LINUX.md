@@ -365,6 +365,31 @@ dmesg | tail -20
 
 ---
 
+## Buildroot 2025.11.3 Configuration (Current)
+
+The defconfig at `linux/buildroot_cyclonev_defconfig` is the authoritative configuration for this project. Key updates from earlier versions:
+
+**Toolchain & Kernel:**
+- glibc (replaces uClibc for modern kernel compatibility)
+- Linux 6.6.26 LTS (Dec 2028 support)
+- Kernel console: `console=ttyS0,115200n8 earlycon=uart,mmio32,0xffc02000`
+
+**Mining-specific packages:**
+- gcc, binutils, gdb, linux-headers (on-target compilation for daemon rebuilds)
+- openssl, libcurl, jansson (Stratum protocol + TLS support)
+
+**Robustness:**
+- supervisor (auto-restart crashed odod daemon)
+- watchdog (ARM watchdog daemon; reboots on system hang)
+- logrotate (prevent log files from consuming disk)
+- sysstat, htop, lsof, strace (monitoring & debugging)
+
+**Rootfs size:** 8GB (accommodates build tools + logs + on-target compilation temp files)
+
+**See `docs/DEPLOYMENT.md` for post-build configuration** including NTP setup, watchdog enablement, password management, and supervisor configuration.
+
+---
+
 ## References
 
 - Buildroot: https://buildroot.org/
