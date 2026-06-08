@@ -29,6 +29,7 @@ BR2_LINUX_KERNEL_DTS_SUPPORT=y
 BR2_LINUX_KERNEL_INTREE_DTS_NAME="socfpga_cyclone5"
 BR2_LINUX_KERNEL_IMAGE_TARGET_CUSTOM=y
 BR2_LINUX_KERNEL_IMAGE_TARGET_NAME="zImage"
+BR2_LINUX_KERNEL_CMDLINE="console=ttyS0,115200n8 earlycon=uart,mmio32,0xffc02000"
 
 # FPGA Manager (runtime bitstream loading)
 BR2_LINUX_KERNEL_EXT_SOCFPGA=y
@@ -80,7 +81,7 @@ BR2_PACKAGE_IPERF=y
 BR2_PACKAGE_PROCPS_NG=y
 BR2_PACKAGE_PSMISC=y
 
-# System time sync
+# System time sync (requires /etc/ntp.conf with server entries, e.g. "server pool.ntp.org iburst")
 BR2_PACKAGE_NTP=y
 BR2_PACKAGE_NTPD=y
 
@@ -125,6 +126,7 @@ BR2_PACKAGE_SUPERVISOR=y
 BR2_PACKAGE_LOGROTATE=y
 BR2_PACKAGE_SYSSTAT=y
 BR2_PACKAGE_WATCH=y
+BR2_PACKAGE_WATCHDOG=y
 
 # Network debugging
 BR2_PACKAGE_IW=y
