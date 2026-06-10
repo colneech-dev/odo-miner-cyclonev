@@ -85,13 +85,23 @@ What was fixed/rebuilt to get there:
 
 ## OPEN ITEMS (priority order)
 
-### 1. Quartus fit/timing closure (in progress)
-History: attempt 1 = 129% ALMs (12× unrolled Keccak + FF S-boxes);
-attempt 2 = 90% but unroutable (small S-boxes became logic, FF copy-commit
-muxes); attempt 3 (Keccak iterated, MLAB ramstyle, single-copy FF tables,
-shared mix datapath) — running at session end. Expected ≈ 15–18K ALMs.
-If it still fails: check the entity table in fit.rpt (`Fitter Resource
-Utilization by Entity`), the whales were odocrypt_epoch_tables and keccak.
+### 1. Quartus fit/timing closure — DONE ✅ (2026-06-10 21:44)
+Final result: **18,132 / 41,910 ALMs (43%)**, 15,535 registers, 80 RAM
+blocks (440 Kbit — all S-boxes in BRAM), **timing met with margin**
+(clk_50 setup slack +1.707 ns, zero violations in any domain).
+Bitstream: `hdl/quartus/output_files/odo_miner.rbf` (2.8 MB).
+
+It took six fitter rounds; the killers, for posterity:
+1. 12x-unrolled Keccak (~25K ALMs) → single iterated round (THROUGHPUT=12).
+2. 60 parallel barrel rotators in the rotation mix → serialized to 10.
+3. FF copy-commit of the pbox/rk tables (~10K ALMs) → single-copy FFs.
+4. Small S-boxes silently became ~31K registers. Root cause (found by
+   standalone bisection, NOT reported by any Quartus warning): the
+   write-port bank bit was the combinational complement of the read-port
+   bank bit (`load_bank = ~active_bank`) — that alone blocks RAM
+   inference. Fix: independent registers swapped on commit. Also needed:
+   read in a separate always block, ramstyle hint. build-fpga.sh now has
+   a >=60-RAM-blocks tripwire against regression.
 
 ### 2. Hardware gate checks (unchanged sequence)
 1. Load rbf via U-Boot boot.scr (it does `fpga load` + `bridge enable`),
