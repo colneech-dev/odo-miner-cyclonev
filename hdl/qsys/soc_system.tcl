@@ -49,7 +49,7 @@ set_instance_parameter_value hps_0 {F2SCLK_SDRAMCLK_ENABLE}     {false}
 set_instance_parameter_value hps_0 {LWH2F_Enabled}              {true}
 set_instance_parameter_value hps_0 {H2F_Width}                  {0}
 set_instance_parameter_value hps_0 {F2H_Width}                  {0}
-set_instance_parameter_value hps_0 {F2SInterruptsEnable}        {true}
+set_instance_parameter_value hps_0 {F2SINTERRUPT_Enable}        {true}
 
 # Peripheral pin-mux (matches the board schematic)
 set_instance_parameter_value hps_0 {EMAC0_Mode}      {N/A}
@@ -88,7 +88,108 @@ set_instance_parameter_value hps_0 {MEM_ROW_ADDR_WIDTH}  {14}
 set_instance_parameter_value hps_0 {MEM_COL_ADDR_WIDTH}  {10}
 set_instance_parameter_value hps_0 {MEM_CS_WIDTH}       {1}
 
+# -----------------------------------------------------------------------------
+# OdoCrypt miner register block (component: odocrypt_top_hw.tcl, same dir)
+# -----------------------------------------------------------------------------
+add_instance odo_0 odocrypt_top 1.0
+
+# -----------------------------------------------------------------------------
+# SPI display (ILI9341-class TFT). Fixed SCLK ≈ 25 MHz (50 MHz / 2).
+# Linux driver: spi-altera-platform ("altr,spi-1.0") + fbtft fb_ili9341.
+# -----------------------------------------------------------------------------
+add_instance spi_lcd altera_avalon_spi 25.1
+set_instance_parameter_value spi_lcd {clockPhase}      {0}
+set_instance_parameter_value spi_lcd {clockPolarity}   {0}
+set_instance_parameter_value spi_lcd {dataWidth}       {8}
+set_instance_parameter_value spi_lcd {masterSPI}       {true}
+set_instance_parameter_value spi_lcd {numberOfSlaves}  {1}
+set_instance_parameter_value spi_lcd {targetClockRate} {25000000.0}
+
+# -----------------------------------------------------------------------------
+# SPI touch controller (XPT2046/ADS7846). Fixed SCLK ≈ 1.56 MHz (max 2.5 MHz).
+# Linux driver: spi-altera-platform + ads7846 touchscreen.
+# -----------------------------------------------------------------------------
+add_instance spi_touch altera_avalon_spi 25.1
+set_instance_parameter_value spi_touch {clockPhase}      {0}
+set_instance_parameter_value spi_touch {clockPolarity}   {0}
+set_instance_parameter_value spi_touch {dataWidth}       {8}
+set_instance_parameter_value spi_touch {masterSPI}       {true}
+set_instance_parameter_value spi_touch {numberOfSlaves}  {1}
+set_instance_parameter_value spi_touch {targetClockRate} {2000000.0}
+
+# -----------------------------------------------------------------------------
+# PIO: LCD control lines (bit0 = D/C, bit1 = RESET_n, bit2 = backlight)
+# -----------------------------------------------------------------------------
+add_instance pio_lcd altera_avalon_pio 25.1
+set_instance_parameter_value pio_lcd {direction} {Output}
+set_instance_parameter_value pio_lcd {width}     {3}
+set_instance_parameter_value pio_lcd {resetValue} {0x2}
+
+# -----------------------------------------------------------------------------
+# PIO: inputs with IRQ (bit0 = touch PENIRQ_n, bit1 = KEY0, bit2 = KEY1)
+# -----------------------------------------------------------------------------
+add_instance pio_in altera_avalon_pio 25.1
+set_instance_parameter_value pio_in {direction}      {Input}
+set_instance_parameter_value pio_in {width}          {3}
+set_instance_parameter_value pio_in {edgeType}       {FALLING}
+set_instance_parameter_value pio_in {captureEdge}    {true}
+set_instance_parameter_value pio_in {generateIRQ}    {true}
+set_instance_parameter_value pio_in {irqType}        {EDGE}
+
+# -----------------------------------------------------------------------------
+# PIO: board LEDs (8 bits, status display)
+# -----------------------------------------------------------------------------
+add_instance pio_led altera_avalon_pio 25.1
+set_instance_parameter_value pio_led {direction} {Output}
+set_instance_parameter_value pio_led {width}     {8}
+set_instance_parameter_value pio_led {resetValue} {0x0}
+
+# -----------------------------------------------------------------------------
+# Clocks and resets to all fabric peripherals
+# -----------------------------------------------------------------------------
+foreach inst {odo_0 spi_lcd spi_touch pio_lcd pio_in pio_led} {
+    add_connection clk_0.clk       ${inst}.clk
+    add_connection clk_0.clk_reset ${inst}.reset
+}
+add_connection clk_0.clk       hps_0.h2f_lw_axi_clock
+add_connection clk_0.clk_reset hps_0.h2f_lw_axi_reset
+
+# -----------------------------------------------------------------------------
+# LWH2F bridge → peripheral address map (byte offsets from 0xFF200000).
+# odo_0 MUST stay at 0x0000: hps/hps_regs.h assumes MINER_BASE_OFFSET = 0.
+# -----------------------------------------------------------------------------
+add_connection hps_0.h2f_lw_axi_master odo_0.s0
+set_connection_parameter_value hps_0.h2f_lw_axi_master/odo_0.s0 baseAddress {0x0000}
+
+add_connection hps_0.h2f_lw_axi_master spi_lcd.spi_control_port
+set_connection_parameter_value hps_0.h2f_lw_axi_master/spi_lcd.spi_control_port baseAddress {0x1000}
+
+add_connection hps_0.h2f_lw_axi_master spi_touch.spi_control_port
+set_connection_parameter_value hps_0.h2f_lw_axi_master/spi_touch.spi_control_port baseAddress {0x1100}
+
+add_connection hps_0.h2f_lw_axi_master pio_lcd.s1
+set_connection_parameter_value hps_0.h2f_lw_axi_master/pio_lcd.s1 baseAddress {0x1200}
+
+add_connection hps_0.h2f_lw_axi_master pio_in.s1
+set_connection_parameter_value hps_0.h2f_lw_axi_master/pio_in.s1 baseAddress {0x1300}
+
+add_connection hps_0.h2f_lw_axi_master pio_led.s1
+set_connection_parameter_value hps_0.h2f_lw_axi_master/pio_led.s1 baseAddress {0x1400}
+
+# -----------------------------------------------------------------------------
+# Interrupts → HPS f2h_irq0 (GIC: 72 + n on Cyclone V)
+#   n=0: spi_lcd, n=1: spi_touch, n=2: pio_in (touch pen / keys)
+# -----------------------------------------------------------------------------
+add_connection hps_0.f2h_irq0 spi_lcd.irq
+set_connection_parameter_value hps_0.f2h_irq0/spi_lcd.irq irqNumber {0}
+add_connection hps_0.f2h_irq0 spi_touch.irq
+set_connection_parameter_value hps_0.f2h_irq0/spi_touch.irq irqNumber {1}
+add_connection hps_0.f2h_irq0 pio_in.irq
+set_connection_parameter_value hps_0.f2h_irq0/pio_in.irq irqNumber {2}
+
+# -----------------------------------------------------------------------------
 # Export interfaces
+# -----------------------------------------------------------------------------
 # Clock and reset (user provides 50 MHz clock)
 add_interface          clk clock sink
 set_interface_property clk EXPORT_OF clk_0.clk_in
@@ -103,13 +204,19 @@ set_interface_property memory EXPORT_OF hps_0.memory
 add_interface          hps_io conduit end
 set_interface_property hps_io EXPORT_OF hps_0.hps_io
 
-# MPU interrupt events (export for future use)
-add_interface          h2f_mpu_events conduit end
-set_interface_property h2f_mpu_events EXPORT_OF hps_0.h2f_mpu_events
+# SPI display / touch external pins
+add_interface          spi_lcd conduit end
+set_interface_property spi_lcd EXPORT_OF spi_lcd.external
+add_interface          spi_touch conduit end
+set_interface_property spi_touch EXPORT_OF spi_touch.external
 
-# Lightweight bridge master (export for future odocrypt_top integration)
-add_interface          h2f_lw_axi_master avalon_master end
-set_interface_property h2f_lw_axi_master EXPORT_OF hps_0.h2f_lw_axi_master
+# PIO external pins
+add_interface          pio_lcd conduit end
+set_interface_property pio_lcd EXPORT_OF pio_lcd.external_connection
+add_interface          pio_in conduit end
+set_interface_property pio_in EXPORT_OF pio_in.external_connection
+add_interface          pio_led conduit end
+set_interface_property pio_led EXPORT_OF pio_led.external_connection
 
 # Save system
 save_system {soc_system.qsys}
