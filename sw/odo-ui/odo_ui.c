@@ -31,6 +31,10 @@
 #include <dirent.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <linux/fb.h>
 #include <linux/input.h>
 
@@ -100,16 +104,41 @@ typedef struct {
 
 #define RGB565(r,g,b) (uint16_t)((((r)>>3)<<11) | (((g)>>2)<<5) | ((b)>>3))
 
-#define C_BG     RGB565(10, 12, 24)
-#define C_PANEL  RGB565(24, 30, 52)
-#define C_TEXT   RGB565(220, 226, 240)
-#define C_DIM    RGB565(120, 128, 150)
+/* Miningcore-inspired palette: dark navy surfaces, two blues + cyan accent */
+#define C_BG     RGB565(8, 14, 32)        /* page background          */
+#define C_PANEL  RGB565(16, 28, 62)       /* header / card surface    */
+#define C_TEXT   RGB565(226, 232, 246)
+#define C_DIM    RGB565(118, 132, 168)
 #define C_OK     RGB565(70, 200, 120)
 #define C_WARN   RGB565(240, 180, 60)
 #define C_BAD    RGB565(230, 80, 80)
-#define C_ACCENT RGB565(80, 160, 255)
-#define C_BTN    RGB565(40, 52, 88)
-#define C_BTNHI  RGB565(70, 90, 140)
+#define C_BLUE   RGB565(45, 127, 240)     /* miningcore bright blue   */
+#define C_NAVY   RGB565(17, 39, 155)      /* miningcore deep blue     */
+#define C_CYAN   RGB565(56, 200, 240)     /* accent / hashrate        */
+#define C_ACCENT C_BLUE
+#define C_BTN    C_NAVY
+#define C_BTNHI  C_BLUE
+
+/* 16x16 two-tone shield mark (.=transparent 1=bright 2=navy 3=white),
+ * a pixel rendition of the Miningcore shield-and-slash logo. */
+static const char *logo_px[16] = {
+    "211111....111112",
+    "1111111111111111",
+    "1111111111111111",
+    ".11111111111111.",
+    ".11111111111333.",
+    ".1111111133331..",
+    ".11111333312222.",
+    ".13333122222222.",
+    ".33122222222222.",
+    "..2222222222222.",
+    "..222222222222..",
+    "...2222222222...",
+    "....22222222....",
+    ".....222222.....",
+    "......2222......",
+    ".......22......."
+};
 
 static int fb_open(fb_t *fb)
 {
@@ -145,6 +174,23 @@ static void fb_rect(fb_t *fb, int x, int y, int w, int h, uint16_t c)
         uint16_t *row = fb->pix + (size_t)(y + j) * fb->stride + x;
         for (int i = 0; i < w; i++)
             row[i] = c;
+    }
+}
+
+/* Draw the shield logo at integer scale */
+static void fb_logo(fb_t *fb, int x, int y, int scale)
+{
+    for (int r = 0; r < 16; r++) {
+        for (int cidx = 0; cidx < 16; cidx++) {
+            uint16_t col;
+            switch (logo_px[r][cidx]) {
+            case '1': col = C_BLUE; break;
+            case '2': col = C_NAVY; break;
+            case '3': col = RGB565(255, 255, 255); break;
+            default: continue;
+            }
+            fb_rect(fb, x + cidx * scale, y + r * scale, scale, scale, col);
+        }
     }
 }
 
@@ -337,6 +383,25 @@ static void fmt_age(long secs, char *out, size_t sz)
     else                     snprintf(out, sz, "%ldh ago", secs / 3600);
 }
 
+/* First non-loopback IPv4 — shown on screen so the web UI is findable */
+static void board_ip(char *ip, size_t ip_sz)
+{
+    ip[0] = 0;
+    struct ifaddrs *ifa0 = NULL;
+    if (getifaddrs(&ifa0) != 0)
+        return;
+    for (struct ifaddrs *ifa = ifa0; ifa; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET)
+            continue;
+        if (strcmp(ifa->ifa_name, "lo") == 0)
+            continue;
+        inet_ntop(AF_INET, &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr,
+                  ip, ip_sz);
+        break;
+    }
+    freeifaddrs(ifa0);
+}
+
 static volatile sig_atomic_t g_stop = 0;
 static void on_sig(int s) { (void)s; g_stop = 1; }
 
@@ -369,63 +434,95 @@ int main(int argc, char **argv)
         time_t now = time(NULL);
         int stale = !have || (st.updated && now - st.updated > 120);
 
-        /* ---- background + header ---- */
+        /* ---- background + header bar with shield logo ---- */
         fb_rect(&fb, 0, 0, fb.w, fb.h, C_BG);
-        fb_rect(&fb, 0, 0, fb.w, 22, C_PANEL);
-        fb_text(&fb, 6, 4, "ODO-MINER", 2, C_ACCENT);
-        if (stale)
-            fb_text(&fb, fb.w - 8*6*2 - 6, 4, "STALE", 2, C_BAD);
-        else if (st.connected)
-            fb_text(&fb, fb.w - 8*4*2 - 6, 4, "POOL", 2, C_OK);
-        else
-            fb_text(&fb, fb.w - 8*7*2 - 6, 4, "OFFLINE", 2, C_WARN);
+        fb_rect(&fb, 0, 0, fb.w, 36, C_PANEL);
+        fb_rect(&fb, 0, 36, fb.w, 2, C_NAVY);
+        fb_logo(&fb, 6, 2, 2);
+        fb_text(&fb, 44, 10, "ODO MINER", 2, C_TEXT);
 
-        /* ---- hashrate, big ---- */
-        char line[128];
-        fmt_rate(st.hashrate, line, sizeof(line));
-        fb_text(&fb, 8, 34, line, 3, C_TEXT);
-
-        /* ---- detail lines ---- */
-        int y = 70;
-        snprintf(line, sizeof(line), "POOL   %s", have ? st.pool : "?");
-        fb_text(&fb, 8, y, line, 1, C_DIM); y += 14;
-        snprintf(line, sizeof(line), "JOB    %s", st.job_id[0] ? st.job_id : "-");
-        fb_text(&fb, 8, y, line, 1, C_DIM); y += 14;
-        if (st.epoch && st.epoch_next && now >= st.epoch_next) {
-            /* Boundary passed; the watcher swaps tables as soon as the pool
-             * issues a job with the new-epoch ntime (seconds, typically). */
-            snprintf(line, sizeof(line), "EPOCH  %ld  ROLLING NOW...", st.epoch);
-            fb_text(&fb, 8, y, line, 1, C_WARN);
-        } else if (st.epoch && st.epoch_next > now) {
-            long left = st.epoch_next - now;
-            snprintf(line, sizeof(line), "EPOCH  %ld (rolls %ldd %ldh)",
-                     st.epoch, left / 86400, (left % 86400) / 3600);
-            fb_text(&fb, 8, y, line, 1, C_DIM);
-        } else {
-            snprintf(line, sizeof(line), "EPOCH  %ld", st.epoch);
-            fb_text(&fb, 8, y, line, 1, C_DIM);
+        /* status pill, right-aligned */
+        {
+            const char *txt; uint16_t col;
+            if (stale)              { txt = "MINER DOWN"; col = C_BAD; }
+            else if (st.connected)  { txt = "POOL OK";    col = C_OK; }
+            else                    { txt = "OFFLINE";    col = C_WARN; }
+            int w = (int)strlen(txt) * 8 + 12;
+            fb_rect(&fb, fb.w - w - 6, 10, w, 16, C_BG);
+            fb_text(&fb, fb.w - w, 14, txt, 1, col);
         }
+
+        /* ---- hashrate hero ---- */
+        char line[128];
+        fb_text(&fb, 10, 44, "HASHRATE", 1, C_DIM);
+        fmt_rate(st.hashrate, line, sizeof(line));
+        fb_text(&fb, 10, 56, line, 3, C_CYAN);
+
+        /* ---- pool line + two-column stat grid ---- */
+        int y = 88;
+        snprintf(line, sizeof(line), "%s", have ? st.pool : "?");
+        fb_text(&fb, 10, y, "POOL", 1, C_DIM);
+        fb_text(&fb, 58, y, line, 1, C_TEXT);
         y += 14;
-        snprintf(line, sizeof(line), "SHARES %lld found / %lld sent",
-                 st.shares_found, st.shares_submitted);
-        fb_text(&fb, 8, y, line, 1, C_TEXT); y += 14;
-        char age[32];
-        fmt_age(st.last_share ? now - st.last_share : -1, age, sizeof(age));
-        snprintf(line, sizeof(line), "LAST   %s", age);
-        fb_text(&fb, 8, y, line, 1, C_TEXT); y += 14;
-        snprintf(line, sizeof(line), "UPTIME %ldh %ldm",
-                 st.uptime / 3600, (st.uptime % 3600) / 60);
-        fb_text(&fb, 8, y, line, 1, C_DIM); y += 14;
+
+        {
+            char age[32], val[64];
+            int xL = 10, xLv = 58, xR = 168, xRv = 216;
+
+            fb_text(&fb, xL, y, "JOB", 1, C_DIM);
+            fb_text(&fb, xLv, y, st.job_id[0] ? st.job_id : "-", 1, C_TEXT);
+            fb_text(&fb, xR, y, "UPTIME", 1, C_DIM);
+            snprintf(val, sizeof(val), "%ldh %ldm",
+                     st.uptime / 3600, (st.uptime % 3600) / 60);
+            fb_text(&fb, xRv, y, val, 1, C_TEXT);
+            y += 14;
+
+            fb_text(&fb, xL, y, "SHARES", 1, C_DIM);
+            snprintf(val, sizeof(val), "%lld/%lld",
+                     st.shares_found, st.shares_submitted);
+            fb_text(&fb, xLv, y, val, 1, C_TEXT);
+            fb_text(&fb, xR, y, "LAST", 1, C_DIM);
+            fmt_age(st.last_share ? now - st.last_share : -1, age, sizeof(age));
+            fb_text(&fb, xRv, y, age, 1, C_TEXT);
+            y += 14;
+
+            fb_text(&fb, xL, y, "IP", 1, C_DIM);
+            char ip[64];
+            board_ip(ip, sizeof(ip));
+            fb_text(&fb, xLv, y, ip[0] ? ip : "no network", 1,
+                    ip[0] ? C_TEXT : C_WARN);
+            y += 14;
+
+            /* epoch line: countdown, or amber ROLLING state at the boundary */
+            fb_text(&fb, xL, y, "EPOCH", 1, C_DIM);
+            if (st.epoch && st.epoch_next && now >= st.epoch_next) {
+                snprintf(val, sizeof(val), "%ld  ROLLING NOW...", st.epoch);
+                fb_text(&fb, xLv, y, val, 1, C_WARN);
+            } else if (st.epoch && st.epoch_next > now) {
+                long left = st.epoch_next - now;
+                snprintf(val, sizeof(val), "%ld (rolls %ldd %ldh)",
+                         st.epoch, left / 86400, (left % 86400) / 3600);
+                fb_text(&fb, xLv, y, val, 1, C_TEXT);
+            } else {
+                snprintf(val, sizeof(val), "%ld", st.epoch);
+                fb_text(&fb, xLv, y, val, 1, C_TEXT);
+            }
+            y += 14;
+        }
 
         /* ---- buttons / confirmation ---- */
         if (confirm && now - confirm_at > 6)
             confirm = 0;     /* confirmation times out */
 
         if (!confirm) {
-            fb_rect(&fb, btn_restart.x, btn_restart.y, btn_restart.w, btn_restart.h, C_BTN);
-            fb_text(&fb, btn_restart.x + 10, btn_restart.y + 10, "RESTART MINER", 1, C_TEXT);
-            fb_rect(&fb, btn_reboot.x, btn_reboot.y, btn_reboot.w, btn_reboot.h, C_BTN);
-            fb_text(&fb, btn_reboot.x + 10, btn_reboot.y + 10, "REBOOT", 1, C_TEXT);
+            fb_rect(&fb, btn_restart.x, btn_restart.y, btn_restart.w, btn_restart.h, C_BLUE);
+            fb_rect(&fb, btn_restart.x + 1, btn_restart.y + 1,
+                    btn_restart.w - 2, btn_restart.h - 2, C_BTN);
+            fb_text(&fb, btn_restart.x + 10, btn_restart.y + 13, "RESTART MINER", 1, C_TEXT);
+            fb_rect(&fb, btn_reboot.x, btn_reboot.y, btn_reboot.w, btn_reboot.h, C_BLUE);
+            fb_rect(&fb, btn_reboot.x + 1, btn_reboot.y + 1,
+                    btn_reboot.w - 2, btn_reboot.h - 2, C_BTN);
+            fb_text(&fb, btn_reboot.x + 10, btn_reboot.y + 13, "REBOOT", 1, C_TEXT);
         } else {
             fb_rect(&fb, btn_restart.x, btn_restart.y, btn_restart.w, btn_restart.h, C_BAD);
             fb_text(&fb, btn_restart.x + 10, btn_restart.y + 10,

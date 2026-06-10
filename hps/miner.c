@@ -130,9 +130,7 @@ static void watchdog_close(void)
 }
 
 /* -----------------------------------------------------------------------
- * Status export: small JSON snapshot for odo-ui / remote monitoring.
- * Written atomically (tmp + rename) on every heartbeat.
- * Path override: ODOD_STATUS_FILE (default /run/odod/status.json).
+ * Status snapshot shared by the JSON export and the persistence layer
  * ---------------------------------------------------------------------- */
 static struct {
     uint64_t shares_submitted;
@@ -145,6 +143,39 @@ static struct {
     char     job_id[64];
 } g_stat;
 
+/* -----------------------------------------------------------------------
+ * Share-counter persistence: survives miner restarts and reboots.
+ * ---------------------------------------------------------------------- */
+#define STATS_PATH "/var/lib/odod/stats"
+
+static void stats_load(void)
+{
+    FILE *f = fopen(STATS_PATH, "r");
+    if (!f) return;
+    unsigned long long found = 0, submitted = 0;
+    if (fscanf(f, "%llu %llu", &found, &submitted) == 2) {
+        g_stat.shares_found     = found;
+        g_stat.shares_submitted = submitted;
+    }
+    fclose(f);
+}
+
+static void stats_save(void)
+{
+    FILE *f = fopen(STATS_PATH ".tmp", "w");
+    if (!f) return;
+    fprintf(f, "%llu %llu\n",
+            (unsigned long long)g_stat.shares_found,
+            (unsigned long long)g_stat.shares_submitted);
+    fclose(f);
+    rename(STATS_PATH ".tmp", STATS_PATH);
+}
+
+/* -----------------------------------------------------------------------
+ * Status export: small JSON snapshot for odo-ui / remote monitoring.
+ * Written atomically (tmp + rename) on every heartbeat.
+ * Path override: ODOD_STATUS_FILE (default /run/odod/status.json).
+ * ---------------------------------------------------------------------- */
 static void status_write(void)
 {
     static const char *path;
@@ -203,6 +234,7 @@ static void status_write(void)
         (long)now);
     fclose(f);
     rename(tmp, path);
+    stats_save();
 }
 
 /* -----------------------------------------------------------------------
@@ -267,6 +299,12 @@ int main(int argc, char **argv)
     if (!pool_port) pool_port = "3333";
     if (!worker)    worker    = "miner";
 
+    /* Optional backup pool: tried alternately after each failed connect */
+    const char *hosts[2] = { pool_host, getenv("ODOD_POOL_HOST2") };
+    const char *ports[2] = { pool_port, getenv("ODOD_POOL_PORT2") };
+    int n_pools  = (hosts[1] && hosts[1][0] && ports[1] && ports[1][0]) ? 2 : 1;
+    int pool_idx = 0;
+
     /* Read tuning parameters from environment (optional) */
     uint32_t nonce_range_size      = get_env_u32("ODOMIN_NONCE_RANGE", NONCE_RANGE_SIZE);
     uint32_t poll_timeout_ms       = get_env_u32("ODOMIN_POLL_TIMEOUT_MS", POLL_TIMEOUT_MS);
@@ -285,6 +323,9 @@ int main(int argc, char **argv)
     memset(&g_stat, 0, sizeof(g_stat));
     g_stat.started = time(NULL);
     snprintf(g_stat.pool, sizeof(g_stat.pool), "%s:%s", pool_host, pool_port);
+    stats_load();
+    if (n_pools > 1)
+        log_info("backup pool configured: %s:%s", hosts[1], ports[1]);
 
     watchdog_open();
 
@@ -327,13 +368,24 @@ int main(int argc, char **argv)
             status_write();
         }
 
-        /* Connect / reconnect */
+        /* Connect / reconnect; alternate pools after a failed attempt */
         if (stratum_connect(&st) != 0) {
-            log_warn("stratum connect failed; retrying in 5 s");
+            log_warn("stratum connect to %s:%s failed; retrying in 5 s",
+                     hosts[pool_idx], ports[pool_idx]);
+            if (n_pools > 1) {
+                pool_idx = (pool_idx + 1) % n_pools;
+                stratum_init(&st, hosts[pool_idx], ports[pool_idx],
+                             worker, password);
+                g_stat.epoch_interval = st.odo_interval;
+                snprintf(g_stat.pool, sizeof(g_stat.pool), "%s:%s",
+                         hosts[pool_idx], ports[pool_idx]);
+                log_info("switching to pool %s:%s",
+                         hosts[pool_idx], ports[pool_idx]);
+            }
             sleep(5);
             continue;
         }
-        log_info("connected to %s:%s", pool_host, pool_port);
+        log_info("connected to %s:%s", hosts[pool_idx], ports[pool_idx]);
         g_stat.connected = 1;
         status_write();
         have_job = 0;
@@ -412,6 +464,7 @@ int main(int argc, char **argv)
                     g_stat.last_share = time(NULL);
                     if (target_met(found_hash, job.target))
                         log_info("*** BLOCK CANDIDATE (meets network target) ***");
+                    stats_save();
                     if (target_met(found_hash, job.share_target)) {
                         if (stratum_submit_share(&st, &job, found_nonce) == 0) {
                             g_stat.shares_submitted++;
@@ -467,6 +520,7 @@ int main(int argc, char **argv)
     }
 
     log_info("shutting down");
+    stats_save();
     watchdog_close();
     epoch_watcher_stop();
     stratum_disconnect(&st);
