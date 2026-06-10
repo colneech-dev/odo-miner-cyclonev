@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <inttypes.h>
 
 #include "stratum.h"
@@ -92,6 +93,41 @@ static void sleep_ms_local(unsigned ms)
  * Signal handling
  * ---------------------------------------------------------------------- */
 static void handle_signal(int sig) { (void)sig; g_terminate = 1; }
+
+/* -----------------------------------------------------------------------
+ * Hardware watchdog (opt-in: ODOD_WATCHDOG=1).
+ * While enabled, the kernel reboots the board if this process stops
+ * petting /dev/watchdog — a hung miner can't strand a headless rig.
+ * On clean shutdown the magic 'V' write disarms the timer.
+ * ---------------------------------------------------------------------- */
+static int g_wd_fd = -1;
+
+static void watchdog_open(void)
+{
+    const char *en = getenv("ODOD_WATCHDOG");
+    if (!en || en[0] != '1')
+        return;
+    g_wd_fd = open("/dev/watchdog", O_WRONLY);
+    if (g_wd_fd < 0)
+        log_warn("ODOD_WATCHDOG=1 but /dev/watchdog unavailable: %s",
+                 strerror(errno));
+    else
+        log_info("hardware watchdog armed");
+}
+
+static void watchdog_pet(void)
+{
+    if (g_wd_fd >= 0 && write(g_wd_fd, "\0", 1) < 0) { /* best effort */ }
+}
+
+static void watchdog_close(void)
+{
+    if (g_wd_fd >= 0) {
+        if (write(g_wd_fd, "V", 1) < 0) { /* still closing */ }
+        close(g_wd_fd);
+        g_wd_fd = -1;
+    }
+}
 
 /* -----------------------------------------------------------------------
  * Status export: small JSON snapshot for odo-ui / remote monitoring.
@@ -250,6 +286,8 @@ int main(int argc, char **argv)
     g_stat.started = time(NULL);
     snprintf(g_stat.pool, sizeof(g_stat.pool), "%s:%s", pool_host, pool_port);
 
+    watchdog_open();
+
     /* FPGA bridge */
     if (miner_io_init(NULL) != 0) {
         log_error("miner_io_init failed");
@@ -278,6 +316,8 @@ int main(int argc, char **argv)
     int    have_job = 0;
 
     while (!g_terminate) {
+        watchdog_pet();
+
         /* Heartbeat */
         time_t now = time(NULL);
         if (now - last_hb >= heartbeat_interval_s) {
@@ -306,6 +346,8 @@ int main(int argc, char **argv)
         time_t batch_started  = 0;
 
         while (!g_terminate) {
+            watchdog_pet();
+
             int n = stratum_poll(&st, batch_active ? 50 : 100 /*ms*/);
             if (n < 0) {
                 log_warn("stratum poll error; reconnecting");
@@ -425,6 +467,7 @@ int main(int argc, char **argv)
     }
 
     log_info("shutting down");
+    watchdog_close();
     epoch_watcher_stop();
     stratum_disconnect(&st);
     miner_io_shutdown();
