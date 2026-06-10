@@ -2,25 +2,34 @@
 # build-sdcard.sh — Automated SD card image assembly for odo-miner-cyclonev
 #
 # Creates a complete, bootable SD card image with:
-#   - U-Boot SPL + bootloader
-#   - Linux kernel + device tree
-#   - FPGA bitstream
-#   - Root filesystem with miner binaries
+#   - U-Boot SPL+bootloader in a raw 0xA2 partition (REQUIRED: the Cyclone V
+#     BootROM only loads the preloader from a partition of type 0xA2 — it
+#     cannot read FAT)
+#   - Linux kernel + device tree + boot script on a FAT partition
+#   - FPGA bitstream (if available)
+#   - Root filesystem (Buildroot rootfs.ext4) with miner binaries injected
+#
+# Partition layout:
+#   p1  FAT32  256 MiB   zImage, socfpga_cyclone5_qmtech_odo.dtb, boot.scr, fpga.rbf
+#   p2  ext4   remainder rootfs (root=/dev/mmcblk0p2)
+#   p3  0xA2   16 MiB    u-boot-with-spl.sfp (raw, no filesystem)
 #
 # Usage:
 #   ./scripts/build-sdcard.sh
 #
 # Environment variables (optional):
-#   BUILDROOT_DIR=~/buildroot-2023.11    (where Buildroot output is)
-#   IMAGE_SIZE=4096                       (SD card image size in MB, default 4GB)
+#   BUILDROOT_DIR=~/buildroot-2025.11.3  (where Buildroot output is)
+#   IMAGE_SIZE=9216                       (image size in MB; must exceed the
+#                                          8 GB rootfs + 272 MB boot/A2)
 #   OUTPUT_DIR=~/sdcard-images            (where to save the image)
 #
 # Prerequisites:
-#   - Buildroot built (zImage, DTB, rootfs.ext4, u-boot-spl.sfp, u-boot.img)
-#   - FPGA bitstream (odo_miner.rbf)
-#   - HPS binaries built (odo-miner, fpga_smoke_test, etc.)
-#   - Utilities: parted, losetup, mkfs.vfat, mkfs.ext4, mkimage, rsync
-#   - sudo access (for mount/unmount operations)
+#   - Buildroot built (zImage, socfpga_cyclone5_qmtech_odo.dtb, u-boot-with-spl.sfp,
+#     rootfs.ext4) — see scripts/build-buildroot.sh
+#   - FPGA bitstream (odo_miner.rbf), optional
+#   - HPS binaries built (odo-miner, fpga_smoke_test, etc.), optional
+#   - Utilities: sfdisk, losetup, mkfs.vfat, mkimage, e2fsck, resize2fs
+#   - sudo access (for loop devices and mounts)
 
 set -e
 
@@ -28,15 +37,24 @@ set -e
 # Configuration & Defaults
 # ============================================================================
 
-BUILDROOT_DIR="${BUILDROOT_DIR:-${HOME}/projects/buildroot-2023.11}"
+BUILDROOT_DIR="${BUILDROOT_DIR:-${HOME}/buildroot-2025.11.3}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HPS_BUILD_DIR="$PROJECT_ROOT/hps"
 BITSTREAM_DIR="$PROJECT_ROOT/bitstreams"
-IMAGE_SIZE_MB="${IMAGE_SIZE:-4096}"
+IMAGE_SIZE_MB="${IMAGE_SIZE:-9216}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/sdcard-output}"
 IMAGE_FILE="$OUTPUT_DIR/odo-miner-cyclonev-$(date +%Y%m%d-%H%M%S).img"
 TEMP_BOOT_DIR="/tmp/odo-sdcard-boot-$$"
 TEMP_ROOT_DIR="/tmp/odo-sdcard-root-$$"
+
+DTB_NAME="socfpga_cyclone5_qmtech_odo.dtb"
+
+# Partition geometry (512-byte sectors)
+P1_START=2048      # 1 MiB
+P1_SIZE=524288     # 256 MiB FAT boot
+A2_START=$((P1_START + P1_SIZE))
+A2_SIZE=32768      # 16 MiB raw preloader partition
+P2_START=$((A2_START + A2_SIZE))
 
 # Colors
 RED='\033[0;31m'
@@ -58,15 +76,14 @@ log_step "Validating environment"
 
 if [ ! -d "$BUILDROOT_DIR" ]; then
     log_error "Buildroot directory not found: $BUILDROOT_DIR"
-    log_info "Set BUILDROOT_DIR=/path/to/buildroot-2023.11"
+    log_info "Set BUILDROOT_DIR=/path/to/buildroot-2025.11.3"
     exit 1
 fi
 
 required_files=(
     "$BUILDROOT_DIR/output/images/zImage"
-    "$BUILDROOT_DIR/output/images/socfpga_cyclone5.dtb"
-    "$BUILDROOT_DIR/output/images/u-boot-spl.sfp"
-    "$BUILDROOT_DIR/output/images/u-boot.img"
+    "$BUILDROOT_DIR/output/images/$DTB_NAME"
+    "$BUILDROOT_DIR/output/images/u-boot-with-spl.sfp"
     "$BUILDROOT_DIR/output/images/rootfs.ext4"
 )
 
@@ -78,11 +95,19 @@ for f in "${required_files[@]}"; do
     fi
 done
 
+# The rootfs (plus boot + A2 partitions) must fit in the image
+rootfs_bytes=$(stat -c%s "$BUILDROOT_DIR/output/images/rootfs.ext4")
+min_image_mb=$(( rootfs_bytes / 1024 / 1024 + (P2_START * 512 / 1024 / 1024) + 16 ))
+if [ "$IMAGE_SIZE_MB" -lt "$min_image_mb" ]; then
+    log_error "IMAGE_SIZE=${IMAGE_SIZE_MB}MB too small for rootfs.ext4 (need >= ${min_image_mb}MB)"
+    exit 1
+fi
+
 # Find bitstream (most recent .rbf)
 if [ -d "$BITSTREAM_DIR" ]; then
     BITSTREAM=$(find "$BITSTREAM_DIR" -name "*.rbf" -type f -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)
     if [ -z "$BITSTREAM" ]; then
-        log_warn "No .rbf bitstream found in $BITSTREAM_DIR (will create blank)"
+        log_warn "No .rbf bitstream found in $BITSTREAM_DIR"
         BITSTREAM=""
     fi
 else
@@ -95,6 +120,8 @@ hps_binaries=(
     "$HPS_BUILD_DIR/odo-miner"
     "$HPS_BUILD_DIR/odo-miner-watcher"
     "$HPS_BUILD_DIR/fpga_smoke_test"
+    "$PROJECT_ROOT/sw/odo-ui/odo-ui"
+    "$PROJECT_ROOT/sw/odo-webd/odo-webd"
 )
 
 for b in "${hps_binaries[@]}"; do
@@ -107,14 +134,7 @@ log_info "✓ Buildroot artifacts found"
 [ -n "$BITSTREAM" ] && log_info "✓ FPGA bitstream: $BITSTREAM" || log_warn "⚠ No FPGA bitstream"
 
 # Check tools
-required_tools=(
-    "parted"
-    "losetup"
-    "mkfs.vfat"
-    "mkfs.ext4"
-    "mkimage"
-    "rsync"
-)
+required_tools=(sfdisk losetup mkfs.vfat mkimage e2fsck resize2fs)
 
 for tool in "${required_tools[@]}"; do
     if ! command -v "$tool" &> /dev/null; then
@@ -136,165 +156,133 @@ log_info "Output directory: $OUTPUT_DIR"
 # Step 1: Create Blank Image
 # ============================================================================
 
-log_step "Step 1: Creating blank SD card image (${IMAGE_SIZE_MB}MB)"
+log_step "Step 1: Creating blank SD card image (${IMAGE_SIZE_MB}MB, sparse)"
 
 if [ -f "$IMAGE_FILE" ]; then
     log_error "Image already exists: $IMAGE_FILE"
     exit 1
 fi
 
-dd if=/dev/zero of="$IMAGE_FILE" bs=1M count=$IMAGE_SIZE_MB status=progress
+truncate -s "${IMAGE_SIZE_MB}M" "$IMAGE_FILE"
 log_info "✓ Image created: $IMAGE_FILE"
 
 # ============================================================================
-# Step 2: Partition Image
+# Step 2: Partition Image (FAT boot + ext4 root + raw A2 preloader)
 # ============================================================================
 
 log_step "Step 2: Partitioning image"
 
-parted -s "$IMAGE_FILE" mklabel msdos
-parted -s "$IMAGE_FILE" mkpart primary fat32 1MiB 256MiB
-parted -s "$IMAGE_FILE" mkpart primary ext4 256MiB 100%
-parted -s "$IMAGE_FILE" set 1 boot on
+sfdisk "$IMAGE_FILE" > /dev/null <<EOF
+label: dos
+unit: sectors
 
-log_info "✓ Partitions created (FAT32 boot @ 1-256MB, ext4 root @ 256MB-end)"
+start=$P1_START, size=$P1_SIZE, type=c, bootable
+start=$P2_START, type=83
+start=$A2_START, size=$A2_SIZE, type=a2
+EOF
+
+log_info "✓ Partitions: p1 FAT32 boot (256MiB), p2 ext4 rootfs, p3 raw 0xA2 preloader (16MiB)"
 
 # ============================================================================
-# Step 3: Setup Loop Devices
+# Step 3: Setup Loop Device
 # ============================================================================
 
-log_step "Step 3: Mounting partitions"
+log_step "Step 3: Attaching loop device"
 
-LOOP_DEV=$(losetup -f)
-losetup "$LOOP_DEV" "$IMAGE_FILE"
+LOOP_DEV=$(sudo losetup -f --show -P "$IMAGE_FILE")
 log_info "Loop device: $LOOP_DEV"
-
-# Wait for devices to appear
 sleep 1
 
-if [ ! -e "${LOOP_DEV}p1" ] || [ ! -e "${LOOP_DEV}p2" ]; then
+if [ ! -e "${LOOP_DEV}p1" ] || [ ! -e "${LOOP_DEV}p2" ] || [ ! -e "${LOOP_DEV}p3" ]; then
     log_error "Loop device partitions not created"
-    losetup -d "$LOOP_DEV"
+    sudo losetup -d "$LOOP_DEV"
     exit 1
 fi
 
-# Format partitions
-log_info "Formatting partitions..."
-mkfs.vfat -F 32 -n BOOT "${LOOP_DEV}p1" > /dev/null
-mkfs.ext4 -q -L rootfs "${LOOP_DEV}p2"
-log_info "✓ Partitions formatted"
+cleanup() {
+    sudo umount "$TEMP_BOOT_DIR" "$TEMP_ROOT_DIR" 2>/dev/null || true
+    rmdir "$TEMP_BOOT_DIR" "$TEMP_ROOT_DIR" 2>/dev/null || true
+    sudo losetup -d "$LOOP_DEV" 2>/dev/null || true
+}
+trap cleanup EXIT
 
-# Mount partitions
+# ============================================================================
+# Step 4: Install Bootloader (raw write to the A2 partition)
+# ============================================================================
+
+log_step "Step 4: Installing bootloader (u-boot-with-spl.sfp -> A2 partition)"
+
+sudo dd if="$BUILDROOT_DIR/output/images/u-boot-with-spl.sfp" \
+        of="${LOOP_DEV}p3" bs=64k status=none
+log_info "✓ SPL + U-Boot written raw to ${LOOP_DEV}p3 (type 0xA2)"
+
+# ============================================================================
+# Step 5: Root Filesystem (dd the Buildroot ext4, then grow to partition)
+# ============================================================================
+
+log_step "Step 5: Installing root filesystem"
+
+sudo dd if="$BUILDROOT_DIR/output/images/rootfs.ext4" \
+        of="${LOOP_DEV}p2" bs=4M status=progress
+sudo e2fsck -fy "${LOOP_DEV}p2" > /dev/null || true
+sudo resize2fs "${LOOP_DEV}p2" > /dev/null
+log_info "✓ rootfs.ext4 written and resized to fill partition"
+
+# ============================================================================
+# Step 6: Boot Partition (kernel, DTB, boot script, bitstream)
+# ============================================================================
+
+log_step "Step 6: Populating FAT boot partition"
+
+sudo mkfs.vfat -F 32 -n BOOT "${LOOP_DEV}p1" > /dev/null
 mkdir -p "$TEMP_BOOT_DIR" "$TEMP_ROOT_DIR"
 sudo mount "${LOOP_DEV}p1" "$TEMP_BOOT_DIR"
-sudo mount "${LOOP_DEV}p2" "$TEMP_ROOT_DIR"
-log_info "✓ Partitions mounted"
-log_info "  Boot: $TEMP_BOOT_DIR"
-log_info "  Root: $TEMP_ROOT_DIR"
-
-# ============================================================================
-# Step 4: Copy Bootloader
-# ============================================================================
-
-log_step "Step 4: Installing bootloader"
-
-sudo cp "$BUILDROOT_DIR/output/images/u-boot-spl.sfp" "$TEMP_BOOT_DIR/u-boot-spl.sfp"
-sudo cp "$BUILDROOT_DIR/output/images/u-boot.img" "$TEMP_BOOT_DIR/u-boot.img"
-log_info "✓ U-Boot SPL + bootloader installed"
-
-# ============================================================================
-# Step 5: Copy Kernel & Device Tree
-# ============================================================================
-
-log_step "Step 5: Installing kernel and device tree"
 
 sudo cp "$BUILDROOT_DIR/output/images/zImage" "$TEMP_BOOT_DIR/zImage"
-sudo cp "$BUILDROOT_DIR/output/images/socfpga_cyclone5.dtb" "$TEMP_BOOT_DIR/socfpga_cyclone5.dtb"
+sudo cp "$BUILDROOT_DIR/output/images/$DTB_NAME" "$TEMP_BOOT_DIR/$DTB_NAME"
 log_info "✓ Kernel and DTB installed"
-
-# ============================================================================
-# Step 6: Copy FPGA Bitstream
-# ============================================================================
-
-log_step "Step 6: Installing FPGA bitstream"
 
 if [ -n "$BITSTREAM" ]; then
     sudo cp "$BITSTREAM" "$TEMP_BOOT_DIR/fpga.rbf"
     log_info "✓ FPGA bitstream: $(basename "$BITSTREAM")"
 else
-    log_warn "⚠ No FPGA bitstream; you'll need to load it manually or copy later"
-    log_info "  Copy your .rbf file to: /boot/fpga.rbf on the running system"
+    log_warn "⚠ No FPGA bitstream; copy your .rbf to the FAT partition as fpga.rbf later"
 fi
 
-# ============================================================================
-# Step 7: Create U-Boot Boot Script
-# ============================================================================
-
-log_step "Step 7: Creating U-Boot boot script"
-
-cat > "$TEMP_BOOT_DIR/boot.txt" <<'UBOOT'
-# U-Boot boot script for odo-miner on Cyclone V SoC
-#
-# Sequence:
-# 1. Load FPGA bitstream (optional)
-# 2. Load device tree from FAT
-# 3. Load kernel from FAT
-# 4. Boot kernel with root on /dev/mmcblk0p2
-
+# U-Boot boot script (U-Boot's distro boot finds boot.scr on the FAT partition)
+cat > "/tmp/odo-boot-$$.txt" <<UBOOT
 echo "odo-miner boot script"
 
-# Set kernel boot arguments
-setenv bootargs "root=/dev/mmcblk0p2 rw rootwait earlyprintk console=ttyS0,115200n8 mem=500M"
+setenv bootargs root=/dev/mmcblk0p2 rw rootwait console=ttyS0,115200n8
 
-# Load device tree
-echo "Loading device tree..."
-fatload mmc 0:1 ${fdtaddr_r} socfpga_cyclone5.dtb || goto failed_dtb
-
-# Load kernel
-echo "Loading kernel..."
-fatload mmc 0:1 ${kernel_addr_r} zImage || goto failed_kernel
-
-# Attempt to load FPGA bitstream if present
 if test -e mmc 0:1 fpga.rbf; then
     echo "Loading FPGA bitstream..."
-    fatload mmc 0:1 0x02000000 fpga.rbf
-    fpga load 0 0x02000000 ${filesize}
+    fatload mmc 0:1 0x2000000 fpga.rbf
+    fpga load 0 0x2000000 \${filesize}
+    bridge enable
 fi
 
-# Boot kernel
-echo "Booting kernel..."
-bootz ${kernel_addr_r} - ${fdtaddr_r}
+echo "Loading device tree and kernel..."
+fatload mmc 0:1 \${fdt_addr_r} $DTB_NAME
+fatload mmc 0:1 \${kernel_addr_r} zImage
 
-failed_dtb:
-    echo "ERROR: Failed to load device tree"
-    goto failed
-
-failed_kernel:
-    echo "ERROR: Failed to load kernel"
-    goto failed
-
-failed:
-    echo "Boot failed. Halting."
-    hang
+echo "Booting..."
+bootz \${kernel_addr_r} - \${fdt_addr_r}
 UBOOT
 
-sudo bash -c "mkimage -T script -C none -n 'odo-miner boot' -d '$TEMP_BOOT_DIR/boot.txt' '$TEMP_BOOT_DIR/boot.scr'" > /dev/null
+mkimage -T script -C none -n 'odo-miner boot' \
+        -d "/tmp/odo-boot-$$.txt" "/tmp/odo-boot-$$.scr" > /dev/null
+sudo cp "/tmp/odo-boot-$$.scr" "$TEMP_BOOT_DIR/boot.scr"
+rm -f "/tmp/odo-boot-$$.txt" "/tmp/odo-boot-$$.scr"
 log_info "✓ U-Boot boot script created"
 
 # ============================================================================
-# Step 8: Populate Root Filesystem
+# Step 7: Inject HPS Binaries into the Rootfs
 # ============================================================================
 
-log_step "Step 8: Installing root filesystem"
+log_step "Step 7: Installing HPS miner binaries"
 
-sudo rsync -av "$BUILDROOT_DIR/output/target/" "$TEMP_ROOT_DIR/" > /dev/null
-log_info "✓ Root filesystem installed"
-
-# ============================================================================
-# Step 9: Install HPS Binaries
-# ============================================================================
-
-log_step "Step 9: Installing HPS miner binaries"
+sudo mount "${LOOP_DEV}p2" "$TEMP_ROOT_DIR"
 
 for binary in "${hps_binaries[@]}"; do
     if [ -f "$binary" ]; then
@@ -304,17 +292,14 @@ for binary in "${hps_binaries[@]}"; do
     fi
 done
 
-# Create /home/miner directory
 sudo mkdir -p "$TEMP_ROOT_DIR/home/miner"
 sudo chmod 755 "$TEMP_ROOT_DIR/home/miner"
 
-log_info "✓ Miner binaries installed at /usr/bin/odo-*"
-
 # ============================================================================
-# Step 10: Create Boot Readme
+# Step 8: On-Target Readme
 # ============================================================================
 
-log_step "Step 10: Creating boot documentation"
+log_step "Step 8: Creating on-target documentation"
 
 sudo tee "$TEMP_ROOT_DIR/root/README.md" > /dev/null <<'README'
 # odo-miner Cyclone V SoC
@@ -336,8 +321,6 @@ odo-miner-watcher pool.example.com 3333
 
 ## Environment Variables
 
-Configure behavior via environment variables:
-
 ```bash
 export ODOMIN_NONCE_RANGE=2000000      # nonces per dispatch
 export ODOMIN_POLL_TIMEOUT_MS=3000     # FPGA poll timeout (ms)
@@ -348,73 +331,62 @@ odo-miner pool.example.com 3333
 
 ## Loading FPGA Bitstream
 
-If the bitstream wasn't pre-loaded:
+The boot script loads /boot FAT partition fpga.rbf automatically at U-Boot
+time. To reload from Linux via the FPGA manager:
 
 ```bash
-# Copy your .rbf file to /boot/
-cp odo_miner.rbf /boot/fpga.rbf
-
-# Load it
-fpga load 0 /boot/fpga.rbf
+mount /dev/mmcblk0p1 /mnt
+cp /mnt/fpga.rbf /lib/firmware/
+echo 0 > /sys/class/fpga_manager/fpga0/flags
+echo fpga.rbf > /sys/class/fpga_manager/fpga0/firmware
+cat /sys/class/fpga_manager/fpga0/state   # should say "operating"
 ```
 
 ## Troubleshooting
 
 **FPGA returns 0xFFFFFFFF (not loaded):**
-- Make sure bitstream is loaded via FPGA Manager
-- Check device tree has FPGA Manager enabled
+- Make sure a bitstream is loaded (see above)
+- Bridges must be enabled before register access
 
 **No Ethernet:**
-- Check cable connection
-- Try: `dhclient eth0`
-- Monitor: `ethtool eth0`
+- Check cable; dhcpcd runs automatically
+- Inspect: `ip addr` / `ethtool eth0`
 
-**Miner binary not found:**
-- Binaries are at /usr/bin/odo-*
-- Check: `which odo-miner`
+**WiFi (USB adapter):**
+- `ip link` should show wlan0 once the adapter is plugged in
+- Configure: `wpa_passphrase SSID PASS > /etc/wpa_supplicant.conf`
+  then `wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant.conf && dhcpcd wlan0`
 
 ## Logs
 
 - Kernel: `dmesg`
 - System: `/var/log/messages`
-- Network: `ifconfig` / `ip addr`
 
-## Building/Cross-Compiling
+## Rebuilding the Miner
 
-To rebuild HPS software on the target:
-
-```bash
-# Install build tools (takes space!)
-# Not included by default; run Buildroot with BR2_PACKAGE_MAKE=y
-
-make clean
-make odo-miner
-```
+The rootfs has no compiler — cross-compile on the build host (WSL) with the
+Buildroot toolchain and scp the binary over. See docs/BUILD_LINUX.md in the
+project repository.
 
 ## References
 
 - odo-miner project: https://github.com/MentalCollatz/odo-miner
-- Cyclone V SoC docs: https://www.intel.com/content/www/us/en/programmable/
 - QMTECH board: https://github.com/ChinaQMTECH/QMTECH_CycloneV_SoC
 README
 
-log_info "✓ Boot documentation created"
+log_info "✓ On-target documentation created"
 
 # ============================================================================
-# Step 11: Sync & Unmount
+# Step 9: Sync & Detach
 # ============================================================================
 
-log_step "Step 11: Finalizing image"
+log_step "Step 9: Finalizing image"
 
-log_info "Syncing filesystems..."
 sync
-
-log_info "Unmounting partitions..."
-sudo umount "$TEMP_BOOT_DIR" "$TEMP_ROOT_DIR" 2>/dev/null || true
+sudo umount "$TEMP_BOOT_DIR" "$TEMP_ROOT_DIR"
 rmdir "$TEMP_BOOT_DIR" "$TEMP_ROOT_DIR" 2>/dev/null || true
-
-log_info "Detaching loop device..."
-losetup -d "$LOOP_DEV"
+sudo losetup -d "$LOOP_DEV"
+trap - EXIT
 
 log_info "✓ Image complete and ready"
 
@@ -424,31 +396,22 @@ log_info "✓ Image complete and ready"
 
 log_step "SD Card Image Ready!"
 
-image_size=$(ls -lh "$IMAGE_FILE" | awk '{print $5}')
-log_info "Image file: $IMAGE_FILE ($image_size)"
+image_size=$(du -h "$IMAGE_FILE" | awk '{print $1}')
+log_info "Image file: $IMAGE_FILE ($image_size on disk, sparse)"
 echo
-log_info "Next: Write to SD card"
+log_info "Write to SD card (16 GB or larger):"
 echo
-echo "  Option 1 - Using dd (Linux/WSL):"
-echo "    sudo dd if='$IMAGE_FILE' of=/dev/sdX bs=4M status=progress && sync"
-echo "    (Replace /dev/sdX with your SD card device, e.g., /dev/sdb)"
+echo "  sudo dd if='$IMAGE_FILE' of=/dev/sdX bs=4M status=progress conv=sparse && sync"
+echo "  (Replace /dev/sdX with your SD card device — check with lsblk!)"
 echo
-echo "  Option 2 - Using Etcher (GUI, safer):"
-echo "    Download: https://www.balena.io/etcher/"
-echo "    1. Select image: $IMAGE_FILE"
-echo "    2. Select target: Your SD card"
-echo "    3. Click Flash"
-echo
-echo "  Option 3 - On macOS:"
-echo "    sudo dd if='$IMAGE_FILE' of=/dev/rdiskX bs=4m && sync"
+echo "  Or use Etcher (GUI, safer): https://www.balena.io/etcher/"
 echo
 log_warn "Warning: Make sure to select the correct device! dd can destroy data."
 echo
 log_info "Once written:"
-echo "  1. Insert SD card into QMTECH board"
-echo "  2. Power on (with Ethernet connected)"
-echo "  3. Watch serial console at 115200 baud"
+echo "  1. Insert SD card into QMTECH board, set BSEL jumpers to SD boot"
+echo "  2. Power on (Ethernet connected)"
+echo "  3. Serial console on UART0 at 115200 8N1"
 echo "  4. Login as root:odo-miner"
-echo "  5. Run: fpga_smoke_test  (to test FPGA)"
-echo "  6. Run: odo-miner pool.example.com 3333  (to start mining)"
+echo "  5. Run: fpga_smoke_test"
 echo

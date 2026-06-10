@@ -1,0 +1,25 @@
+# Kernel config fragment: Realtek USB WiFi support on top of multi_v7_defconfig.
+# multi_v7 has cfg80211/mac80211 but no Realtek USB drivers; modules auto-load
+# via udev when the adapter is plugged in.
+
+CONFIG_CFG80211=m
+CONFIG_MAC80211=m
+CONFIG_RFKILL=y
+
+CONFIG_WLAN=y
+CONFIG_WLAN_VENDOR_REALTEK=y
+
+# rtl8xxxu: RTL8188CU/8188EU/8192CU/8192EU/8723AU/8723BU and friends
+# (covers most cheap TP-Link/Edimax/generic nano dongles)
+CONFIG_RTL8XXXU=m
+CONFIG_RTL8XXXU_UNTESTED=y
+
+# Older RTL8187/8187B dongles
+CONFIG_RTL8187=m
+
+# rtw88 USB: RTL8822BU/8822CU/8821CU/8723DU (AC1200-class adapters)
+CONFIG_RTW88=m
+CONFIG_RTW88_8822BU=m
+CONFIG_RTW88_8822CU=m
+CONFIG_RTW88_8821CU=m
+CONFIG_RTW88_8723DU=m

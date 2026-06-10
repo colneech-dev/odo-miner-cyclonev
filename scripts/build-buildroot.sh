@@ -5,19 +5,26 @@
 #   ./scripts/build-buildroot.sh
 #
 # Prerequisites:
-#   - Buildroot 2023.11 installed (download from buildroot.org)
+#   - Buildroot 2025.11.3 installed (download from buildroot.org)
 #   - BUILDROOT_DIR environment variable set, or pass path as arg
+#   - On WSL: Buildroot tree must live on the Linux filesystem (e.g. ~),
+#     NOT under /mnt/c — the kernel build fails on case-insensitive NTFS
 #
 # Example:
-#   BUILDROOT_DIR=~/buildroot-2023.11 ./scripts/build-buildroot.sh
+#   BUILDROOT_DIR=~/buildroot-2025.11.3 ./scripts/build-buildroot.sh
 #   OR
-#   ./scripts/build-buildroot.sh ~/buildroot-2023.11
+#   ./scripts/build-buildroot.sh ~/buildroot-2025.11.3
 
 set -e
+
+# Buildroot refuses to build with spaces in PATH (WSL appends the Windows
+# PATH, which is full of "Program Files" entries) — use a clean one.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Configuration
 BUILDROOT_DIR="${1:-${BUILDROOT_DIR:?'Set BUILDROOT_DIR env var or pass as argument'}}"
 DEFCONFIG_SRC="$(dirname "$0")/../linux/buildroot_cyclonev_defconfig"
+FRAGMENTS_SRC_DIR="$(dirname "$0")/../linux"
 PROJECT_ROOT="$(dirname "$0")/.."
 HPS_BUILD_DIR="$PROJECT_ROOT/hps"
 PARALLEL_JOBS=${PARALLEL_JOBS:-4}
@@ -59,10 +66,26 @@ log_info "HPS source dir: $HPS_BUILD_DIR"
 log_info "Parallel jobs: $PARALLEL_JOBS"
 echo
 
-# Step 1: Copy defconfig to Buildroot
-log_info "Step 1: Installing defconfig..."
+# Warn if building on a Windows-mounted filesystem
+case "$BUILDROOT_DIR" in
+    /mnt/*)
+        log_warn "Buildroot is under /mnt/* (Windows drive)."
+        log_warn "The kernel build WILL fail on case-insensitive NTFS."
+        log_warn "Copy the tree to the Linux filesystem first, e.g. ~/buildroot-2025.11.3"
+        ;;
+esac
+
+# Step 1: Copy defconfig + kernel config fragments + board DTS to Buildroot
+# (the defconfig references all of these by board/qmtech/cyclonev/ path)
+log_info "Step 1: Installing defconfig, kernel fragments, and board DTS..."
 cp "$DEFCONFIG_SRC" "$BUILDROOT_DIR/configs/cyclonev_defconfig"
-log_info "  ✓ Defconfig installed"
+mkdir -p "$BUILDROOT_DIR/board/qmtech/cyclonev"
+cp "$FRAGMENTS_SRC_DIR/linux-wifi.fragment" \
+   "$FRAGMENTS_SRC_DIR/linux-fpga.fragment" \
+   "$FRAGMENTS_SRC_DIR/linux-display.fragment" \
+   "$FRAGMENTS_SRC_DIR/socfpga_cyclone5_qmtech_odo.dts" \
+   "$BUILDROOT_DIR/board/qmtech/cyclonev/"
+log_info "  ✓ Defconfig + 3 kernel fragments + socfpga_cyclone5_qmtech_odo.dts installed"
 
 # Step 1.5: Clean stale configuration
 cd "$BUILDROOT_DIR"
@@ -77,10 +100,11 @@ log_info "  ✓ Configuration loaded"
 
 # Step 3: Show configuration summary
 log_info "Step 3: Configuration summary"
-echo "  Target: ARM Cortex-A9 (Cyclone V SoC)"
-echo "  Kernel: 5.15 LTS with FPGA Manager"
-echo "  U-Boot: 2023.10 with SPL"
-echo "  Rootfs: ext4 (256 MB)"
+echo "  Target:    ARM Cortex-A9 hard-float NEON (Cyclone V SX, 5CSXFC6C6U23)"
+echo "  Toolchain: Bootlin external armv7-eabihf stable (gcc 14.3, glibc 2.41)"
+echo "  Kernel:    6.6.26 LTS (multi_v7 + FPGA manager + Realtek USB WiFi fragments)"
+echo "  U-Boot:    2023.10 with SPL (u-boot-with-spl.sfp)"
+echo "  Rootfs:    ext4 (8 GB)"
 echo
 
 # Step 4: Build
@@ -88,8 +112,10 @@ log_info "Step 4: Starting Buildroot build (this takes 30-90 minutes)..."
 log_warn "  Do not interrupt the build process."
 echo
 
+# Note: the Buildroot top-level make must NOT be given -j; per-package
+# parallelism comes from BR2_JLEVEL in the defconfig.
 start_time=$(date +%s)
-make -j${PARALLEL_JOBS} 2>&1 | tee buildroot-build.log
+make 2>&1 | tee buildroot-build.log
 build_rc=$?
 end_time=$(date +%s)
 build_time=$((end_time - start_time))
@@ -107,9 +133,9 @@ echo
 log_info "Step 5: Verifying build artifacts..."
 outputs=(
     "output/images/zImage"
-    "output/images/socfpga_cyclone5.dtb"
-    "output/images/u-boot-spl.sfp"
-    "output/images/u-boot.img"
+    "output/images/socfpga_cyclone5_socdk.dtb"
+    "output/images/socfpga_cyclone5_qmtech_odo.dtb"
+    "output/images/u-boot-with-spl.sfp"
     "output/images/rootfs.ext4"
 )
 
@@ -136,21 +162,38 @@ cd "$HPS_BUILD_DIR"
 # Clean previous ARM builds (if any)
 make clean > /dev/null 2>&1 || true
 
-# Build with ARM cross-compiler
-export CC=arm-linux-gnueabihf-gcc
-export CXX=arm-linux-gnueabihf-g++
-export CFLAGS="-O2 -march=armv7-a -mthumb"
-export CXXFLAGS="-O2 -march=armv7-a -mthumb"
+# Build with the Buildroot toolchain (matches the target's glibc 2.41 —
+# the Ubuntu arm-linux-gnueabihf toolchain may link against a newer glibc
+# than the rootfs ships)
+CROSS_GCC="$BUILDROOT_DIR/output/host/bin/arm-buildroot-linux-gnueabihf-gcc"
+CROSS_GXX="$BUILDROOT_DIR/output/host/bin/arm-buildroot-linux-gnueabihf-g++"
+if [ ! -x "$CROSS_GCC" ]; then
+    log_warn "  Buildroot toolchain not found at $CROSS_GCC, falling back to system arm-linux-gnueabihf-gcc"
+    CROSS_GCC=arm-linux-gnueabihf-gcc
+    CROSS_GXX=arm-linux-gnueabihf-g++
+fi
+export CC="$CROSS_GCC"
+export CXX="$CROSS_GXX"
+export CFLAGS="-O2 -march=armv7-a -mfpu=neon -mthumb"
+export CXXFLAGS="-O2 -march=armv7-a -mfpu=neon -mthumb"
 
 if make 2>&1 | tee hps-build-arm.log; then
     log_info "  ✓ HPS software built for ARM"
+    # Touch UI + web dashboard (sw/) with the same toolchain
+    for app in odo-ui odo-webd; do
+        if make -C "$HPS_BUILD_DIR/../sw/$app" clean all >> hps-build-arm.log 2>&1; then
+            log_info "  ✓ $app built for ARM"
+        else
+            log_warn "  ⚠ $app build failed (see hps-build-arm.log)"
+        fi
+    done
 
     # List binaries
     echo "  Built binaries:"
     ls -lh odo-miner odo-miner-watcher fpga_smoke_test miner_io_test 2>/dev/null | awk '{print "    " $9 " (" $5 ")"}'
 else
-    log_warn "  ⚠ HPS build failed (might be due to missing arm-linux-gnueabihf toolchain)"
-    log_warn "  Install with: sudo apt-get install arm-linux-gnueabihf-gcc arm-linux-gnueabihf-g++"
+    log_warn "  ⚠ HPS build failed"
+    log_warn "  Check hps-build-arm.log; ensure the Buildroot build completed first"
 fi
 
 echo
@@ -166,7 +209,7 @@ echo "  4. Write to SD card and test on hardware"
 echo
 log_info "Output files:"
 echo "  Kernel:  $BUILDROOT_DIR/output/images/zImage"
-echo "  DTB:     $BUILDROOT_DIR/output/images/socfpga_cyclone5.dtb"
-echo "  Bootloader: $BUILDROOT_DIR/output/images/u-boot-spl.sfp"
+echo "  DTB:     $BUILDROOT_DIR/output/images/socfpga_cyclone5_qmtech_odo.dtb (board) / socfpga_cyclone5_socdk.dtb (fallback)"
+echo "  Bootloader: $BUILDROOT_DIR/output/images/u-boot-with-spl.sfp (raw A2 partition)"
 echo "  Rootfs:  $BUILDROOT_DIR/output/images/rootfs.ext4"
 echo

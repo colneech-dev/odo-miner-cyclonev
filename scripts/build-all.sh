@@ -7,13 +7,16 @@
 #   3. SD card image (bootable image ready to write)
 #
 # Usage (on Linux/WSL with Buildroot installed):
-#   BUILDROOT_DIR=~/buildroot-2023.11 ./scripts/build-all.sh
+#   BUILDROOT_DIR=~/buildroot-2025.11.3 ./scripts/build-all.sh
 #
 # Or with all options:
-#   BUILDROOT_DIR=~/buildroot-2023.11 \
-#   IMAGE_SIZE=4096 \
+#   BUILDROOT_DIR=~/buildroot-2025.11.3 \
+#   IMAGE_SIZE=9216 \
 #   PARALLEL_JOBS=8 \
 #   ./scripts/build-all.sh
+#
+# On WSL the Buildroot tree must live on the Linux filesystem (e.g. ~),
+# NOT under /mnt/c — the kernel build fails on case-insensitive NTFS.
 
 set -e
 
@@ -53,9 +56,10 @@ echo -e "${NC}"
 # Configuration
 # ============================================================================
 
-BUILDROOT_DIR="${BUILDROOT_DIR:?'Error: Set BUILDROOT_DIR=/path/to/buildroot-2023.11'}"
+BUILDROOT_DIR="${BUILDROOT_DIR:?'Error: Set BUILDROOT_DIR=/path/to/buildroot-2025.11.3'}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-4}"
-IMAGE_SIZE="${IMAGE_SIZE:-4096}"
+# 8 GB rootfs + boot/A2 partitions must fit
+IMAGE_SIZE="${IMAGE_SIZE:-9216}"
 
 echo "Configuration:"
 echo "  Buildroot:    $BUILDROOT_DIR"

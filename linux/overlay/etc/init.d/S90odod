@@ -1,0 +1,46 @@
+#!/bin/sh
+# S90odod — start the OdoCrypt FPGA miner daemon (BusyBox init).
+#
+# Configuration: /etc/odod.conf (shell syntax), e.g.
+#   ODOD_POOL_HOST=pool.example.com
+#   ODOD_POOL_PORT=3333
+#   ODOD_WORKER=DGB1yourpayoutaddress.worker1
+#   ODOD_PASSWORD=x
+#   ODO_TESTNET=0
+#
+# The FPGA bitstream and bridges are set up by U-Boot (boot.scr) before
+# Linux starts, so the miner can talk to 0xFF200000 immediately.
+
+DAEMON=/usr/bin/odo-miner
+CONF=/etc/odod.conf
+PIDFILE=/var/run/odod.pid
+
+[ -f "$CONF" ] && . "$CONF"
+
+start() {
+    printf "Starting odo-miner: "
+    mkdir -p /run/odod
+    if [ ! -x "$DAEMON" ]; then
+        echo "MISSING ($DAEMON)"
+        return 1
+    fi
+    export ODO_TESTNET ODO_EPOCH_INTERVAL ODOMIN_NONCE_RANGE ODOMIN_POLL_TIMEOUT_MS
+    start-stop-daemon -S -b -m -p "$PIDFILE" -x "$DAEMON" -- \
+        "${ODOD_POOL_HOST:-127.0.0.1}" "${ODOD_POOL_PORT:-3333}" \
+        "${ODOD_WORKER:-miner}" "${ODOD_PASSWORD:-x}"
+    echo "OK"
+}
+
+stop() {
+    printf "Stopping odo-miner: "
+    start-stop-daemon -K -p "$PIDFILE" 2>/dev/null
+    rm -f "$PIDFILE"
+    echo "OK"
+}
+
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; sleep 1; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

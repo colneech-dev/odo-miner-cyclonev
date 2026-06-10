@@ -1,0 +1,16 @@
+# Kernel config fragment: Cyclone V SoC FPGA support on top of multi_v7_defconfig.
+# multi_v7 has NO CONFIG_FPGA options at all — without these Linux cannot
+# program the fabric (.rbf via /sys/class/fpga_manager) or enable the
+# HPS<->FPGA bridges that the miner daemon uses for register access.
+
+CONFIG_FPGA=y
+CONFIG_FPGA_MGR_SOCFPGA=y
+CONFIG_FPGA_BRIDGE=y
+CONFIG_SOCFPGA_FPGA_BRIDGE=y
+CONFIG_FPGA_REGION=y
+CONFIG_OF_FPGA_REGION=y
+
+# Simple framebuffer for the KFB carrier display path (FPGA frame reader
+# scanning DDR + simple-framebuffer DTS node); ADV7511/7513 bridge driver
+# is already =m in multi_v7. Console on screen once /dev/fb0 exists.
+CONFIG_FB_SIMPLE=y

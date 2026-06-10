@@ -1,0 +1,31 @@
+#!/bin/sh
+# S96odowebd — web dashboard / configuration server on port 80 (BusyBox init).
+# NO AUTHENTICATION — trusted LAN only. Change the port here if 80 clashes.
+
+DAEMON=/usr/bin/odo-webd
+PIDFILE=/var/run/odowebd.pid
+PORT=80
+
+start() {
+    printf "Starting odo-webd: "
+    if [ ! -x "$DAEMON" ]; then
+        echo "MISSING ($DAEMON)"
+        return 1
+    fi
+    start-stop-daemon -S -b -m -p "$PIDFILE" -x "$DAEMON" -- "$PORT"
+    echo "OK (http://<board-ip>:$PORT)"
+}
+
+stop() {
+    printf "Stopping odo-webd: "
+    start-stop-daemon -K -p "$PIDFILE" 2>/dev/null
+    rm -f "$PIDFILE"
+    echo "OK"
+}
+
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; sleep 1; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
