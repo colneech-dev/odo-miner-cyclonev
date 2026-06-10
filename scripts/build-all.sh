@@ -6,6 +6,11 @@
 #   2. Linux rootfs (Buildroot)
 #   3. SD card image (bootable image ready to write)
 #
+# The FPGA bitstream is built separately (Quartus is a Windows install):
+#   run `bash scripts/build-fpga.sh` from Git Bash on Windows first; the
+#   SD card step picks up hdl/quartus/output_files/odo_miner.rbf when it
+#   exists. Epoch changes never require an FPGA rebuild (runtime tables).
+#
 # Usage (on Linux/WSL with Buildroot installed):
 #   BUILDROOT_DIR=~/buildroot-2025.11.3 ./scripts/build-all.sh
 #
