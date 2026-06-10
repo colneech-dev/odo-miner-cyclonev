@@ -98,6 +98,16 @@ log_info "Step 2: Loading configuration..."
 make cyclonev_defconfig > /dev/null
 log_info "  ✓ Configuration loaded"
 
+# Step 2.5: Force the kernel to pick up changed fragments / board DTS.
+# Buildroot does NOT rebuild the kernel config when fragment files or the
+# custom DTS change — only a package dirclean guarantees it. Cheap (~10 min)
+# compared to debugging a stale-config kernel on hardware.
+if [ -d output/build ] && ls -d output/build/linux-* > /dev/null 2>&1; then
+    log_info "Step 2.5: Cleaning kernel package (fragments/DTS changed)..."
+    make linux-dirclean > /dev/null 2>&1 || true
+    log_info "  ✓ linux-dirclean done (kernel will rebuild with new config)"
+fi
+
 # Step 3: Show configuration summary
 log_info "Step 3: Configuration summary"
 echo "  Target:    ARM Cortex-A9 hard-float NEON (Cyclone V SX, 5CSXFC6C6U23)"
