@@ -68,12 +68,16 @@ module odocrypt_epoch_tables (
     localparam TOTAL_WORDS = 5964;
 
     // -------------------------------------------------------------------------
-    // Bank select: bank being loaded vs bank being read by the core
+    // Bank select: bank being loaded vs bank being read by the core.
+    // load_bank MUST be its own register (swapped with active_bank on
+    // commit), NOT `~active_bank`: a combinational complement between the
+    // write-port and read-port address MSBs makes Quartus silently refuse
+    // block-RAM inference for the small S-boxes (~31k registers instead).
     // -------------------------------------------------------------------------
     reg active_bank;
+    reg load_bank;
     reg valid_r;
     assign tables_valid = valid_r;
-    wire load_bank = ~active_bank;
 
     // -------------------------------------------------------------------------
     // Stream write pointer
@@ -171,18 +175,21 @@ module odocrypt_epoch_tables (
     genvar gi;
     generate
         for (gi = 0; gi < 40; gi = gi + 1) begin : sb1_ram
-            // Force M10K implementation. Without a hint (and even with an
-            // MLAB hint — 128 deep exceeds MLAB geometry) Quartus silently
-            // implements these arrays as ~770 registers + read muxes EACH,
-            // blowing the ALM budget. no_rw_check waives the old-data
-            // read-during-write semantics, which is safe: the core is held
-            // in reset during table loads, so RDW never occurs.
+            // The write and the read MUST live in separate always blocks:
+            // an unconditional read in the write block implies strict
+            // old-data read-during-write ordering, which the RAM hardware
+            // cannot honor — Quartus then silently implements the array as
+            // ~770 registers + a 128:1 read mux (≈510 ALMs) per S-box.
+            // Cross-port RDW never actually occurs here (the core is held
+            // in reset during table loads), so no_rw_check is safe.
             (* ramstyle = "M10K, no_rw_check" *) reg [5:0] mem [0:127];
             reg [5:0] q;
             wire we = sb1_we && (sb1_wsel == gi);
             always @(posedge clk) begin
                 if (we)
                     mem[{load_bank, sb1_wentry[5:0]}] <= sb1_wdata;
+            end
+            always @(posedge clk) begin
                 q <= mem[{active_bank, sb1_addr[6*gi +: 6]}];
             end
             assign sb1_q[6*gi +: 6] = q;
@@ -235,6 +242,7 @@ module odocrypt_epoch_tables (
         if (!reset_n) begin
             valid_r     <= 1'b0;
             active_bank <= 1'b0;
+            load_bank   <= 1'b1;
             load_pmask_lo_buf <= 32'd0;
             for (i = 0; i < 2; i = i+1)
                 for (j = 0; j < 6; j = j+1)
@@ -301,7 +309,8 @@ module odocrypt_epoch_tables (
             end
         end else if (commit) begin
             valid_r     <= 1'b1;
-            active_bank <= ~active_bank;
+            active_bank <= load_bank;
+            load_bank   <= active_bank;
         end
     end
 
