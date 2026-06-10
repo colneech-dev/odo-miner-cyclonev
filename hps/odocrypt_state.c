@@ -284,12 +284,13 @@ static void odo_apply_round_key(uint64_t state[ODO_STATE_SIZE], uint16_t rk)
  *   [5930..5935]  Global rotations:  6 words  (6-bit each)
  *   [5936..5963]  Round keys:       28 words  (3 × 10-bit per word)
  * ---------------------------------------------------------------------- */
-int odo_fpga_load_epoch(const odo_epoch_state_t *s, const miner_io_t *io)
+int odo_epoch_stream_words(const odo_epoch_state_t *s, uint32_t *out)
 {
-    if (!s || !io)
+    if (!s || !out)
         return -1;
 
-#define WR(val) reg_wr(io, REG_EPOCH_WR_DATA, (uint32_t)(val))
+    int n = 0;
+#define WR(val) (out[n++] = (uint32_t)(val))
 
     /* Small S-boxes: 4 entries per word, 8-bit each */
     for (int si = 0; si < ODO_SMALL_SBOX_COUNT; si++) {
@@ -346,6 +347,23 @@ int odo_fpga_load_epoch(const odo_epoch_state_t *s, const miner_io_t *io)
     }
 
 #undef WR
+    return n;
+}
+
+int odo_fpga_load_epoch(const odo_epoch_state_t *s, const miner_io_t *io)
+{
+    static uint32_t words[REG_EPOCH_WR_TOTAL];
+
+    if (!s || !io)
+        return -1;
+
+    int n = odo_epoch_stream_words(s, words);
+    if (n != REG_EPOCH_WR_TOTAL)
+        return -1;
+
+    for (int i = 0; i < n; i++)
+        reg_wr(io, REG_EPOCH_WR_DATA, words[i]);
+
     return 0;
 }
 

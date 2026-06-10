@@ -36,6 +36,7 @@ int job_target_from_nbits(job_t *job)
             job->target[i] = (uint8_t)(value & 0xFFu);
             value >>= 8;
         }
+        memcpy(job->share_target, job->target, JOB_TARGET_BYTES);
         return 0;
     }
 
@@ -51,7 +52,39 @@ int job_target_from_nbits(job_t *job)
     job->target[word_shift + 0] = (uint8_t)(mantissa & 0xFFu);
     job->target[word_shift + 1] = (uint8_t)((mantissa >> 8) & 0xFFu);
     job->target[word_shift + 2] = (uint8_t)((mantissa >> 16) & 0xFFu);
+    memcpy(job->share_target, job->target, JOB_TARGET_BYTES);
     return 0;
+}
+
+/*
+ * Convert a Stratum share difficulty to a 256-bit little-endian target.
+ * Same construction as cpuminer's diff_to_target: diff1 target is
+ * 0x00000000FFFF0000...0000 (0xFFFF * 2^208); share target = diff1 / diff.
+ */
+void job_share_target_from_difficulty(job_t *job, double diff)
+{
+    if (!job)
+        return;
+
+    if (diff <= 0.0) {
+        memcpy(job->share_target, job->target, JOB_TARGET_BYTES);
+        return;
+    }
+
+    int k;
+    for (k = 6; k > 0 && diff > 1.0; k--)
+        diff /= 4294967296.0;
+
+    uint64_t m = (uint64_t)(4294901760.0 / diff);  /* 0xFFFF0000 / diff */
+
+    memset(job->share_target, 0, JOB_TARGET_BYTES);
+    if (m == 0 && k == 6) {
+        memset(job->share_target, 0xff, JOB_TARGET_BYTES);
+    } else {
+        /* place m at 32-bit word positions k and k+1 (LE words, LE bytes) */
+        for (int b = 0; b < 8; b++)
+            job->share_target[4 * k + b] = (uint8_t)(m >> (8 * b));
+    }
 }
 
 void job_set_nonce_range(job_t *job, uint32_t start, uint32_t end)

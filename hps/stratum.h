@@ -39,6 +39,11 @@ typedef struct {
     uint8_t extranonce1[32];
     size_t  extranonce1_len;
     int     extranonce2_size;
+    uint64_t extranonce2_counter; /* incremented once per job */
+
+    double   difficulty;     /* last mining.set_difficulty (0 = none yet) */
+    uint32_t odo_interval;   /* OdoCrypt shapechange interval in seconds
+                                (864000 mainnet, 86400 testnet) */
 
     job_t current_job;
     bool  have_job;

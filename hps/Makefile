@@ -68,7 +68,11 @@ miner_io_test: $(MINER_IO_TEST_SRCS)
 # -----------------------------------------------------------------------
 # Algorithm tests
 # -----------------------------------------------------------------------
-.PHONY: test test_upstream check
+.PHONY: test test_upstream check test_units
+
+test_units: test_units.c job.c odocrypt_header.c
+	$(CC) $(CFLAGS) -o $@ $^
+	./test_units
 
 test: test_odo
 	./test_odo

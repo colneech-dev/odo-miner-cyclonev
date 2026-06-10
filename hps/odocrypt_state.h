@@ -79,10 +79,23 @@ void odo_encrypt(const odo_epoch_state_t *state,
                  uint8_t cipher[ODO_DIGEST_SIZE]);
 
 /*
- * OdoCrypt epoch period in blocks (key = block_height / ODO_KEY_PERIOD).
- * Matches the DigiByte network constant.
+ * OdoCrypt epoch key derivation (DigiByte):
+ *   key = ntime - ntime % ODO_EPOCH_INTERVAL
+ * i.e. the block time rounded down to the shapechange interval. The interval
+ * is 10 days on mainnet and 1 day on testnet (see upstream
+ * pool/stratum/header.py odokey_from_ntime).
  */
-#define ODO_KEY_PERIOD  2048u
+#define ODO_EPOCH_INTERVAL_MAINNET  (10u * 24u * 60u * 60u)  /* 864000 */
+#define ODO_EPOCH_INTERVAL_TESTNET  (24u * 60u * 60u)        /*  86400 */
+
+/*
+ * Serialise all epoch tables into the exact 5964-word stream consumed by
+ * odocrypt_epoch_tables.v (same order odo_fpga_load_epoch writes over MMIO).
+ * out must hold REG_EPOCH_WR_TOTAL words. Returns the word count written,
+ * or -1 on bad arguments. Used by the FPGA loader and the RTL testbench
+ * vector generator so both always agree.
+ */
+int odo_epoch_stream_words(const odo_epoch_state_t *state, uint32_t *out);
 
 /*
  * Stream all epoch tables to the FPGA via the REG_EPOCH_WR_DATA register.

@@ -67,10 +67,12 @@ int miner_io_load_epoch(uint32_t epoch_key);
  *
  * header     : 80-byte OdoCrypt block header (nonce field zeroed; FPGA sweeps it).
  * header_len : must be 80.
- * target     : 32-byte big-endian difficulty target, or NULL to accept any hash.
+ * target     : 32-byte little-endian difficulty target (LE uint256, same
+ *              byte order as job_t.share_target), or NULL to accept any hash.
  * nonce_start: first nonce value.
  * nonce_count: number of nonces to sweep (end = start + count - 1).
- * Returns 0 on success.
+ * Returns 0 on success, -EAGAIN if an unread FOUND result is still latched
+ * (caller must consume it via miner_io_check_result first).
  */
 int miner_io_dispatch_job(const uint8_t *header, size_t header_len,
                           const uint8_t *target,
@@ -88,11 +90,24 @@ int miner_io_dispatch_range(const uint8_t *header, size_t header_len,
  * ---------------------------------------------------------------------- */
 
 /*
- * Wait up to timeout_ms for the FPGA to find a qualifying nonce.
+ * Non-blocking result check.
+ *
+ * Returns:
+ *   0         — nonce found; *out_nonce filled; out_hash (32 B) filled if
+ *               non-NULL; FOUND latch cleared.
+ *   1         — core idle, nonce range exhausted without a find.
+ *   EAGAIN    — core still hashing.
+ *   negative  — I/O error.
+ */
+int miner_io_check_result(uint32_t *out_nonce, uint8_t out_hash[32]);
+
+/*
+ * Wait up to timeout_ms for the FPGA to finish.
  *
  * Returns:
  *   0         — nonce found; *out_nonce filled; out_hash (32 B) filled if non-NULL.
- *   ETIMEDOUT — no result in time.
+ *   1         — range exhausted without a find (core idle).
+ *   ETIMEDOUT — core still busy after timeout_ms.
  *   negative  — I/O error.
  *
  * Clears the FOUND latch on success so the next dispatch starts clean.
@@ -108,6 +123,15 @@ int miner_io_poll_result(uint32_t *out_nonce, uint8_t out_hash[32],
 void     miner_io_stop(void);    /* halt hashing (registers preserved) */
 void     miner_io_start(void);   /* resume with current registers */
 uint32_t miner_io_status(void);  /* raw STATUS register value */
+
+/*
+ * Read the FPGA performance counters.
+ * hashes      : total hashes computed since configuration (64-bit)
+ * shares      : FOUND events latched since configuration
+ * uptime_ticks: fabric clock ticks since configuration (wraps at 2^32)
+ * Any pointer may be NULL. Returns 0, or -ENODEV if the bridge is closed.
+ */
+int miner_io_read_perf(uint64_t *hashes, uint32_t *shares, uint32_t *uptime_ticks);
 
 #ifdef __cplusplus
 }

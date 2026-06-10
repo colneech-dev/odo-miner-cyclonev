@@ -268,6 +268,10 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
     char prevhash_hex[68]  = {0};
     char coinb1_hex  [2048] = {0};
     char coinb2_hex  [2048] = {0};
+    /* Row width must match the odocrypt_build_merkle_root() parameter type
+     * (const char [][128]) — passing a narrower array gives a wrong stride. */
+    char branches[32][128];
+    size_t branch_count = 0;
 
     /* Skip the outer '[' */
     while (*p && *p != '[') p++;
@@ -284,8 +288,6 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
     if (!*p) return -1;
     p++; /* skip inner '[' */
 
-    char branches[32][72]; /* 32-byte hashes = 64 hex chars + NUL */
-    size_t branch_count = 0;
     while (*p && *p != ']' && branch_count < 32) {
         if (*p == '"') {
             p++;
@@ -322,10 +324,19 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
     job.version = parse_hex_u32(version_hex);
     job.nbits   = parse_hex_u32(nbits_hex);
     job.ntime   = parse_hex_u32(ntime_hex);
-    /* epoch is block_height/2048; the pool doesn't send height in standard
-     * Stratum — the daemon must supply it separately.  Leave 0 for now. */
-    job.epoch           = 0;
+
+    /* OdoCrypt epoch key: ntime rounded down to the shapechange interval
+     * (upstream pool/stratum/header.py: odokey = ntime - ntime % interval). */
+    job.epoch = job.ntime - (job.ntime % ctx->odo_interval);
+
+    /* Pick a fresh extranonce2 for this job BEFORE building the coinbase so
+     * the merkle root and the submitted value always agree. */
     job.extranonce2_len = (size_t)ctx->extranonce2_size;
+    {
+        uint64_t en2 = ctx->extranonce2_counter++;
+        for (size_t i = 0; i < job.extranonce2_len && i < sizeof(en2); i++)
+            job.extranonce2[i] = (uint8_t)(en2 >> (8 * i));
+    }
 
     /* prevhash: pool sends big-endian, reverse to LE for header construction */
     if (hex_to_bytes(prevhash_hex, job.prevhash, sizeof(job.prevhash))
@@ -363,9 +374,10 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
                                    job.merkle_root) != 0)
         return -1;
 
-    /* Derive 256-bit target from nbits */
+    /* Derive 256-bit network target from nbits, then the pool share target */
     if (job_target_from_nbits(&job) != 0)
         return -1;
+    job_share_target_from_difficulty(&job, ctx->difficulty);
 
     /* Build the 80-byte header template (nonce field zeroed) */
     odocrypt_build_header(&job, job.header);
@@ -376,9 +388,33 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
     if (ctx->state < STRATUM_READY)
         ctx->state = STRATUM_READY;
 
-    fprintf(stderr, "[stratum] job %s nbits=%s ntime=%08x branches=%zu clean=%d\n",
-            job.job_id, nbits_hex, job.ntime, branch_count, job.clean_jobs);
+    fprintf(stderr, "[stratum] job %s nbits=%s ntime=%08x epoch=%u branches=%zu clean=%d\n",
+            job.job_id, nbits_hex, job.ntime, job.epoch, branch_count, job.clean_jobs);
     return 0;
+}
+
+/*
+ * mining.set_difficulty: params = [diff]. Affects the share target of all
+ * subsequent jobs; also retroactively updates a pending unfetched job so a
+ * set_difficulty/notify pair in either order behaves correctly.
+ */
+static void handle_set_difficulty(stratum_ctx_t *ctx, const char *params)
+{
+    const char *p = params;
+    while (*p && *p != '[') p++;
+    if (!*p) return;
+    p++;
+    while (*p == ' ' || *p == '\t') p++;
+
+    char *end = NULL;
+    double diff = strtod(p, &end);
+    if (end == p || diff <= 0.0)
+        return;
+
+    ctx->difficulty = diff;
+    if (ctx->have_job)
+        job_share_target_from_difficulty(&ctx->current_job, diff);
+    fprintf(stderr, "[stratum] difficulty set to %g\n", diff);
 }
 
 static void handle_result(stratum_ctx_t *ctx, const char *line)
@@ -417,6 +453,19 @@ int stratum_init(stratum_ctx_t *ctx,
     ctx->extranonce2_size = 0;
     ctx->have_job = false;
     ctx->next_id = 1;
+    ctx->difficulty = 0.0;
+
+    /* OdoCrypt shapechange interval: 10 days mainnet, 1 day testnet.
+     * Override with ODO_EPOCH_INTERVAL (seconds) or ODO_TESTNET=1. */
+    ctx->odo_interval = 10 * 24 * 60 * 60;
+    {
+        const char *tn = getenv("ODO_TESTNET");
+        const char *iv = getenv("ODO_EPOCH_INTERVAL");
+        if (tn && tn[0] == '1')
+            ctx->odo_interval = 24 * 60 * 60;
+        if (iv && strtoul(iv, NULL, 10) > 0)
+            ctx->odo_interval = (uint32_t)strtoul(iv, NULL, 10);
+    }
     snprintf(ctx->host, sizeof(ctx->host), "%s", host);
     snprintf(ctx->port, sizeof(ctx->port), "%s", port);
     snprintf(ctx->user, sizeof(ctx->user), "%s", user);
@@ -496,6 +545,11 @@ int stratum_poll(stratum_ctx_t *ctx, int timeout_ms)
                     const char *params = find_json_key(line, "params");
                     if (params)
                         handle_notify(ctx, params);
+                } else if (method && *method == '"' &&
+                           strncmp(method, "\"mining.set_difficulty\"", 23) == 0) {
+                    const char *params = find_json_key(line, "params");
+                    if (params)
+                        handle_set_difficulty(ctx, params);
                 } else {
                     handle_result(ctx, line);
                 }
