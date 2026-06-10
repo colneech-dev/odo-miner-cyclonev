@@ -24,7 +24,7 @@ start() {
         echo "MISSING ($DAEMON)"
         return 1
     fi
-    export ODO_TESTNET ODO_EPOCH_INTERVAL ODOMIN_NONCE_RANGE ODOMIN_POLL_TIMEOUT_MS
+    export ODO_TESTNET ODO_EPOCH_INTERVAL ODOMIN_NONCE_RANGE ODOMIN_POLL_TIMEOUT_MS ODOD_WATCHDOG
     start-stop-daemon -S -b -m -p "$PIDFILE" -x "$DAEMON" -- \
         "${ODOD_POOL_HOST:-127.0.0.1}" "${ODOD_POOL_PORT:-3333}" \
         "${ODOD_WORKER:-miner}" "${ODOD_PASSWORD:-x}"
