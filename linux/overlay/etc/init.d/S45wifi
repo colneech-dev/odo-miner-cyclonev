@@ -1,0 +1,47 @@
+#!/bin/sh
+# S45wifi — bring up USB WiFi if configured (BusyBox init).
+#
+# Uses /etc/wpa_supplicant.conf, which is written either by hand or from the
+# web dashboard (odo-webd WiFi form). If the file or the adapter is missing,
+# this script is a no-op — the board keeps working over Ethernet.
+# dhcpcd (master mode) picks up wlan0 automatically once it associates.
+
+CONF=/etc/wpa_supplicant.conf
+IFACE=wlan0
+PIDFILE=/var/run/wpa_supplicant.$IFACE.pid
+
+start() {
+    printf "Starting WiFi: "
+    if [ ! -f "$CONF" ]; then
+        echo "SKIPPED (no $CONF)"
+        return 0
+    fi
+    # USB adapter may enumerate slightly after init; wait briefly
+    n=0
+    while [ ! -d "/sys/class/net/$IFACE" ] && [ $n -lt 10 ]; do
+        sleep 1
+        n=$((n + 1))
+    done
+    if [ ! -d "/sys/class/net/$IFACE" ]; then
+        echo "SKIPPED (no $IFACE adapter)"
+        return 0
+    fi
+    ip link set "$IFACE" up
+    wpa_supplicant -B -i "$IFACE" -c "$CONF" -P "$PIDFILE"
+    echo "OK"
+}
+
+stop() {
+    printf "Stopping WiFi: "
+    [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
+    rm -f "$PIDFILE"
+    killall wpa_supplicant 2>/dev/null
+    echo "OK"
+}
+
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; sleep 1; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

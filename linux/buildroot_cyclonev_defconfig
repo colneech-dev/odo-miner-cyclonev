@@ -1,74 +1,80 @@
-# QMTECH Cyclone V SoC – odo-miner Buildroot defconfig (modernised for 2025.11.x)
+# QMTECH Cyclone V SoC - odo-miner Buildroot defconfig (Buildroot 2025.11.x)
+#
+# Toolchain: Bootlin external armv7-eabihf "stable" = gcc 14.3 + glibc 2.41
+# (internal Buildroot toolchain would build glibc 2.42, which is buggy;
+# external toolchain is also prebuilt, saving ~1h of build time)
 
 # -----------------------------------------------------------------------------
 # CPU Architecture
+# Cortex-A9's FPU is optional in Kconfig: without ENABLE_VFP/ENABLE_NEON the
+# EABIhf option is invisible and silently falls back to soft-float EABI,
+# which in turn hides the Bootlin armv7-eabihf toolchain and python3.
 # -----------------------------------------------------------------------------
 BR2_arm=y
 BR2_cortex_a9=y
 BR2_USE_MMU=y
-BR2_ARM_EABI=y
 BR2_ARM_ENABLE_VFP=y
 BR2_ARM_ENABLE_NEON=y
+BR2_ARM_EABIHF=y
+BR2_ARM_FPU_NEON=y
 BR2_ARM_INSTRUCTIONS_THUMB2=y
-BR2_OPTIMIZE_FOR_BUILD=y
 
 # -----------------------------------------------------------------------------
-# Toolchain (modern unified libc selector)
+# Toolchain (Bootlin external, glibc 2.41)
 # -----------------------------------------------------------------------------
-
-# glibc core selection
-BR2_TOOLCHAIN_BUILDROOT=y
-BR2_TOOLCHAIN_BUILDROOT_LIBC="glibc"
-BR2_TOOLCHAIN_BUILDROOT_CXX=y
-
-# glibc compatibility shims (recommended)
-BR2_TOOLCHAIN_BUILDROOT_GLIBC_USE_COMPAT=y
-
-# glibc utilities (ldconfig, getent, locale, iconv, etc.)
-BR2_PACKAGE_GLIBC_UTILS=y
-
-# glibc gconv modules (charset conversion libraries)
-BR2_PACKAGE_GLIBC_UTILS_GCONV=y
-
-# required for glibc
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV7_EABIHF_GLIBC_STABLE=y
 BR2_SHARED_LIBS=y
-BR2_STATIC_LIBS=n
-BR2_USE_MMU=y
-
+# gconv charset-conversion libraries (copied from toolchain sysroot)
+BR2_TOOLCHAIN_GLIBC_GCONV_LIBS_COPY=y
 
 # -----------------------------------------------------------------------------
-# Linux Kernel (6.6 LTS)
+# Kernel (6.6.26) — headers default to "same as kernel", no explicit config.
+# Fragments: linux-wifi (Realtek USB WiFi), linux-fpga (FPGA manager/bridges),
+# linux-display (fabric SPI TFT + touch + keys/LEDs).
 # -----------------------------------------------------------------------------
 BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.6.26"
 BR2_LINUX_KERNEL_DEFCONFIG="multi_v7"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="board/qmtech/cyclonev/linux-wifi.fragment board/qmtech/cyclonev/linux-fpga.fragment board/qmtech/cyclonev/linux-display.fragment"
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
-BR2_LINUX_KERNEL_INTREE_DTS_NAME="socfpga_cyclone5"
+# Primary DTB: custom QMTECH board DTS (SoCDK base + fabric peripherals).
+# SoCDK DTB is kept as a known-good fallback for bring-up.
+BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="board/qmtech/cyclonev/socfpga_cyclone5_qmtech_odo.dts"
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="intel/socfpga/socfpga_cyclone5_socdk"
 BR2_LINUX_KERNEL_IMAGE_TARGET_CUSTOM=y
 BR2_LINUX_KERNEL_IMAGE_TARGET_NAME="zImage"
 
-# FPGA Manager
-BR2_LINUX_KERNEL_EXT_SOCFPGA=y
-BR2_PACKAGE_LINUX_FIRMWARE=y
-BR2_PACKAGE_LINUX_FIRMWARE_SOCFPGA=y
+# -----------------------------------------------------------------------------
+# Rootfs overlay: BusyBox init scripts (S90odod miner, S95odoui touch panel,
+# S96odowebd web dashboard) and the /etc/odod.conf template.
+# Copied from linux/overlay/ by scripts/build-buildroot.sh.
+# -----------------------------------------------------------------------------
+BR2_ROOTFS_OVERLAY="board/qmtech/cyclonev/overlay"
 
 # -----------------------------------------------------------------------------
-# U-Boot Bootloader
+# U-Boot (Cyclone V BootROM needs the .sfp preloader image, not .bin)
 # -----------------------------------------------------------------------------
 BR2_TARGET_UBOOT=y
 BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
 BR2_TARGET_UBOOT_CUSTOM_VERSION=y
 BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2023.10"
 BR2_TARGET_UBOOT_BOARD_DEFCONFIG="socfpga_cyclone5"
-BR2_UBOOT_SPL=y
+BR2_TARGET_UBOOT_FORMAT_CUSTOM=y
+BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME="u-boot-with-spl.sfp"
 BR2_TARGET_UBOOT_SPL=y
+BR2_TARGET_UBOOT_SPL_NAME="spl/u-boot-spl.sfp"
 
 # -----------------------------------------------------------------------------
-# Root Filesystem
+# Root Filesystem (ext4 = EXT2 builder with the _4 generation choice;
+# BR2_TARGET_ROOTFS_EXT4 does not exist)
 # -----------------------------------------------------------------------------
-BR2_TARGET_ROOTFS_EXT4=y
-BR2_TARGET_ROOTFS_EXT4_SIZE="8G"
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_SIZE="8G"
+BR2_TARGET_ROOTFS_EXT2_LABEL="rootfs"
 
 # -----------------------------------------------------------------------------
 # BusyBox
@@ -85,27 +91,12 @@ BR2_PACKAGE_UTIL_LINUX=y
 BR2_PACKAGE_E2FSPROGS=y
 
 # -----------------------------------------------------------------------------
-# Networking
+# Networking (dhcpcd is the DHCP client; ISC dhcp no longer exists in Buildroot)
 # -----------------------------------------------------------------------------
-BR2_PACKAGE_DHCP=y
 BR2_PACKAGE_DHCPCD=y
 BR2_PACKAGE_OPENSSH=y
-BR2_PACKAGE_OPENSSH_SERVER=y
-BR2_PACKAGE_OPENSSH_CLIENT=y
 BR2_PACKAGE_ETHTOOL=y
 BR2_PACKAGE_NET_TOOLS=y
-
-# -----------------------------------------------------------------------------
-# Development Tools
-# -----------------------------------------------------------------------------
-BR2_PACKAGE_MAKE=y
-BR2_PACKAGE_GIT=y
-BR2_PACKAGE_WGET=y
-BR2_PACKAGE_HTOP=y
-BR2_PACKAGE_LSOF=y
-BR2_PACKAGE_STRACE=y
-BR2_PACKAGE_IPERF3=y
-BR2_PACKAGE_IPERF=y
 
 # -----------------------------------------------------------------------------
 # Performance Monitoring
@@ -117,7 +108,6 @@ BR2_PACKAGE_PSMISC=y
 # Time Sync
 # -----------------------------------------------------------------------------
 BR2_PACKAGE_NTP=y
-BR2_PACKAGE_NTPD=y
 
 # -----------------------------------------------------------------------------
 # Locale & System Settings
@@ -125,7 +115,6 @@ BR2_PACKAGE_NTPD=y
 BR2_GENERATE_LOCALE="en_US"
 BR2_SYSTEM_LOCALE="en_US.UTF-8"
 BR2_SYSTEM_DEFAULT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
 BR2_SYSTEM_HOSTNAME="odo-miner"
 BR2_TARGET_GENERIC_ROOT_PASSWD="odo-miner"
 BR2_TARGET_GENERIC_ISSUE="Welcome to odo-miner (Cyclone V SoC)"
@@ -136,21 +125,11 @@ BR2_TARGET_GENERIC_ISSUE="Welcome to odo-miner (Cyclone V SoC)"
 BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_UDEV=y
 
 # -----------------------------------------------------------------------------
-# Serial Console
+# Serial Console (HPS UART0 = ttyS0)
 # -----------------------------------------------------------------------------
-BR2_PACKAGE_GETTY_AGETTY=y
-BR2_PACKAGE_GETTY_AGETTY_BAUDRATE=115200
-
-# -----------------------------------------------------------------------------
-# Build Tools (on-target)
-# -----------------------------------------------------------------------------
-BR2_PACKAGE_GCC=y
-BR2_PACKAGE_BINUTILS=y
-BR2_PACKAGE_GDB=y
-BR2_PACKAGE_LINUX_HEADERS=y
-BR2_PACKAGE_PKGCONF=y
-BR2_PACKAGE_AUTOCONF=y
-BR2_PACKAGE_AUTOMAKE=y
+BR2_TARGET_GENERIC_GETTY=y
+BR2_TARGET_GENERIC_GETTY_PORT="ttyS0"
+BR2_TARGET_GENERIC_GETTY_BAUDRATE_115200=y
 
 # -----------------------------------------------------------------------------
 # Mining Dependencies
@@ -160,12 +139,13 @@ BR2_PACKAGE_LIBCURL=y
 BR2_PACKAGE_JANSSON=y
 
 # -----------------------------------------------------------------------------
-# System Robustness
+# System Robustness ('watch' comes from procps-ng).
+# supervisor requires python3 — without it Kconfig silently drops supervisor.
 # -----------------------------------------------------------------------------
+BR2_PACKAGE_PYTHON3=y
 BR2_PACKAGE_SUPERVISOR=y
 BR2_PACKAGE_LOGROTATE=y
 BR2_PACKAGE_SYSSTAT=y
-BR2_PACKAGE_WATCH=y
 BR2_PACKAGE_WATCHDOG=y
 
 # -----------------------------------------------------------------------------
@@ -185,22 +165,23 @@ BR2_PACKAGE_MEMTESTER=y
 BR2_PACKAGE_NANO=y
 
 # -----------------------------------------------------------------------------
-# WiFi Support
+# WiFi Support (USB adapter: firmware here, drivers via linux-wifi.fragment)
+# Realtek firmware is per-chip; trim to your dongle's chip once known.
 # -----------------------------------------------------------------------------
-BR2_PACKAGE_LINUX_FIRMWARE_RTLWIFI=y
+BR2_PACKAGE_LINUX_FIRMWARE=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_81XX=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_87XX=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_RTW88=y
 BR2_PACKAGE_WIRELESS_TOOLS=y
 BR2_PACKAGE_WPA_SUPPLICANT=y
-BR2_PACKAGE_WPA_SUPPLICANT_OPENSSL=y
-BR2_PACKAGE_WPA_CLI=y
+BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
+BR2_PACKAGE_WPA_SUPPLICANT_WPA3=y
+BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
+BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y
 
 # -----------------------------------------------------------------------------
 # Build Optimisation
 # -----------------------------------------------------------------------------
 BR2_JLEVEL=8
 BR2_CCACHE=y
-BR2_CCACHE_USE_ENVVAR=y
-
-# -----------------------------------------------------------------------------
-# Use system CMake
-# -----------------------------------------------------------------------------
-BR2_CMAKE=y

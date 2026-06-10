@@ -1,0 +1,33 @@
+#!/bin/sh
+# S95odoui — start the touch status panel on the SPI TFT (BusyBox init).
+
+DAEMON=/usr/bin/odo-ui
+PIDFILE=/var/run/odoui.pid
+
+start() {
+    printf "Starting odo-ui: "
+    if [ ! -e /dev/fb0 ]; then
+        echo "SKIPPED (no /dev/fb0 — display not probed)"
+        return 0
+    fi
+    if [ ! -x "$DAEMON" ]; then
+        echo "MISSING ($DAEMON)"
+        return 1
+    fi
+    start-stop-daemon -S -b -m -p "$PIDFILE" -x "$DAEMON"
+    echo "OK"
+}
+
+stop() {
+    printf "Stopping odo-ui: "
+    start-stop-daemon -K -p "$PIDFILE" 2>/dev/null
+    rm -f "$PIDFILE"
+    echo "OK"
+}
+
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; sleep 1; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

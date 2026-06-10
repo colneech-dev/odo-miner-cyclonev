@@ -1,0 +1,39 @@
+# Kernel config fragment: SPI TFT display + touch on the FPGA fabric.
+# Pairs with linux/socfpga_cyclone5_qmtech_odo.dts.
+#
+# Drivers:
+#   spi-altera-platform : Avalon SPI masters at 0xFF201000/0xFF201100
+#   fbtft / fb_ili9341  : ILI9341 TFT panel as /dev/fb0
+#   ads7846             : XPT2046 resistive touch as /dev/input/event*
+#   gpio-altera         : Avalon PIO blocks (LCD control, keys, LEDs)
+
+# Avalon/fabric peripherals
+CONFIG_SPI=y
+CONFIG_SPI_MASTER=y
+CONFIG_SPI_ALTERA=y
+CONFIG_SPI_ALTERA_CORE=y
+CONFIG_GPIO_ALTERA=y
+
+# Framebuffer + small TFT driver (staging)
+CONFIG_FB=y
+CONFIG_STAGING=y
+CONFIG_FB_TFT=y
+CONFIG_FB_TFT_ILI9341=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y
+CONFIG_FONTS=y
+CONFIG_FONT_8x8=y
+CONFIG_FONT_8x16=y
+
+# Touch input
+CONFIG_INPUT=y
+CONFIG_INPUT_EVDEV=y
+CONFIG_INPUT_TOUCHSCREEN=y
+CONFIG_TOUCHSCREEN_ADS7846=y
+
+# Buttons and LEDs
+CONFIG_KEYBOARD_GPIO=y
+CONFIG_LEDS_CLASS=y
+CONFIG_LEDS_GPIO=y
+CONFIG_LEDS_TRIGGER_HEARTBEAT=y
+CONFIG_LEDS_TRIGGER_NETDEV=y

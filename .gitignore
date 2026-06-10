@@ -65,3 +65,17 @@ hdl/quartus/c5_pin_model_dump.txt
 hdl/quartus/*.sopcinfo
 hdl/quartus/db/
 hdl/quartus/output_files/
+
+# More HPS/UI build artifacts
+hps/odo-miner
+hps/odo-miner-watcher
+hps/miner_io_test
+hps/test_odo
+hps/test_odo_upstream
+hps/test_units
+hps/gen_vectors
+sw/odo-ui/odo-ui
+hdl/tb/*.vvp
+hdl/tb/vec_*/
+hdl/tb/gen_vectors
+sw/odo-webd/odo-webd
