@@ -48,8 +48,9 @@ static uint32_t get_env_u32(const char *var, uint32_t def)
  *   ODOMIN_EPOCH_POLL_S=5
  *   ODOMIN_HEARTBEAT_S=60
  */
-#define NONCE_RANGE_SIZE      1000000u   /* nonces dispatched per batch */
-#define POLL_TIMEOUT_MS       2000u      /* max wait for an FPGA result */
+#define NONCE_RANGE_SIZE      250000u    /* nonces per batch (~few seconds at
+                                            the sequential core's hashrate) */
+#define POLL_TIMEOUT_MS       30000u     /* safety budget for one batch */
 #define EPOCH_POLL_INTERVAL_S 10u        /* how often to check epoch */
 #define HEARTBEAT_INTERVAL_S  30         /* status log interval */
 
@@ -93,6 +94,82 @@ static void sleep_ms_local(unsigned ms)
 static void handle_signal(int sig) { (void)sig; g_terminate = 1; }
 
 /* -----------------------------------------------------------------------
+ * Status export: small JSON snapshot for odo-ui / remote monitoring.
+ * Written atomically (tmp + rename) on every heartbeat.
+ * Path override: ODOD_STATUS_FILE (default /run/odod/status.json).
+ * ---------------------------------------------------------------------- */
+static struct {
+    uint64_t shares_submitted;
+    uint64_t shares_found;
+    time_t   last_share;
+    time_t   started;
+    int      connected;
+    uint32_t epoch_interval;   /* Odo shapechange interval (s) */
+    char     pool[160];
+    char     job_id[64];
+} g_stat;
+
+static void status_write(void)
+{
+    static const char *path;
+    static uint64_t last_hashes;
+    static time_t   last_time;
+    static double   hashrate;
+
+    if (!path) {
+        path = getenv("ODOD_STATUS_FILE");
+        if (!path) path = "/run/odod/status.json";
+    }
+
+    uint64_t hashes = 0;
+    uint32_t fpga_shares = 0;
+    miner_io_read_perf(&hashes, &fpga_shares, NULL);
+
+    time_t now = time(NULL);
+    if (last_time && now > last_time && hashes >= last_hashes)
+        hashrate = (double)(hashes - last_hashes) / (double)(now - last_time);
+    last_hashes = hashes;
+    last_time   = now;
+
+    char tmp[256];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f,
+        "{\n"
+        "  \"pool\": \"%s\",\n"
+        "  \"connected\": %s,\n"
+        "  \"job_id\": \"%s\",\n"
+        "  \"epoch\": %" PRIu32 ",\n"
+        "  \"epoch_interval\": %" PRIu32 ",\n"
+        "  \"epoch_next\": %ld,\n"
+        "  \"hashrate\": %.1f,\n"
+        "  \"hashes_total\": %" PRIu64 ",\n"
+        "  \"shares_found\": %" PRIu64 ",\n"
+        "  \"shares_submitted\": %" PRIu64 ",\n"
+        "  \"last_share\": %ld,\n"
+        "  \"uptime\": %ld,\n"
+        "  \"updated\": %ld\n"
+        "}\n",
+        g_stat.pool,
+        g_stat.connected ? "true" : "false",
+        g_stat.job_id,
+        g_cur_epoch == UINT32_MAX ? 0 : g_cur_epoch,
+        g_stat.epoch_interval,
+        (g_cur_epoch == UINT32_MAX || !g_stat.epoch_interval)
+            ? 0L : (long)g_cur_epoch + (long)g_stat.epoch_interval,
+        hashrate,
+        hashes,
+        g_stat.shares_found,
+        g_stat.shares_submitted,
+        (long)g_stat.last_share,
+        (long)(now - g_stat.started),
+        (long)now);
+    fclose(f);
+    rename(tmp, path);
+}
+
+/* -----------------------------------------------------------------------
  * Epoch getter for epoch_watcher (reads from stratum job / external source)
  * Returns the current epoch based on the job we last processed.
  * A more robust implementation would track block height from the pool.
@@ -107,11 +184,13 @@ static uint32_t epoch_getter(void *ctx)
 }
 
 /* -----------------------------------------------------------------------
- * Target comparison: returns 1 if hash <= target (both big-endian, 32 B)
+ * Target comparison: returns 1 if hash <= target.
+ * Both are little-endian uint256 byte arrays (byte 31 is most significant),
+ * so the comparison walks from the most-significant byte downwards.
  * ---------------------------------------------------------------------- */
 static int target_met(const uint8_t hash[32], const uint8_t target[32])
 {
-    for (int i = 0; i < 32; i++) {
+    for (int i = 31; i >= 0; i--) {
         if (hash[i] < target[i]) return 1;
         if (hash[i] > target[i]) return 0;
     }
@@ -121,14 +200,14 @@ static int target_met(const uint8_t hash[32], const uint8_t target[32])
 /* -----------------------------------------------------------------------
  * Nonce allocator — simple linear counter
  * ---------------------------------------------------------------------- */
-typedef struct { uint32_t next; } nonce_alloc_t;
+typedef struct { uint32_t next; uint32_t range; } nonce_alloc_t;
 
 static void   nonce_init(nonce_alloc_t *a)              { a->next = 0; }
 static uint32_t nonce_get(nonce_alloc_t *a, uint32_t *cnt)
 {
     uint32_t s = a->next;
-    *cnt = NONCE_RANGE_SIZE;
-    uint32_t next = s + NONCE_RANGE_SIZE;
+    *cnt = a->range;
+    uint32_t next = s + a->range;
     if (next < s) {
         log_warn("nonce counter wrapped (searched 0x00000000–0x%08x, restarting)", s);
         a->next = 0;
@@ -167,6 +246,10 @@ int main(int argc, char **argv)
 
     log_info("odo-miner starting (pool=%s:%s worker=%s)", pool_host, pool_port, worker);
 
+    memset(&g_stat, 0, sizeof(g_stat));
+    g_stat.started = time(NULL);
+    snprintf(g_stat.pool, sizeof(g_stat.pool), "%s:%s", pool_host, pool_port);
+
     /* FPGA bridge */
     if (miner_io_init(NULL) != 0) {
         log_error("miner_io_init failed");
@@ -185,9 +268,11 @@ int main(int argc, char **argv)
         log_error("stratum_init failed");
         return 1;
     }
+    g_stat.epoch_interval = st.odo_interval;
 
     nonce_alloc_t alloc;
     nonce_init(&alloc);
+    alloc.range = nonce_range_size > 0 ? nonce_range_size : NONCE_RANGE_SIZE;
     time_t last_hb = time(NULL);
     job_t  job;
     int    have_job = 0;
@@ -199,6 +284,7 @@ int main(int argc, char **argv)
             log_info("heartbeat: epoch=%" PRIu32 " nonce_next=%" PRIu32,
                      g_cur_epoch, alloc.next);
             last_hb = now;
+            status_write();
         }
 
         /* Connect / reconnect */
@@ -208,23 +294,51 @@ int main(int argc, char **argv)
             continue;
         }
         log_info("connected to %s:%s", pool_host, pool_port);
+        g_stat.connected = 1;
+        status_write();
         have_job = 0;
 
-        /* Inner work loop */
+        /* Inner work loop.
+         * State: batch_active tracks whether the FPGA is working on a range.
+         * Stratum is serviced on every iteration so new jobs preempt the
+         * current batch instead of waiting for it to finish. */
+        int    batch_active   = 0;
+        time_t batch_started  = 0;
+
         while (!g_terminate) {
-            int n = stratum_poll(&st, 100 /*ms*/);
+            int n = stratum_poll(&st, batch_active ? 50 : 100 /*ms*/);
             if (n < 0) {
                 log_warn("stratum poll error; reconnecting");
                 break;
             }
 
+            /* Heartbeat + status export (the outer-loop heartbeat only runs
+             * between connections) */
+            now = time(NULL);
+            if (now - last_hb >= heartbeat_interval_s) {
+                log_info("heartbeat: epoch=%" PRIu32 " nonce_next=%" PRIu32,
+                         g_cur_epoch, alloc.next);
+                last_hb = now;
+                status_write();
+            }
+
             /* Check for new job */
             job_t new_job;
             if (stratum_get_job(&st, &new_job)) {
+                int same_gen = have_job && !new_job.clean_jobs &&
+                               strncmp(new_job.job_id, job.job_id,
+                                       sizeof(job.job_id)) == 0;
                 memcpy(&job, &new_job, sizeof(job));
                 have_job = 1;
-                nonce_init(&alloc);  /* reset nonce on clean job */
+                if (!same_gen) {
+                    nonce_init(&alloc);
+                    if (batch_active) {
+                        miner_io_stop();   /* abort stale work */
+                        batch_active = 0;
+                    }
+                }
                 log_info("new job id=%s epoch=%" PRIu32, job.job_id, job.epoch);
+                snprintf(g_stat.job_id, sizeof(g_stat.job_id), "%s", job.job_id);
 
                 /* Update epoch tracking for watcher */
                 pthread_mutex_lock(&g_epoch_lock);
@@ -243,42 +357,70 @@ int main(int argc, char **argv)
                 continue;
             }
 
-            /* Dispatch next nonce batch */
-            uint32_t cnt, start = nonce_get(&alloc, &cnt);
-            if (miner_io_dispatch_job(job.header, sizeof(job.header),
-                                      job.target, start, cnt) != 0) {
-                log_error("dispatch_job failed");
-                sleep(1);
-                continue;
-            }
+            /* Harvest a finished/produced result */
+            if (batch_active) {
+                uint32_t found_nonce;
+                uint8_t  found_hash[32];
+                int rc = miner_io_check_result(&found_nonce, found_hash);
 
-            /* Poll for a result */
-            uint32_t found_nonce;
-            uint8_t  found_hash[32];
-            int rc = miner_io_poll_result(&found_nonce, found_hash, poll_timeout_ms);
-            if (rc == 0) {
-                log_info("found nonce=0x%08" PRIx32, found_nonce);
-                if (target_met(found_hash, job.target)) {
-                    char ntime_hex[16], en2_hex[64];
-                    snprintf(ntime_hex, sizeof(ntime_hex), "%08x", job.ntime);
-                    /* extranonce2 as hex */
-                    for (size_t i = 0; i < job.extranonce2_len && i < 8; i++)
-                        snprintf(en2_hex + i*2, 3, "%02x", job.extranonce2[i]);
-                    en2_hex[job.extranonce2_len * 2] = '\0';
-
-                    if (stratum_submit_share(&st, &job, found_nonce) == 0)
-                        log_info("share submitted (job=%s nonce=0x%08" PRIx32 ")",
-                                 job.job_id, found_nonce);
-                    else
-                        log_warn("stratum_submit_share failed");
+                if (rc == 0) {
+                    batch_active = 0;
+                    log_info("found nonce=0x%08" PRIx32, found_nonce);
+                    g_stat.shares_found++;
+                    g_stat.last_share = time(NULL);
+                    if (target_met(found_hash, job.target))
+                        log_info("*** BLOCK CANDIDATE (meets network target) ***");
+                    if (target_met(found_hash, job.share_target)) {
+                        if (stratum_submit_share(&st, &job, found_nonce) == 0) {
+                            g_stat.shares_submitted++;
+                            log_info("share submitted (job=%s nonce=0x%08" PRIx32 ")",
+                                     job.job_id, found_nonce);
+                        } else
+                            log_warn("stratum_submit_share failed");
+                    } else {
+                        log_info("hash below share target rejected locally; continuing");
+                    }
+                } else if (rc == 1) {
+                    batch_active = 0;   /* range exhausted, dispatch next */
+                } else if (rc == EAGAIN) {
+                    /* Safety net: if a batch runs far beyond expectations,
+                     * reset and move on rather than hanging forever. */
+                    if (poll_timeout_ms &&
+                        time(NULL) - batch_started > (time_t)(poll_timeout_ms / 1000) + 1) {
+                        log_warn("batch overran %u ms; resetting core", poll_timeout_ms);
+                        miner_io_stop();
+                        batch_active = 0;
+                    }
                 } else {
-                    log_info("hash did not meet target; continuing");
+                    log_error("miner_io_check_result failed: %d", rc);
+                    batch_active = 0;
                 }
             }
-            /* ETIMEDOUT or no result — loop and dispatch next range */
+
+            /* Dispatch the next nonce batch */
+            if (!batch_active) {
+                uint32_t cnt, start = nonce_get(&alloc, &cnt);
+                int rc = miner_io_dispatch_job(job.header, sizeof(job.header),
+                                               job.share_target, start, cnt);
+                if (rc == -EAGAIN) {
+                    /* Unread result still latched: mark the batch active so
+                     * the harvest branch above consumes it on the next pass. */
+                    batch_active  = 1;
+                    batch_started = time(NULL);
+                    continue;
+                } else if (rc != 0) {
+                    log_error("dispatch_job failed: %d", rc);
+                    sleep(1);
+                    continue;
+                }
+                batch_active  = 1;
+                batch_started = time(NULL);
+            }
         }
 
         stratum_disconnect(&st);
+        g_stat.connected = 0;
+        status_write();
         if (!g_terminate) sleep(5);
     }
 

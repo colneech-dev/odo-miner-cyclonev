@@ -28,7 +28,8 @@ typedef struct {
     uint32_t ntime;
     uint32_t nbits;
 
-    uint8_t  target[JOB_TARGET_BYTES];
+    uint8_t  target[JOB_TARGET_BYTES];       /* network target from nbits (LE) */
+    uint8_t  share_target[JOB_TARGET_BYTES]; /* pool share target from difficulty (LE) */
     uint8_t  header[JOB_HEADER_BYTES];
 
     uint8_t  extranonce2[JOB_MAX_EXTRANONCE];
@@ -49,6 +50,9 @@ int      job_from_notify(job_t *job,
                          uint32_t epoch,
                          bool clean_jobs);
 int      job_target_from_nbits(job_t *job);
+/* Fill job->share_target from a Stratum difficulty (diff1 = 0xFFFF * 2^208).
+ * diff <= 0 copies the network target instead. Target is little-endian. */
+void     job_share_target_from_difficulty(job_t *job, double diff);
 void     job_set_nonce_range(job_t *job, uint32_t start, uint32_t end);
 bool     job_same(const job_t *a, const job_t *b);
 

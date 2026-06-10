@@ -167,6 +167,11 @@ int miner_io_dispatch_job(const uint8_t *header, size_t header_len,
     if (!g_io.regs) return -ENODEV;
     if (!header || header_len != REG_HEADER_WORDS * 4) return -EINVAL;
 
+    /* Refuse to clobber an unread result: the caller must consume the FOUND
+     * nonce first (miner_io_check_result), otherwise the share is lost. */
+    if (io_rd(REG_STATUS) & STAT_FOUND)
+        return -EAGAIN;
+
     /* Stop any running operation and clear the found latch */
     io_wr(REG_CONTROL, CTRL_RESET);
     io_wr(REG_CONTROL, CTRL_CLEAR_FOUND);
@@ -181,9 +186,11 @@ int miner_io_dispatch_job(const uint8_t *header, size_t header_len,
         io_wr(REG_HEADER_BASE + i * 4, w);
     }
 
-    /* Write 8 target words (32 bytes, big-endian byte order → LE word order).
-     * Our RTL packs target as {reg[7],...,reg[0]} = MSW first in 256-bit value,
-     * so we write the big-endian target bytes directly as LE words. */
+    /* Write 8 target words. The target is a little-endian uint256 (byte 0 =
+     * LSB, as produced by job_target_from_nbits / diff_to_target). TARGET[i]
+     * holds bytes 4i..4i+3 as an LE word, so target_256 in the RTL ends up
+     * with byte 31 as its most-significant byte — matching the byte order of
+     * the Keccak hash it is compared against. */
     for (uint32_t i = 0; i < REG_TARGET_WORDS; i++) {
         uint32_t w = 0;
         if (target) {
@@ -214,15 +221,58 @@ int miner_io_dispatch_range(const uint8_t *header, size_t header_len,
 }
 
 /*
- * miner_io_poll_result — wait for the FPGA to find a valid nonce.
+ * miner_io_check_result — non-blocking result check.
+ *
+ * Returns:
+ *   0        — nonce found; out_nonce/out_hash filled, FOUND latch cleared.
+ *   1        — core idle and no find: the nonce range is exhausted.
+ *   EAGAIN   — core still hashing.
+ *   -ENODEV  — bridge not mapped.
+ *
+ * FOUND is checked before BUSY so a result latched just as the core goes
+ * idle is never missed.
+ */
+int miner_io_check_result(uint32_t *out_nonce, uint8_t out_hash[32])
+{
+    if (!g_io.regs) return -ENODEV;
+    if (!out_nonce) return -EINVAL;
+
+    uint32_t status = io_rd(REG_STATUS);
+
+    if (status & STAT_FOUND) {
+        *out_nonce = io_rd(REG_NONCE_FOUND);
+
+        /* Read 8 × 32-bit hash words from REG_HASH_BASE */
+        if (out_hash) {
+            for (uint32_t i = 0; i < REG_HASH_WORDS; i++) {
+                uint32_t w = io_rd(REG_HASH_BASE + i * 4);
+                out_hash[i*4 + 0] = (uint8_t)(w);
+                out_hash[i*4 + 1] = (uint8_t)(w >>  8);
+                out_hash[i*4 + 2] = (uint8_t)(w >> 16);
+                out_hash[i*4 + 3] = (uint8_t)(w >> 24);
+            }
+        }
+
+        /* Clear found latch for next use */
+        io_wr(REG_CONTROL, CTRL_CLEAR_FOUND);
+        io_wr(REG_CONTROL, 0);
+        return 0;
+    }
+
+    if (!(status & STAT_BUSY))
+        return 1;   /* range exhausted, nothing found */
+
+    return EAGAIN;
+}
+
+/*
+ * miner_io_poll_result — wait for the FPGA to finish the dispatched range.
  *
  * Returns:
  *   0          — valid nonce found; out_nonce and out_hash (32 bytes) filled.
- *   ETIMEDOUT  — no result within timeout_ms milliseconds.
+ *   1          — range exhausted without a find.
+ *   ETIMEDOUT  — core still busy after timeout_ms milliseconds.
  *   -ENODEV    — bridge not mapped.
- *
- * On success the FOUND latch is cleared so the next dispatch starts clean.
- * out_hash receives the 32-byte Keccak hash from REG_HASH_BASE.
  */
 int miner_io_poll_result(uint32_t *out_nonce, uint8_t out_hash[32],
                          uint32_t timeout_ms)
@@ -234,27 +284,9 @@ int miner_io_poll_result(uint32_t *out_nonce, uint8_t out_hash[32],
     uint32_t elapsed = 0;
 
     while (1) {
-        uint32_t status = io_rd(REG_STATUS);
-
-        if (status & STAT_FOUND) {
-            *out_nonce = io_rd(REG_NONCE_FOUND);
-
-            /* Read 8 × 32-bit hash words from REG_HASH_BASE */
-            if (out_hash) {
-                for (uint32_t i = 0; i < REG_HASH_WORDS; i++) {
-                    uint32_t w = io_rd(REG_HASH_BASE + i * 4);
-                    out_hash[i*4 + 0] = (uint8_t)(w);
-                    out_hash[i*4 + 1] = (uint8_t)(w >>  8);
-                    out_hash[i*4 + 2] = (uint8_t)(w >> 16);
-                    out_hash[i*4 + 3] = (uint8_t)(w >> 24);
-                }
-            }
-
-            /* Clear found latch for next use */
-            io_wr(REG_CONTROL, CTRL_CLEAR_FOUND);
-            io_wr(REG_CONTROL, 0);
-            return 0;
-        }
+        int rc = miner_io_check_result(out_nonce, out_hash);
+        if (rc != EAGAIN)
+            return rc;
 
         if (timeout_ms != UINT32_MAX && elapsed >= timeout_ms)
             return ETIMEDOUT;
@@ -282,4 +314,25 @@ void miner_io_start(void)
 uint32_t miner_io_status(void)
 {
     return g_io.regs ? io_rd(REG_STATUS) : 0;
+}
+
+/* Read the performance counters (see miner_io.h) */
+int miner_io_read_perf(uint64_t *hashes, uint32_t *shares, uint32_t *uptime_ticks)
+{
+    if (!g_io.regs) return -ENODEV;
+
+    if (hashes) {
+        /* Read hi twice around lo to catch a carry between the two reads */
+        uint32_t hi1 = io_rd(REG_PERF_HASHES_HI);
+        uint32_t lo  = io_rd(REG_PERF_HASHES_LO);
+        uint32_t hi2 = io_rd(REG_PERF_HASHES_HI);
+        if (hi1 != hi2)
+            lo = io_rd(REG_PERF_HASHES_LO);
+        *hashes = ((uint64_t)hi2 << 32) | lo;
+    }
+    if (shares)
+        *shares = io_rd(REG_PERF_SHARES);
+    if (uptime_ticks)
+        *uptime_ticks = io_rd(REG_PERF_UPTIME);
+    return 0;
 }
