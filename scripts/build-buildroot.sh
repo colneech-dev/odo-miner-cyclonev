@@ -98,6 +98,39 @@ log_info "Step 2: Loading configuration..."
 make cyclonev_defconfig > /dev/null
 log_info "  ✓ Configuration loaded"
 
+# Step 2.2: Optional full clean.
+# Required when the toolchain selection changed since the last build
+# (e.g. internal glibc -> Bootlin external); otherwise incremental is fine.
+# Defaults to NO CLEAN automatically after 30 seconds, so unattended runs
+# proceed without input. Force without prompting: BUILDROOT_FULL_CLEAN=1.
+do_full_clean=0
+if [ "${BUILDROOT_FULL_CLEAN:-0}" = "1" ]; then
+    do_full_clean=1
+    log_info "Step 2.2: Full clean forced via BUILDROOT_FULL_CLEAN=1"
+elif [ -t 0 ]; then
+    echo
+    log_warn "Full 'make clean' rebuilds everything (~60-90 min, needed after a"
+    log_warn "toolchain change). Incremental build is fine for config/package tweaks."
+    ans=""
+    if read -t 30 -r -p "Run full 'make clean' first? [y/N] (auto-continues without clean in 30s) " ans; then
+        :
+    else
+        echo
+        log_info "  No answer in 30 s — continuing WITHOUT full clean"
+    fi
+    case "$ans" in
+        y|Y|yes|YES) do_full_clean=1 ;;
+        *)           do_full_clean=0 ;;
+    esac
+else
+    log_info "Step 2.2: Non-interactive run — skipping full clean (set BUILDROOT_FULL_CLEAN=1 to force)"
+fi
+if [ "$do_full_clean" = "1" ]; then
+    log_info "  Running 'make clean' (download cache and ccache are kept)..."
+    make clean > /dev/null
+    log_info "  ✓ Full clean done"
+fi
+
 # Step 2.5: Force the kernel to pick up changed fragments / board DTS.
 # Buildroot does NOT rebuild the kernel config when fragment files or the
 # custom DTS change — only a package dirclean guarantees it. Cheap (~10 min)
