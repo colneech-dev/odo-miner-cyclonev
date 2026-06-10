@@ -1,17 +1,46 @@
-// soc_top.v — Top-level FPGA module for QMTECH Cyclone V SoC
+// soc_top.v — Top-level FPGA module for QMTECH Cyclone V SoC KFB (dual SDRAM)
 //
 // Instantiates the Platform Designer system (soc_system) which contains:
 //   - HPS with 32-bit single-rank DDR3 (2x MT41K256M16, 1 GB total)
-//   - Lightweight H2F bridge (for future OdoCrypt miner integration)
+//   - Lightweight H2F bridge -> odocrypt_top miner @ 0xFF200000
+//   - SPI masters for ILI9341 TFT (25 MHz) and XPT2046 touch (1.56 MHz)
+//   - PIOs for LCD control, touch IRQ / keys, board LEDs
 //   - Full HPS peripherals (Ethernet, USB, SD, UART, I2C, SPI, GPIO)
 //
-// Board I/O: DDR3 pins are managed entirely by HPS hard memory controller.
-// HPS peripherals route through dedicated HPS I/O banks (not FPGA fabric pins).
+// Display wiring uses the GPIO_0 header (DE10-Nano-compatible ball-out,
+// verified against the QMTECH KFB schematic). The header shares pins with
+// the onboard MiSTer-style SDRAM chips; both SDRAM chip selects are driven
+// high here so the chips stay quiet while the header is used as GPIO.
 
 module soc_top (
     // ---- Board clock & reset ----
     input  wire        CLOCK_50,   // 50 MHz oscillator
     input  wire        RESET_n,    // Active-low board reset
+
+    // ---- SPI TFT display (ILI9341-class, GPIO_0 header) ----
+    output wire        LCD_SCLK,
+    output wire        LCD_MOSI,
+    input  wire        LCD_MISO,
+    output wire        LCD_CS_n,
+    output wire        LCD_DC,     // data/command
+    output wire        LCD_RST_n,
+    output wire        LCD_BL,     // backlight enable
+
+    // ---- SPI touch controller (XPT2046, GPIO_0 header) ----
+    output wire        TP_SCLK,
+    output wire        TP_MOSI,
+    input  wire        TP_MISO,
+    output wire        TP_CS_n,
+    input  wire        TP_IRQ_n,   // pen interrupt, active low
+
+    // ---- User buttons & LEDs ----
+    input  wire        KEY0,
+    input  wire        KEY1,
+    output wire [7:0]  LED,
+
+    // ---- Onboard fabric SDRAM (shares GPIO_0 pins) — held disabled ----
+    output wire        SDRAM_CS0_n,
+    output wire        SDRAM_CS1_n,
 
     // ---- HPS DDR3 SDRAM (auto-assigned by HPS hard memory controller) ----
     output wire [14:0] HPS_DDR3_ADDR,
@@ -70,11 +99,38 @@ module soc_top (
     output wire        HPS_SPIM_SS
 );
 
-    // ---- Platform Designer system (HPS + DDR3 + LW H2F bridge) ----
+    // ---- Keep the onboard fabric SDRAM deselected (GPIO_0 used as GPIO) ----
+    assign SDRAM_CS0_n = 1'b1;
+    assign SDRAM_CS1_n = 1'b1;
+
+    // ---- LCD control PIO bit mapping (bit0=D/C, bit1=RESET_n, bit2=BL) ----
+    wire [2:0] pio_lcd_export;
+    assign LCD_DC    = pio_lcd_export[0];
+    assign LCD_RST_n = pio_lcd_export[1];
+    assign LCD_BL    = pio_lcd_export[2];
+
+    // ---- Platform Designer system (HPS + DDR3 + miner + display SPI) ----
     soc_system u_soc (
         // Clock & reset
         .clk_clk                               (CLOCK_50),
         .reset_reset_n                         (RESET_n),
+
+        // SPI display
+        .spi_lcd_SCLK                          (LCD_SCLK),
+        .spi_lcd_MOSI                          (LCD_MOSI),
+        .spi_lcd_MISO                          (LCD_MISO),
+        .spi_lcd_SS_n                          (LCD_CS_n),
+
+        // SPI touch
+        .spi_touch_SCLK                        (TP_SCLK),
+        .spi_touch_MOSI                        (TP_MOSI),
+        .spi_touch_MISO                        (TP_MISO),
+        .spi_touch_SS_n                        (TP_CS_n),
+
+        // PIOs
+        .pio_lcd_export                        (pio_lcd_export),
+        .pio_in_export                         ({KEY1, KEY0, TP_IRQ_n}),
+        .pio_led_export                        (LED),
 
         // HPS DDR3 (memory conduit — auto-assigned by HPS)
         .memory_mem_a                          (HPS_DDR3_ADDR),

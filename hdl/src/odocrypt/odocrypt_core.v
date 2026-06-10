@@ -1,21 +1,29 @@
-// odocrypt_core.v — Sequential OdoCrypt hash engine
+// odocrypt_core.v — Sequential OdoCrypt hash engine (BRAM S-box edition)
 //
 // Implements the real OdoCrypt hash per upstream odocrypt.cpp:
 //   1. Unpack 80-byte header into 10 × 64-bit words (little-endian), inject nonce
 //   2. PreMix: XOR all words, fold, XOR back
 //   3. 84 rounds: Pbox0 → Sbox → Pbox1 → Rotations → RoundKey
 //   4. Keccak-800 (12 rounds, 25-cycle latency) → 256-bit PoW hash
-//   5. Compare hash ≤ target
+//   5. Compare hash ≤ target (both little-endian uint256)
 //
-// One hash takes: 1 (premix) + 84 (rounds) + 1 (kec feed) + 25 (kec wait) = 111 cycles.
-// Multiple cores can be instantiated in odocrypt_array.v for higher throughput.
+// The S-boxes live in block RAM inside odocrypt_epoch_tables and are read
+// through synchronous ports (1-cycle latency):
+//   - 40 small S-boxes, one port each: all 40 lookups issue in one cycle.
+//   - 10 large S-boxes, two ports each: a word's 4 large lookups take 2
+//     address cycles (chunks 0/1 then 2/3).
 //
-// Epoch tables are provided as flat packed input wires from odocrypt_epoch_tables.
-// If tables_valid is low, the core will not start hashing.
+// Cycle budget per round:
+//   Pbox0: 6 (one subround per cycle)
+//   Sbox : 3 (address, capture 0/1 + address 2/3, capture 2/3)
+//   Pbox1: 6
+//   Mix  : 7 (rotate-copy init, then one global rotation per cycle ×6;
+//             round key applied on the last cycle). Serialised so only 10
+//             64-bit barrel rotators exist instead of 60.
+//   = 22 cycles/round; one hash ≈ 1 + 84*22 + ~60 (keccak, THROUGHPUT=12)
+//   ≈ 1910 cycles ≈ 26 KH/s at 50 MHz. Raise the clock or add cores for more.
 //
 // State encoding: 640 bits = word[9]..word[0], word[i] = state[64*i +: 64]
-
-`define W(state, i) (state)[64*(i) +: 64]
 
 module odocrypt_core (
     input  wire         clk,
@@ -24,18 +32,22 @@ module odocrypt_core (
     input  wire         start,
     input  wire [31:0]  nonce_start,
     input  wire [31:0]  nonce_end,
-    input  wire [639:0] header_words,   // 20 x 32-bit words packed as single 640-bit value
+    input  wire [639:0] header_words,   // 20 x 32-bit words packed
     input  wire [255:0] target,
-    input  wire [31:0]  epoch,         // kept for interface compat; tables supersede it
+    input  wire [31:0]  epoch,          // informational; tables supersede it
 
-    // Epoch tables from odocrypt_epoch_tables
-    input  wire [20479:0]  sbox1_flat,
-    input  wire [163839:0] sbox2_flat,
-    input  wire [38399:0]  pmask_flat,
-    input  wire [299:0]    prot_flat,
-    input  wire [35:0]     rot_flat,
-    input  wire [839:0]    rk_flat,
-    input  wire            tables_valid,
+    // Epoch table interface (odocrypt_epoch_tables)
+    output wire [239:0] sb1_addr,      // 40 × 6-bit small S-box addresses
+    input  wire [239:0] sb1_q,         // 40 × 6-bit results (1-cycle latency)
+    output wire [99:0]  sb2_addr_a,    // 10 × 10-bit large S-box addresses
+    output wire [99:0]  sb2_addr_b,
+    input  wire [99:0]  sb2_q_a,
+    input  wire [99:0]  sb2_q_b,
+    input  wire [38399:0] pmask_flat,
+    input  wire [299:0]   prot_flat,
+    input  wire [35:0]    rot_flat,
+    input  wire [839:0]   rk_flat,
+    input  wire           tables_valid,
 
     output wire         busy,
     output reg          found,
@@ -47,35 +59,66 @@ module odocrypt_core (
     // -------------------------------------------------------------------------
     // FSM states
     // -------------------------------------------------------------------------
-    localparam ST_IDLE      = 3'd0;
-    localparam ST_PREMIX    = 3'd1;
-    localparam ST_ROUND     = 3'd2;
-    localparam ST_KEC_FEED  = 3'd3;
-    localparam ST_KEC_WAIT  = 3'd4;
-    localparam ST_NEXT      = 3'd5;
+    localparam ST_IDLE     = 4'd0;
+    localparam ST_PREMIX   = 4'd1;
+    localparam ST_PBOX     = 4'd2;   // 6 subrounds of pbox[pb_sel]
+    localparam ST_SB_ADDR  = 4'd3;
+    localparam ST_SB_CAP1  = 4'd4;
+    localparam ST_SB_CAP2  = 4'd5;
+    localparam ST_MIX_INIT = 4'd6;
+    localparam ST_MIX      = 4'd7;
+    localparam ST_KEC_FEED = 4'd8;
+    localparam ST_KEC_WAIT = 4'd9;
 
-    reg [2:0]  state;
-    reg [31:0] nonce_cur;
+    reg [3:0]   state;
+    reg [31:0]  nonce_cur;
     reg [639:0] hash_state;
-    reg [6:0]  round_idx;
-    reg [4:0]  kec_cnt;
+    reg [639:0] sbox_acc;     // assembled S-box output (small + large c0/c1)
+    reg [639:0] mix_acc;      // rotation-mix accumulator
+    reg [6:0]   round_idx;
+    reg         pb_sel;       // 0 = pbox0, 1 = pbox1
+    reg [2:0]   pb_sub;       // pbox subround 0..5
+    reg [2:0]   mix_cnt;      // global rotation index 0..5
 
     assign busy = (state != ST_IDLE);
 
     // -------------------------------------------------------------------------
-    // Keccak-800 instance (WIDTH=640, THROUGHPUT=1, latency=25)
+    // Keccak-800 instance. THROUGHPUT=12 instantiates a single round and
+    // iterates it (we only need one hash every ~2k cycles); the core waits
+    // for the write strobe instead of counting a fixed latency.
     // -------------------------------------------------------------------------
     reg          kec_read;
     wire [255:0] keccak_hash;
     wire         keccak_write;
 
-    keccak_hasher #(.WIDTH(640), .THROUGHPUT(1)) keccak_inst (
+    keccak_hasher #(.WIDTH(640), .THROUGHPUT(12)) keccak_inst (
         .clk   (clk),
         .in    (hash_state),
         .read  (kec_read),
         .out   (keccak_hash),
         .write (keccak_write)
     );
+
+    // -------------------------------------------------------------------------
+    // S-box address generation (combinational from hash_state)
+    //   word w, chunk j: small sbox (4w+j) gets bits [16j   +: 6 ]
+    //                    large sbox  w     gets bits [16j+6 +: 10]
+    //   Large ports: chunks 0/1 during ST_SB_ADDR, chunks 2/3 during ST_SB_CAP1.
+    // -------------------------------------------------------------------------
+    genvar gw, gj;
+    generate
+        for (gw = 0; gw < 10; gw = gw + 1) begin : addr_gen
+            for (gj = 0; gj < 4; gj = gj + 1) begin : chunk_gen
+                assign sb1_addr[6*(4*gw+gj) +: 6] = hash_state[64*gw + 16*gj +: 6];
+            end
+            assign sb2_addr_a[10*gw +: 10] = (state == ST_SB_CAP1)
+                ? hash_state[64*gw + 16*2 + 6 +: 10]   // chunk 2
+                : hash_state[64*gw +          6 +: 10]; // chunk 0
+            assign sb2_addr_b[10*gw +: 10] = (state == ST_SB_CAP1)
+                ? hash_state[64*gw + 16*3 + 6 +: 10]   // chunk 3
+                : hash_state[64*gw + 16   + 6 +: 10];  // chunk 1
+        end
+    endgenerate
 
     // -------------------------------------------------------------------------
     // Helper: unpack 80-byte header + inject nonce → 10 × 64-bit words (LE)
@@ -91,8 +134,8 @@ module odocrypt_core (
             // Unpack: word[i] = {hdr[2i+1], hdr[2i]} little-endian
             for (fi = 0; fi < 9; fi = fi + 1)
                 s[64*fi +: 64] = {hdr[32*(2*fi+1) +: 32], hdr[32*(2*fi) +: 32]};
-            // Word 9: bytes 72-75 = hdr[18], bytes 76-79 = nonce
-            s[64*9 +: 64] = {nonce, hdr[18]};
+            // Word 9: bytes 72-75 = header word 18, bytes 76-79 = nonce
+            s[64*9 +: 64] = {nonce, hdr[32*18 +: 32]};
 
             // PreMix
             total = 64'd0;
@@ -118,8 +161,7 @@ module odocrypt_core (
     endfunction
 
     // -------------------------------------------------------------------------
-    // Helper: apply masked swaps to adjacent pairs
-    //   mask_flat[64*k +: 64] = mask for pair k
+    // Helper: masked swaps on adjacent pairs (one pbox subround component)
     // -------------------------------------------------------------------------
     function [639:0] masked_swaps;
         input [639:0] s;
@@ -141,8 +183,6 @@ module odocrypt_core (
     // -------------------------------------------------------------------------
     // Helper: word shuffle with stride 3 (PBOX_M=3, STATE_SIZE=10)
     //   out[3*i % 10] = in[i]
-    //   Precomputed mapping: out[dest] = in[src]
-    //   src→dest: 0→0,1→3,2→6,3→9,4→2,5→5,6→8,7→1,8→4,9→7
     // -------------------------------------------------------------------------
     function [639:0] word_shuffle;
         input [639:0] s;
@@ -163,107 +203,71 @@ module odocrypt_core (
     endfunction
 
     // -------------------------------------------------------------------------
-    // Helper: rotate even-indexed words
-    //   rot_flat[6*k +: 6] = rotation amount for even word 2k
+    // Helper: rotate even-indexed words (pbox subround rotation step)
     // -------------------------------------------------------------------------
     function [639:0] pbox_rotations;
         input [639:0] s;
-        input [29:0]  rot_flat;  // 5 × 6-bit
+        input [29:0]  rots;  // 5 × 6-bit
         integer fi;
         begin
             for (fi = 0; fi < 5; fi = fi + 1)
-                s[64*(2*fi) +: 64] = rot64(s[64*(2*fi) +: 64], rot_flat[6*fi +: 6]);
+                s[64*(2*fi) +: 64] = rot64(s[64*(2*fi) +: 64], rots[6*fi +: 6]);
             pbox_rotations = s;
         end
     endfunction
 
     // -------------------------------------------------------------------------
-    // Helper: one Pbox application (6 subrounds)
-    //   pmask_flat: 6 × 5 × 64-bit = 1920 bits  (subrounds × lanes × 64)
-    //   prot_flat:  5 × 5 × 6-bit  = 150 bits   (5 subrounds with rotations × lanes)
+    // One pbox subround. Subrounds 0..4: swap → shuffle → rotate.
+    // Subround 5: final masked swap only.
+    //   pmask_flat layout: 320 bits per (pbox, subround), pbox0 then pbox1
+    //   prot_flat  layout: 30 bits per (pbox, subround 0..4)
     // -------------------------------------------------------------------------
-    function [639:0] apply_pbox;
-        input [639:0]  s;
-        input [1919:0] pmask_flat;
-        input [149:0]  prot_flat;
-        integer fi;
-        begin
-            for (fi = 0; fi < 5; fi = fi + 1) begin
-                s = masked_swaps(s, pmask_flat[320*fi +: 320]);
-                s = word_shuffle(s);
-                s = pbox_rotations(s, prot_flat[30*fi +: 30]);
-            end
-            // Final masked swap (subround 5, no rotation)
-            s = masked_swaps(s, pmask_flat[320*5 +: 320]);
-            apply_pbox = s;
-        end
-    endfunction
-
-    // -------------------------------------------------------------------------
-    // Helper: S-box substitution
-    //   sbox1: 40 sboxes × 64 × 8-bit; index via sbox1_flat[8*(s*64+e) +: 8]
-    //   sbox2: 10 sboxes × 1024 × 16-bit; index via sbox2_flat[16*(s*1024+e) +: 16]
-    //   Per word: 4 iterations of (6-bit sbox1 + 10-bit sbox2)
-    // -------------------------------------------------------------------------
-    function [639:0] apply_sboxes;
-        input [639:0]   s;
-        input [20479:0] sb1;
-        input [163839:0] sb2;
-        reg [63:0] w, next_w;
-        reg [5:0]  addr1;
-        reg [9:0]  addr2;
-        integer fw, fj, small_idx;
-        begin
-            small_idx = 0;
-            for (fw = 0; fw < 10; fw = fw + 1) begin
-                w      = s[64*fw +: 64];
-                next_w = 64'd0;
-                for (fj = 0; fj < 4; fj = fj + 1) begin
-                    // 6-bit small sbox at bits [5:0] of current 16-bit chunk
-                    addr1 = w[16*fj +: 6];
-                    next_w[16*fj +: 6] = (sb1[8*(small_idx*64 + addr1) +: 8]) & 6'h3F;
-
-                    // 10-bit large sbox at bits [15:6] of current 16-bit chunk
-                    addr2 = w[16*fj+6 +: 10];
-                    next_w[16*fj+6 +: 10] = (sb2[16*(fw*1024 + addr2) +: 16]) & 10'h3FF;
-
-                    small_idx = small_idx + 1;
-                end
-                s[64*fw +: 64] = next_w;
-            end
-            apply_sboxes = s;
-        end
-    endfunction
-
-    // -------------------------------------------------------------------------
-    // Helper: apply rotations mixing step
-    //   rotate array left by 1; each word ^= 6 rotations of the original word
-    //   rot_flat[6*r +: 6] = rotation amount r
-    // -------------------------------------------------------------------------
-    function [639:0] apply_rotations;
+    function [639:0] pbox_subround;
         input [639:0] s;
-        input [35:0]  rot_flat;
-        reg [639:0] next_s;
-        reg [63:0]  orig_w;
-        integer fw, fr;
+        input         sel;       // which pbox
+        input [2:0]   sub;       // subround 0..5
+        reg [319:0] mask;
+        reg [29:0]  rots;
         begin
-            // rotate array left by 1 position
-            for (fw = 0; fw < 9; fw = fw + 1)
-                next_s[64*fw +: 64] = s[64*(fw+1) +: 64];
-            next_s[64*9 +: 64] = s[64*0 +: 64];
-
-            // XOR each next_s[i] with 6 rotations of original s[i]
-            for (fw = 0; fw < 10; fw = fw + 1) begin
-                orig_w = s[64*fw +: 64];
-                for (fr = 0; fr < 6; fr = fr + 1)
-                    next_s[64*fw +: 64] = next_s[64*fw +: 64] ^ rot64(orig_w, rot_flat[6*fr +: 6]);
+            mask = pmask_flat[320*({3'd0, sel}*6 + {1'b0, sub}) +: 320];
+            if (sub == 3'd5) begin
+                pbox_subround = masked_swaps(s, mask);
+            end else begin
+                rots = prot_flat[30*({3'd0, sel}*5 + {1'b0, sub}) +: 30];
+                pbox_subround = pbox_rotations(word_shuffle(masked_swaps(s, mask)), rots);
             end
-            apply_rotations = next_s;
         end
     endfunction
 
     // -------------------------------------------------------------------------
-    // Helper: apply round key (XOR state[i] with bit i of round_key)
+    // Rotation-mix helpers (serialised: one global rotation per cycle so only
+    // 10 barrel rotators exist instead of 60).
+    //   init : acc = state array rotated left by one position
+    //   step : acc[w] ^= rot64(state[w], rotation[mix_cnt])  for all w
+    // -------------------------------------------------------------------------
+    function [639:0] mix_init;
+        input [639:0] s;
+        integer fw;
+        begin
+            for (fw = 0; fw < 9; fw = fw + 1)
+                mix_init[64*fw +: 64] = s[64*(fw+1) +: 64];
+            mix_init[64*9 +: 64] = s[64*0 +: 64];
+        end
+    endfunction
+
+    function [639:0] mix_step;
+        input [639:0] acc;
+        input [639:0] s;
+        input [5:0]   r;
+        integer fw;
+        begin
+            for (fw = 0; fw < 10; fw = fw + 1)
+                mix_step[64*fw +: 64] = acc[64*fw +: 64] ^ rot64(s[64*fw +: 64], r);
+        end
+    endfunction
+
+    // -------------------------------------------------------------------------
+    // Helper: apply round key (XOR state[i] LSB with bit i of round_key)
     // -------------------------------------------------------------------------
     function [639:0] apply_round_key;
         input [639:0] s;
@@ -271,49 +275,57 @@ module odocrypt_core (
         integer fi;
         begin
             for (fi = 0; fi < 10; fi = fi + 1)
-                s[64*fi +: 64] = s[64*fi +: 64] ^ {{63{1'b0}}, rk[fi]};
+                s[64*fi] = s[64*fi] ^ rk[fi];
             apply_round_key = s;
         end
     endfunction
 
     // -------------------------------------------------------------------------
-    // Full round: Pbox0 → Sbox → Pbox1 → Rotations → RoundKey
-    //   pmask_flat layout: [0..1919]=pbox0 masks, [1920..3839]=pbox1 masks
-    //   prot_flat  layout: [0..149]=pbox0 rots,   [150..299]=pbox1 rots
+    // S-box capture merge: final state from acc + large chunks 2/3
     // -------------------------------------------------------------------------
-    function [639:0] apply_round;
-        input [639:0]   s;
-        input [9:0]     rk;
-        input [20479:0] sb1;
-        input [163839:0] sb2;
-        input [38399:0] pmask_flat;
-        input [299:0]   prot_flat;
-        input [35:0]    rot_flat;
+    function [639:0] merge_sbox_final;
+        input [639:0] acc;
+        input [99:0]  qa;   // large chunk 2 per word
+        input [99:0]  qb;   // large chunk 3 per word
+        integer fw;
         begin
-            s = apply_pbox(s, pmask_flat[1919:0],    prot_flat[149:0]);
-            s = apply_sboxes(s, sb1, sb2);
-            s = apply_pbox(s, pmask_flat[3839:1920],  prot_flat[299:150]);
-            s = apply_rotations(s, rot_flat);
-            s = apply_round_key(s, rk);
-            apply_round = s;
+            merge_sbox_final = acc;
+            for (fw = 0; fw < 10; fw = fw + 1) begin
+                merge_sbox_final[64*fw + 16*2 + 6 +: 10] = qa[10*fw +: 10];
+                merge_sbox_final[64*fw + 16*3 + 6 +: 10] = qb[10*fw +: 10];
+            end
         end
     endfunction
 
     // -------------------------------------------------------------------------
+    // Shared datapaths (continuous, so each exists exactly once regardless of
+    // how many FSM branches consume them)
+    // -------------------------------------------------------------------------
+    wire [639:0] mix_stepped = mix_step(mix_acc, hash_state,
+                                        rot_flat[6*mix_cnt +: 6]);
+    wire [639:0] pbox_next   = pbox_subround(hash_state, pb_sel, pb_sub);
+
+    // -------------------------------------------------------------------------
     // Sequential FSM
     // -------------------------------------------------------------------------
+    integer w, j;
+
     always @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            state      <= ST_IDLE;
-            nonce_cur  <= 32'd0;
-            hash_state <= 640'd0;
-            round_idx  <= 7'd0;
-            kec_cnt    <= 5'd0;
-            kec_read   <= 1'b0;
-            found      <= 1'b0;
+            state       <= ST_IDLE;
+            nonce_cur   <= 32'd0;
+            hash_state  <= 640'd0;
+            sbox_acc    <= 640'd0;
+            mix_acc     <= 640'd0;
+            round_idx   <= 7'd0;
+            pb_sel      <= 1'b0;
+            pb_sub      <= 3'd0;
+            mix_cnt     <= 3'd0;
+            kec_read    <= 1'b0;
+            found       <= 1'b0;
             found_nonce <= 32'd0;
-            hash_out   <= 256'd0;
-            hash_valid <= 1'b0;
+            hash_out    <= 256'd0;
+            hash_valid  <= 1'b0;
         end else begin
             kec_read   <= 1'b0;
             hash_valid <= 1'b0;
@@ -330,51 +342,94 @@ module odocrypt_core (
                 ST_PREMIX: begin
                     hash_state <= premix_state(header_words, nonce_cur);
                     round_idx  <= 7'd0;
-                    state      <= ST_ROUND;
+                    pb_sel     <= 1'b0;
+                    pb_sub     <= 3'd0;
+                    state      <= ST_PBOX;
                 end
 
-                ST_ROUND: begin
-                    hash_state <= apply_round(
-                        hash_state,
-                        rk_flat[10*round_idx +: 10],
-                        sbox1_flat, sbox2_flat,
-                        pmask_flat, prot_flat, rot_flat
-                    );
-                    if (round_idx == 7'd83) begin
-                        state <= ST_KEC_FEED;
+                ST_PBOX: begin
+                    hash_state <= pbox_next;
+                    if (pb_sub == 3'd5) begin
+                        pb_sub <= 3'd0;
+                        state  <= pb_sel ? ST_MIX_INIT : ST_SB_ADDR;
                     end else begin
-                        round_idx <= round_idx + 1;
+                        pb_sub <= pb_sub + 3'd1;
+                    end
+                end
+
+                ST_SB_ADDR: begin
+                    // Addresses for small (all) and large chunks 0/1 are on
+                    // the RAM ports this cycle; results register at the edge.
+                    state <= ST_SB_CAP1;
+                end
+
+                ST_SB_CAP1: begin
+                    // Capture small results and large chunks 0/1.
+                    // Large chunk 2/3 addresses are on the ports this cycle.
+                    for (w = 0; w < 10; w = w + 1) begin
+                        for (j = 0; j < 4; j = j + 1)
+                            sbox_acc[64*w + 16*j +: 6] <= sb1_q[6*(4*w+j) +: 6];
+                        sbox_acc[64*w +        6 +: 10] <= sb2_q_a[10*w +: 10];
+                        sbox_acc[64*w + 16   + 6 +: 10] <= sb2_q_b[10*w +: 10];
+                    end
+                    state <= ST_SB_CAP2;
+                end
+
+                ST_SB_CAP2: begin
+                    // Merge large chunks 2/3 and move on to pbox1
+                    hash_state <= merge_sbox_final(sbox_acc, sb2_q_a, sb2_q_b);
+                    pb_sel     <= 1'b1;
+                    pb_sub     <= 3'd0;
+                    state      <= ST_PBOX;
+                end
+
+                ST_MIX_INIT: begin
+                    mix_acc <= mix_init(hash_state);
+                    mix_cnt <= 3'd0;
+                    state   <= ST_MIX;
+                end
+
+                ST_MIX: begin
+                    if (mix_cnt == 3'd5) begin
+                        // last rotation + round key, commit the round
+                        hash_state <= apply_round_key(mix_stepped,
+                                                      rk_flat[10*round_idx +: 10]);
+                        pb_sel <= 1'b0;
+                        pb_sub <= 3'd0;
+                        if (round_idx == 7'd83) begin
+                            state <= ST_KEC_FEED;
+                        end else begin
+                            round_idx <= round_idx + 7'd1;
+                            state     <= ST_PBOX;
+                        end
+                    end else begin
+                        mix_acc <= mix_stepped;
+                        mix_cnt <= mix_cnt + 3'd1;
                     end
                 end
 
                 ST_KEC_FEED: begin
                     kec_read <= 1'b1;          // feed odo_encrypt output to Keccak
-                    kec_cnt  <= 5'd24;         // count down 24 more cycles (25 total)
                     state    <= ST_KEC_WAIT;
                 end
 
                 ST_KEC_WAIT: begin
-                    if (kec_cnt == 5'd0) begin
-                        state <= ST_NEXT;
-                    end else begin
-                        kec_cnt <= kec_cnt - 1;
-                    end
-                end
-
-                ST_NEXT: begin
-                    // keccak_write should be asserted this cycle
-                    hash_out   <= keccak_hash;
-                    hash_valid <= 1'b1;
-                    if (!found && (keccak_hash <= target)) begin
-                        found       <= 1'b1;
-                        found_nonce <= nonce_cur;
-                    end
-
-                    if (nonce_cur == nonce_end || found) begin
-                        state <= ST_IDLE;
-                    end else begin
-                        nonce_cur <= nonce_cur + 1;
-                        state     <= ST_PREMIX;
+                    // 'out' is only guaranteed valid while 'write' is high
+                    // (the iterated permutation keeps running afterwards), so
+                    // capture and compare in this very cycle.
+                    if (keccak_write) begin
+                        hash_out   <= keccak_hash;
+                        hash_valid <= 1'b1;
+                        if (!found && (keccak_hash <= target)) begin
+                            found       <= 1'b1;
+                            found_nonce <= nonce_cur;
+                            state       <= ST_IDLE;   // stop on first find
+                        end else if (nonce_cur == nonce_end) begin
+                            state <= ST_IDLE;         // range exhausted
+                        end else begin
+                            nonce_cur <= nonce_cur + 32'd1;
+                            state     <= ST_PREMIX;
+                        end
                     end
                 end
 
