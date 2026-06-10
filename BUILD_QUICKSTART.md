@@ -1,5 +1,11 @@
 # Quick Start: Build Everything for Hardware
 
+> **Starting from a completely blank PC?** Use
+> [docs/SETUP_FROM_SCRATCH.md](docs/SETUP_FROM_SCRATCH.md) — it covers the
+> Windows side too (Quartus install, FPGA bitstream, simulator, display
+> wiring, first boot). This page is the fast path for the Linux/SD-card
+> portion once tools are installed.
+
 This is the fastest path from zero to a bootable SD card. Total time: **~2 hours** (mostly waiting for Buildroot).
 
 ## Prerequisites (One-Time Setup)
