@@ -81,24 +81,30 @@ module odocrypt_top (
     wire        core_reset_n;
     wire        core_busy;
     wire        core_found;
+    reg         core_found_d;
     wire [31:0] core_found_nonce;
     wire [255:0] core_hash;
     wire        core_hash_valid;
 
     // Epoch table wires from odocrypt_epoch_tables
-    wire [20479:0]  et_sbox1;
-    wire [163839:0] et_sbox2;
-    wire [38399:0]  et_pmask;
-    wire [299:0]    et_prot;
-    wire [35:0]     et_rot;
-    wire [839:0]    et_rk;
-    wire            et_tables_valid;
+    wire [239:0]  et_sb1_addr, et_sb1_q;
+    wire [99:0]   et_sb2_addr_a, et_sb2_addr_b, et_sb2_q_a, et_sb2_q_b;
+    wire [38399:0] et_pmask;
+    wire [299:0]   et_prot;
+    wire [35:0]    et_rot;
+    wire [839:0]   et_rk;
+    wire           et_tables_valid;
+    wire           et_wr_busy;
 
     // Epoch table write strobes (combinatorial from Avalon write decode)
     reg  et_wr_en;
+    reg  et_wr_reset;
     reg  et_commit;
 
-    assign avs_waitrequest = 1'b0;
+    // Stall stream writes while the table loader is unpacking the previous
+    // word (multi-entry S-box words take up to 4 cycles to store).
+    assign avs_waitrequest = avs_write && (avs_address == ADDR_EPOCH_WR_DATA)
+                                       && et_wr_busy;
     assign core_reset_n = reset_n & ~control_reg[1];
     assign epoch_value = epoch_reg;
     assign version_reg = 32'h0001_0000;  // Version 1.0
@@ -129,9 +135,15 @@ module odocrypt_top (
         .reset_n      (reset_n),
         .wr_en        (et_wr_en),
         .wr_data      (avs_writedata),
+        .wr_reset     (et_wr_reset),
         .commit       (et_commit),
-        .sbox1_out    (et_sbox1),
-        .sbox2_out    (et_sbox2),
+        .wr_busy      (et_wr_busy),
+        .sb1_addr     (et_sb1_addr),
+        .sb1_q        (et_sb1_q),
+        .sb2_addr_a   (et_sb2_addr_a),
+        .sb2_addr_b   (et_sb2_addr_b),
+        .sb2_q_a      (et_sb2_q_a),
+        .sb2_q_b      (et_sb2_q_b),
         .pmask_out    (et_pmask),
         .prot_out     (et_prot),
         .rot_out      (et_rot),
@@ -152,8 +164,12 @@ module odocrypt_top (
         .header_words (header_reg),
         .target       (target_256),
         .epoch        (epoch_value),
-        .sbox1_flat   (et_sbox1),
-        .sbox2_flat   (et_sbox2),
+        .sb1_addr     (et_sb1_addr),
+        .sb1_q        (et_sb1_q),
+        .sb2_addr_a   (et_sb2_addr_a),
+        .sb2_addr_b   (et_sb2_addr_b),
+        .sb2_q_a      (et_sb2_q_a),
+        .sb2_q_b      (et_sb2_q_b),
         .pmask_flat   (et_pmask),
         .prot_flat    (et_prot),
         .rot_flat     (et_rot),
@@ -170,8 +186,9 @@ module odocrypt_top (
     // Epoch write strobes: combinatorial decode from Avalon write
     // -------------------------------------------------------------------------
     always @(*) begin
-        et_wr_en  = avs_write && (avs_address == ADDR_EPOCH_WR_DATA);
-        et_commit = avs_write && (avs_address == ADDR_EPOCH_COMMIT);
+        et_wr_en    = avs_write && (avs_address == ADDR_EPOCH_WR_DATA);
+        et_wr_reset = avs_write && (avs_address == ADDR_EPOCH_WR_RESET);
+        et_commit   = avs_write && (avs_address == ADDR_EPOCH_COMMIT);
     end
 
     // -------------------------------------------------------------------------
@@ -185,6 +202,7 @@ module odocrypt_top (
             nonce_start_reg  <= 32'h0000_0000;
             nonce_end_reg    <= 32'h0000_0000;
             found_latched    <= 1'b0;
+            core_found_d     <= 1'b0;
             found_nonce_reg  <= 32'h0000_0000;
             perf_hashes_lo   <= 32'h0000_0000;
             perf_hashes_hi   <= 32'h0000_0000;
@@ -261,7 +279,11 @@ module odocrypt_top (
                     hash_reg[32*i +: 32] <= core_hash[32*i +: 32];
             end
 
-            if (core_found && !found_latched) begin
+            // Latch on the rising edge of core_found only. Latching on level
+            // would re-arm immediately after CTRL_CLEAR_FOUND while the core
+            // still holds found high, double-counting shares.
+            core_found_d <= core_found;
+            if (core_found && !core_found_d) begin
                 found_latched   <= 1'b1;
                 found_nonce_reg <= core_found_nonce;
                 perf_shares     <= perf_shares + 1;
