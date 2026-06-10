@@ -40,6 +40,7 @@
 #define STATUS_PATH "/run/odod/status.json"
 #define CONF_PATH   "/etc/odod.conf"
 #define WPA_CONF    "/etc/wpa_supplicant.conf"
+#define CUSTOM_PAGE "/etc/odo-web/index.html"   /* overrides the built-in page */
 #define MINER_RESTART_CMD "/etc/init.d/S90odod restart >/dev/null 2>&1 &"
 #define WIFI_RESTART_CMD  "/etc/init.d/S45wifi restart >/dev/null 2>&1 &"
 
@@ -50,28 +51,36 @@ static const char PAGE[] =
 "<!DOCTYPE html><html><head><meta charset='utf-8'>"
 "<meta name='viewport' content='width=device-width,initial-scale=1'>"
 "<title>odo-miner</title><style>"
-"body{font-family:system-ui,sans-serif;background:#0d1020;color:#dde2f0;"
+"body{font-family:system-ui,sans-serif;background:#0a1228;color:#e2e8f6;"
 "margin:0;padding:16px;max-width:560px;margin-inline:auto}"
-"h1{font-size:20px;color:#6aa8ff;margin:8px 0 16px}"
-"h1 small{color:#7c8499;font-weight:400;font-size:13px;margin-left:8px}"
-".card{background:#181e34;border-radius:10px;padding:14px 16px;margin-bottom:14px}"
-".big{font-size:34px;font-weight:600;margin:2px 0 8px}"
+"h1{font-size:21px;color:#e2e8f6;margin:8px 0 16px;display:flex;align-items:center;gap:10px}"
+"h1 small{color:#7684a8;font-weight:400;font-size:13px;margin-left:4px}"
+".card{background:#121f44;border:1px solid #1d2f63;border-radius:10px;"
+"padding:14px 16px;margin-bottom:14px}"
+".big{font-size:34px;font-weight:600;margin:2px 0 8px;color:#38c8f0}"
 ".row{display:flex;justify-content:space-between;padding:3px 0;font-size:14px}"
-".row span:first-child{color:#7c8499}"
+".row span:first-child{color:#7684a8}"
 ".chip{padding:2px 10px;border-radius:10px;font-size:12px;font-weight:600}"
 ".ok{background:#15402a;color:#52d68a}.warn{background:#4a3a12;color:#f0b43c}"
 ".bad{background:#491b1b;color:#f07878}"
-"label{display:block;color:#7c8499;font-size:12px;margin:10px 0 2px}"
+"label{display:block;color:#7684a8;font-size:12px;margin:10px 0 2px}"
 "input[type=text],input[type=password]{width:100%;box-sizing:border-box;"
-"background:#0d1020;color:#dde2f0;border:1px solid #2c3550;border-radius:6px;"
+"background:#0a1228;color:#e2e8f6;border:1px solid #24386f;border-radius:6px;"
 "padding:8px;font-size:14px}"
-"button{background:#2a4d8f;color:#fff;border:0;border-radius:6px;padding:10px 16px;"
+"button{background:#2d7ff0;color:#fff;border:0;border-radius:6px;padding:10px 16px;"
 "font-size:14px;margin:12px 8px 0 0;cursor:pointer}"
-"button.danger{background:#8f2a2a}"
-"#bar{height:6px;border-radius:3px;background:#2c3550;margin-top:6px}"
-"#barfill{height:6px;border-radius:3px;background:#6aa8ff;width:0%}"
+"button:hover{background:#1f66cc}"
+"button.danger{background:#a32d2d}"
+"#bar{height:6px;border-radius:3px;background:#1d2f63;margin-top:6px}"
+"#barfill{height:6px;border-radius:3px;background:#38c8f0;width:0%}"
 "</style></head><body>"
-"<h1>odo-miner<small id='host'></small></h1>"
+"<h1>"
+"<svg width='30' height='32' viewBox='0 0 100 110'>"
+"<path d='M50 4 L8 18 V58 C8 84 28 100 50 108 C72 100 92 84 92 58 V18 Z' fill='#11279b'/>"
+"<path d='M50 4 L8 18 V52 L92 30 V18 Z' fill='#2d7ff0'/>"
+"<path d='M4 60 L96 34 L96 42 L4 70 Z' fill='#fff'/>"
+"</svg>"
+"ODO MINER<small id='host'></small></h1>"
 "<div class='card'>"
 "<div class='row'><span>Pool connection</span><span class='chip warn' id='conn'>...</span></div>"
 "<div class='big' id='rate'>-</div>"
@@ -110,6 +119,8 @@ static const char PAGE[] =
 "<label>Port</label><input type='text' name='port' id='c_port'>"
 "<label>Worker / payout address</label><input type='text' name='worker' id='c_worker'>"
 "<label>Password</label><input type='password' name='pass' value='x'>"
+"<label>Backup pool host (optional)</label><input type='text' name='host2'>"
+"<label>Backup pool port</label><input type='text' name='port2'>"
 "<label><input type='checkbox' name='testnet' value='1' style='width:auto'> testnet (1-day epochs)</label>"
 "<button type='submit' onclick='return confirm(\"Save config and restart the miner?\")'>Save &amp; restart miner</button>"
 "</form>"
@@ -389,15 +400,19 @@ static int value_safe(const char *s)
 static void handle_config(int fd, const char *body)
 {
     char host[128], port[16], worker[160], pass[64], testnet[8];
+    char host2[128], port2[16];
     form_get(body, "host", host, sizeof(host));
     form_get(body, "port", port, sizeof(port));
     form_get(body, "worker", worker, sizeof(worker));
     form_get(body, "pass", pass, sizeof(pass));
     form_get(body, "testnet", testnet, sizeof(testnet));
+    form_get(body, "host2", host2, sizeof(host2));
+    form_get(body, "port2", port2, sizeof(port2));
 
     if (!host[0] || !port[0] || !worker[0] ||
         !value_safe(host) || !value_safe(port) ||
-        !value_safe(worker) || !value_safe(pass)) {
+        !value_safe(worker) || !value_safe(pass) ||
+        !value_safe(host2) || !value_safe(port2)) {
         send_response(fd, "400 Bad Request", "text/plain",
                       "invalid characters in form values\n", 33);
         return;
@@ -411,9 +426,11 @@ static void handle_config(int fd, const char *body)
     fprintf(f,
         "# written by odo-webd\n"
         "ODOD_POOL_HOST=%s\nODOD_POOL_PORT=%s\n"
-        "ODOD_WORKER=%s\nODOD_PASSWORD=%s\nODO_TESTNET=%s\n",
+        "ODOD_WORKER=%s\nODOD_PASSWORD=%s\nODO_TESTNET=%s\n"
+        "ODOD_POOL_HOST2=%s\nODOD_POOL_PORT2=%s\n",
         host, port, worker, pass[0] ? pass : "x",
-        testnet[0] == '1' ? "1" : "0");
+        testnet[0] == '1' ? "1" : "0",
+        host2, port2);
     fclose(f);
     rename(CONF_PATH ".tmp", CONF_PATH);
 
@@ -550,7 +567,18 @@ int main(int argc, char **argv)
         }
 
         if (strncmp(req, "GET / ", 6) == 0) {
-            send_response(fd, "200 OK", "text/html", PAGE, sizeof(PAGE) - 1);
+            /* A customised page at /etc/odo-web/index.html wins over the
+             * built-in one — restyle without recompiling. To start from the
+             * built-in: curl -s localhost > /etc/odo-web/index.html */
+            FILE *pf = fopen(CUSTOM_PAGE, "r");
+            if (pf) {
+                static char page_buf[65536];
+                size_t pn = fread(page_buf, 1, sizeof(page_buf) - 1, pf);
+                fclose(pf);
+                send_response(fd, "200 OK", "text/html", page_buf, pn);
+            } else {
+                send_response(fd, "200 OK", "text/html", PAGE, sizeof(PAGE) - 1);
+            }
         } else if (strncmp(req, "GET /status.json", 16) == 0) {
             serve_file(fd, STATUS_PATH, "application/json");
         } else if (strncmp(req, "GET /sysinfo.json", 17) == 0) {
