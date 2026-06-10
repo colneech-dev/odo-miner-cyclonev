@@ -32,36 +32,50 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 - `scripts/` — build and deployment helpers
 - `services/` — init/service unit files
 
-## Current status
+## Current status (2026-06-10)
 
-- The FPGA RTL now includes `hdl/src/odocrypt_top.v` as the Avalon-MM register wrapper.
-- The mining core has a single-core 84-round pipeline in `hdl/src/odocrypt_compress.v` and `hdl/src/odocrypt_round.v`.
-- `hdl/src/odocrypt_core.v` implements a job FSM, runtime nonce injection, header-folding state builder, target compare, and hash capture.
-- Epoch-dependent round constants are generated in `hdl/src/odocrypt_epoch_mutator.v`.
-- The HPS software already streams the 80-byte job header, target, and epoch into the FPGA registers.
-
-## Recent progress
-
-- Added a stronger initial-state mixer for header+nonce/epoch in `hdl/src/odocrypt_core.v`.
-- Expanded the nonlinear DSP layer in `hdl/src/odocrypt_sbox_dsp.v` for richer FPGA-friendly mixing.
-- Updated `hdl/src/odocrypt_round.v` to use multiple epoch/key-dependent operations and lane rotations.
-- Captured final pipeline hash results in top-level hash registers for verification.
+- **Algorithm correct in RTL, proven**: `hdl/tb/run_tb.sh` drives the full
+  register interface and reproduces upstream OdoCrypt+Keccak hashes bit-exact
+  for multiple (epoch, header, nonce) vectors. The C oracle in
+  `hps/odocrypt_state.c` matches upstream `odocrypt.cpp` (`make check`).
+- `hdl/src/odocrypt/odocrypt_core.v` is a multi-cycle FSM (~22 cycles/round,
+  ~26 KH/s @ 50 MHz); S-boxes live in BRAM in
+  `hdl/src/odocrypt/odocrypt_epoch_tables.v` (ping-pong banks, streamed from
+  the HPS with waitrequest flow control). Old pipeline/mutator RTL is archived.
+- The miner is integrated into Platform Designer (`hdl/qsys/soc_system.qsys`)
+  as a proper Avalon component at LW bridge offset 0x0, alongside SPI display
+  (ILI9341), SPI touch (XPT2046), and PIO blocks for LCD control/keys/LEDs.
+  Use `hdl/qsys/qsys_add_peripherals.tcl` as the reference for how it was
+  added — do NOT rebuild from `soc_system.tcl` (stale HPS parameter names).
+- HPS software: stratum client with set_difficulty/share targets, correct
+  Odo epoch key (`ntime - ntime % 864000`), per-job extranonce2, preemptive
+  job switching, status JSON export. `make all`, `make test_units`,
+  `make check` all green.
+- Touch UI: `sw/odo-ui` renders a dashboard on `/dev/fb0` with touch
+  restart/reboot. Linux side: `linux/socfpga_cyclone5_qmtech_odo.dts` +
+  `linux/linux-display.fragment` + BusyBox init overlay in `linux/overlay/`.
+- Board identified as DE10-Nano ball-compatible (MiSTer-style); display
+  wiring on the GPIO_0 header — see `docs/DISPLAY_WIRING.md`.
 
 ## Validation focus
 
-- Confirm `hdl/src/odocrypt_top.v` register mapping matches `hps/hps_regs.h` and HPS software assumptions.
-- Verify `hash_meets_target()` comparison semantics are correct for the little-endian target format.
-- Add a smoke-test or simple HDL simulation for the start/status/clear and register access sequence.
-- Integrate the RTL into the Quartus SoC project and assign a stable LWH2F base address.
+- Quartus fit/timing closure of the integrated design (see docs/TODO.md §1
+  for the fit-failure history and what to check if it regresses).
+- Hardware gate checks: smoke test → epoch load → known-nonce on silicon →
+  display probe → testnet stratum round-trip (docs/TODO.md §2).
+- Touch calibration and GPIO_0 power-pin verification before wiring.
 
 ## Notes
 
-- `docs/TODO.md` now tracks current RTL progress and pending integration/validation items.
-- `docs/register-map.md` should be reviewed and updated as the wrapper register layout stabilizes.
+- `docs/TODO.md` is the authoritative status/plan document (refreshed 2026-06-10).
+- `docs/DISPLAY_WIRING.md` — physical wiring for the SPI touch screen.
+- RTL regression: `hdl/tb/run_tb.sh` (Icarus in WSL). Run it after ANY
+  change to core/tables/keccak, then regenerate Qsys (it copies RTL into
+  `soc_system/synthesis/submodules/`) before recompiling Quartus.
 
 ## Next steps
 
-1. Review `docs/architecture.md` for the high-level plan.
-2. Confirm the register map in `docs/register-map.md` matches the FPGA and HPS sources.
-3. Implement or validate the HPS daemon and FPGA bridge interface.
-4. Build and boot the SoC image on the target hardware.
+1. Confirm the latest Quartus compile fits and meets timing; produce .rbf.
+2. Rebuild the Buildroot image (new defconfig/DTS/overlay), assemble SD card.
+3. Run the hardware gate checks in docs/TODO.md.
+4. Wire the display per docs/DISPLAY_WIRING.md and bring up odo-ui.

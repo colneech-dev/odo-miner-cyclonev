@@ -1,5 +1,12 @@
 # Wireless Options: USB WiFi & ESP32 Integration
 
+> **Update 2026-06-10:** WiFi can now be configured from the web dashboard
+> (`odo-webd`, port 80): scan for networks, enter SSID + password, done — no
+> shell needed. First-time setup happens over wired Ethernet (or read the IP
+> off the TFT). The manual steps below remain valid as the fallback path.
+> The ESP32 sections are historical: the display/control role is now filled
+> by the SPI touch screen (docs/DISPLAY_WIRING.md) and the web dashboard.
+
 This document covers:
 1. **USB WiFi adapters** — Plug-and-play wireless networking
 2. **ESP32 module integration** — Advanced setup with display + wireless gateway

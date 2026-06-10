@@ -14,16 +14,18 @@ wsl --install
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-  build-essential git wget curl bc cpio unzip rsync file \
-  parted losetup kpartx dosfstools e2fsprogs u-boot-tools \
-  arm-linux-gnueabihf-gcc arm-linux-gnueabihf-g++
+  build-essential libncurses-dev flex bison libssl-dev \
+  git wget curl bc cpio unzip rsync file python3 \
+  fdisk dosfstools e2fsprogs u-boot-tools
 ```
+
+No ARM cross-compiler needed — the defconfig uses the prebuilt Bootlin toolchain (gcc 14.3 + glibc 2.41), downloaded automatically by Buildroot.
 
 ### Download Buildroot
 ```bash
-cd ~/projects  # or your preferred location
-wget https://buildroot.org/downloads/buildroot-2023.11.tar.xz
-tar xf buildroot-2023.11.tar.xz
+cd ~   # MUST be on the Linux filesystem — building under /mnt/c fails (case-insensitive NTFS)
+wget https://buildroot.org/downloads/buildroot-2025.11.3.tar.xz
+tar xf buildroot-2025.11.3.tar.xz
 ```
 
 ---
@@ -38,7 +40,7 @@ cd ~/odo-miner-cyclonev
 
 ### Step 2: Build everything in one command
 ```bash
-BUILDROOT_DIR=~/projects/buildroot-2023.11 \
+BUILDROOT_DIR=~/buildroot-2025.11.3 \
 PARALLEL_JOBS=8 \
 bash scripts/build-all.sh
 ```
@@ -59,20 +61,21 @@ bash scripts/build-all.sh
    Time: ~2 min
 
 📦 Build Linux with Buildroot
-   • Downloads Linux kernel 5.15 LTS
-   • Downloads U-Boot, GCC cross-compiler
-   • Compiles everything for ARM Cortex-A9
-   • Creates ext4 root filesystem
-   Time: 30-90 min (downloads + compilation)
+   • Downloads Linux kernel 6.6.26 LTS + prebuilt Bootlin toolchain (glibc 2.41)
+   • Applies kernel fragments (FPGA manager, Realtek USB WiFi)
+   • Compiles everything for ARM Cortex-A9 (NEON hard-float)
+   • Creates 8GB ext4 root filesystem
+   Time: 1-2 h (downloads + compilation)
 
 📦 Assemble SD Card Image
-   • Creates 4GB bootable image file
-   • Partitions: FAT32 (boot) + ext4 (root)
-   • Installs U-Boot, kernel, device tree
+   • Creates ~9GB bootable image file (sparse)
+   • Partitions: FAT32 (boot) + ext4 (root) + raw 0xA2 (preloader —
+     required by the Cyclone V BootROM)
+   • Installs U-Boot (.sfp), kernel, device tree
    • Embeds FPGA bitstream (if available)
    • Adds miner binaries to rootfs
    • Creates U-Boot boot script
-   Time: ~2 min
+   Time: ~5 min
 
 ✅ Ready to write to physical SD card!
 ```
@@ -139,8 +142,8 @@ odo-miner-watcher pool.example.com 3333
 
 ### Adjust image size
 ```bash
-# Default 4GB; customize for your SD card
-IMAGE_SIZE=8192 bash scripts/build-sdcard.sh  # 8GB image
+# Default 9216MB (must hold the 8GB rootfs); needs a 16GB+ SD card
+IMAGE_SIZE=15360 bash scripts/build-sdcard.sh  # 15GB image
 ```
 
 ### Adjust parallel compilation
@@ -151,8 +154,9 @@ PARALLEL_JOBS=16 bash scripts/build-all.sh
 
 ### Different Buildroot version
 ```bash
-# Use latest LTS instead
-BUILDROOT_DIR=~/buildroot-latest bash scripts/build-all.sh
+# The defconfig is validated against 2025.11.x — other versions may have
+# different Kconfig symbols (silently dropped if unknown!)
+BUILDROOT_DIR=~/buildroot-other bash scripts/build-all.sh
 ```
 
 ---
@@ -162,7 +166,8 @@ BUILDROOT_DIR=~/buildroot-latest bash scripts/build-all.sh
 | Problem | Solution |
 |---------|----------|
 | "Buildroot directory not found" | Set `BUILDROOT_DIR` to correct path |
-| Build fails with "compiler not found" | Run: `sudo apt-get install arm-linux-gnueabihf-gcc` |
+| "PATH contains spaces" error | WSL leaked the Windows PATH; scripts set a clean one, or `export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` |
+| Kernel build fails with weird patch/case errors | Tree is under `/mnt/c` — move it to `~` (WSL ext4) |
 | SD card write fails with permission | Use: `sudo dd ...` or try Etcher |
 | Board doesn't boot | Check: power supply, SD card adapter, serial console messages |
 | FPGA shows 0xFFFFFFFF | FPGA bitstream not loaded; wait for LWH2F bridge enable |
@@ -197,11 +202,11 @@ hps/
   ├── fpga_smoke_test        ← FPGA register validation
   └── miner_io_test          ← Hardware bring-up test
 
-buildroot-2023.11/output/images/
-  ├── zImage                 ← Linux kernel
-  ├── socfpga_cyclone5.dtb   ← Device tree
-  ├── u-boot-spl.sfp        ← Bootloader (SPL + U-Boot)
-  └── rootfs.ext4           ← Root filesystem (includes miner binaries)
+~/buildroot-2025.11.3/output/images/
+  ├── zImage                       ← Linux kernel
+  ├── socfpga_cyclone5_socdk.dtb   ← Device tree
+  ├── u-boot-with-spl.sfp          ← Bootloader (SPL + U-Boot, for raw A2 partition)
+  └── rootfs.ext4                  ← Root filesystem (8GB)
 
 sdcard-output/
   └── odo-miner-cyclonev-YYYYMMDD-HHMMSS.img  ← Complete SD card image
@@ -211,19 +216,21 @@ sdcard-output/
 
 ## What's Included on the SD Card
 
+- **Preloader partition (raw, type 0xA2):**
+  - SPL + U-Boot (`u-boot-with-spl.sfp`) — the Cyclone V BootROM only boots from here
+
 - **Boot partition (FAT32):**
-  - U-Boot bootloader
   - Linux kernel (zImage)
-  - Device tree (socfpga_cyclone5.dtb)
+  - Device tree (socfpga_cyclone5_socdk.dtb)
   - FPGA bitstream (fpga.rbf, if available)
   - U-Boot boot script (boot.scr)
 
-- **Root filesystem (ext4):**
-  - Linux (from Buildroot)
-  - SSH server
-  - Networking tools
-  - Your compiled miner binaries at `/usr/bin/odo-*`
-  - Build tools (optional)
+- **Root filesystem (ext4, 8GB):**
+  - Linux (from Buildroot, glibc 2.41)
+  - SSH server, networking tools, WiFi (wpa_supplicant)
+  - supervisor + watchdog for unattended operation
+  - Your cross-compiled miner binaries at `/usr/bin/odo-*`
+  - No on-target compiler — cross-compile on the build host
 
 ---
 
@@ -261,7 +268,7 @@ sdcard-output/
 
 **Ready? Run:**
 ```bash
-BUILDROOT_DIR=~/projects/buildroot-2023.11 bash scripts/build-all.sh
+BUILDROOT_DIR=~/buildroot-2025.11.3 bash scripts/build-all.sh
 ```
 
 🚀

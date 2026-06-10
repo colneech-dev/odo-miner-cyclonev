@@ -1,12 +1,11 @@
 # OdoCrypt Miner — Avalon-MM Register Map
 
-**Status:** v0.2 (matches actual `odocrypt_top.v` + `miner_daemon.c`) · **Owner:** colneech-dev
-**Applies to:** `fpga/odocrypt_top.v` (Avalon-MM slave) ↔ `hps/miner_daemon.c` (`mmap` access)
+**Status:** v0.3 (2026-06-10, matches `odocrypt_top.v` + `hps/hps_regs.h`) · **Owner:** colneech-dev
+**Applies to:** `hdl/src/odocrypt_top.v` (Avalon-MM slave) ↔ `hps/hps_regs.h` / `hps/miner_io.c`
 
 > **Single source of truth.** Any change here MUST be matched in `odocrypt_top.v` and
-> `odo_regs.h` in the same commit. Register-map / CDC mismatches are the #1 bring-up
-> failure mode for this project. Offsets below are **verified against the current code**,
-> not idealized — known caveats are called out explicitly.
+> `hps/hps_regs.h` in the same commit. Register-map mismatches are the #1 bring-up
+> failure mode for this project.
 
 ---
 
@@ -15,15 +14,30 @@
 | Parameter | Value | Notes |
 |---|---|---|
 | Data width | 32 bits | All registers are 32-bit words. |
-| Address unit | Word (4 bytes) | `address[N:0]` indexes 32-bit words, not bytes. The HPS `mmap` pointer is `uint32_t*`, so `base[idx]` already matches word addressing. |
+| Address unit | **Byte (SYMBOLS)** | `avs_address[7:0]` is a byte offset; registers are at 0x00, 0x04, … The Platform Designer component (`odocrypt_top_hw.tcl`) declares `addressUnits SYMBOLS` — this must never change, or every register lands on the wrong offset. |
 | Endianness | Little-endian | HPS (ARM) and Avalon agree; no byte-swap needed for register access. |
 | Byteenable | Ignored | RTL performs full 32-bit read/write only. Do not rely on sub-word writes. |
-| Read latency | 1 cycle (registered) | `readdata` is registered; `waitrequest` is tied low (always ready). |
-| Reset | Active-high `reset` | Synchronous to the Avalon clock domain. |
+| Read latency | 0 (combinational) | `readdata` is valid in the cycle the read is accepted. |
+| waitrequest | Used for `EPOCH_WR_DATA` | Writes to 0xC0 stall up to 3 cycles while the table loader unpacks the previous multi-entry word. All other accesses complete immediately. |
+| Reset | Active-low `reset_n` | Synchronous deassert, Avalon clock domain. |
 
 The HPS reaches the slave through the **HPS-to-FPGA Lightweight (LWH2F) bridge**.
-Bridge base is `0xFF20_0000`; the slave's span base offset is set in Platform Designer.
-Effective virtual address = `mmap(LWH2F_base + slave_offset)`.
+Bridge base is `0xFF20_0000`; the miner slave is at offset **0x0000** (so registers
+start at exactly 0xFF200000 — `hps_regs.h` MINER_BASE_OFFSET = 0).
+
+### System LWH2F address map (Platform Designer)
+
+| LW offset | Peripheral | Linux driver |
+|---|---|---|
+| 0x0000 | OdoCrypt miner (this block) | none — `odo-miner` uses /dev/mem |
+| 0x1000 | `spi_lcd` Avalon SPI (ILI9341, ~25 MHz) | spi-altera-platform + fb_ili9341 |
+| 0x1100 | `spi_touch` Avalon SPI (XPT2046, ~1.56 MHz) | spi-altera-platform + ads7846 |
+| 0x1200 | `pio_lcd` 3-bit out (D/C, RESET_n, BL) | gpio-altera |
+| 0x1300 | `pio_in` 3-bit in + IRQ (PENIRQ_n, KEY0, KEY1) | gpio-altera |
+| 0x1400 | `pio_led` 8-bit out (board LEDs) | gpio-altera + gpio-leds |
+
+FPGA→HPS interrupts (f2h_irq0): 0 = spi_lcd, 1 = spi_touch, 2 = pio_in
+(Linux GIC SPI 72/73/74).
 
 ---
 
@@ -45,10 +59,14 @@ byte-addressed Avalon offsets, not word indexes.
 | 0x020–0x03C | `TARGET[0..7]` | R/W | 256-bit difficulty target, little-endian words. |
 | 0x040–0x08C | `HEADER[0..19]` | R/W | 80-byte block header, 20 × 32-bit words. |
 | 0x090–0x0AC | `HASH[0..7]` | RO | 256-bit hash result captured from the pipeline. |
-| 0x0B0 | `PERF_HASHES_LO` | RO | Hash count low 32 bits. |
+| 0x0B0 | `PERF_HASHES_LO` | RO | Hash count low 32 bits (counts `hash_valid`). |
 | 0x0B4 | `PERF_HASHES_HI` | RO | Hash count high 32 bits. |
-| 0x0B8 | `PERF_SHARES` | RO | Shares found since reset. |
-| 0x0BC | `PERF_UPTIME` | RO | Uptime in clock-derived ticks. |
+| 0x0B8 | `PERF_SHARES` | RO | FOUND events latched since reset (edge-counted). |
+| 0x0BC | `PERF_UPTIME` | RO | Uptime in fabric clock ticks (wraps at 2^32). |
+| 0x0C0 | `EPOCH_WR_DATA` | WO | Epoch table stream: write 5964 words in the order produced by `odo_epoch_stream_words()`. May stall via waitrequest (≤3 cycles). |
+| 0x0C4 | `EPOCH_WR_RESET` | WO | Any write resets the stream pointer to 0 (recover an aborted load). |
+| 0x0C8 | `EPOCH_COMMIT` | WO | Any write flips the S-box bank and activates the loaded tables; sets `STATUS.TABLES_VALID`. Stop the core (CTRL.RESET) before loading — the small FF tables are single-copy. |
+| 0x0CC | `EPOCH_WR_ADDR` | RO | Current stream pointer (0..5964), for verification. |
 
 > **Header word count:** the OdoCrypt header is 80 bytes = 20 words, and the RTL
 > accepts exactly 20 header words at `HEADER[0..19]`. The HPS job loader currently
