@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
-odocrypt.dll
+*.so
+*.dll
 current_job.json
 stats.json
