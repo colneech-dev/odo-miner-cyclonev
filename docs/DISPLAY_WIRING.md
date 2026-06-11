@@ -1,43 +1,77 @@
 # SPI Touch Display — Wiring & Bring-up
 
-**Target module:** ILI9341-class SPI TFT (2.2"–3.2", 320×240) with XPT2046
-resistive touch — the common 14-pin red breakout modules.
+**Module:** **KMRTM28028-SPI** — 2.8″ 240×320 SPI TFT, controller **ILI9341**,
+resistive touch **XPT2046**, 14-pin single-row header. (Any ILI9341 + XPT2046
+module with the same 14-pin layout is identical for this build.)
 
 **Board connector:** `GPIO_0` header (J10/J12 area per the KFB schematic).
 The board is ball-compatible with the Terasic DE10-Nano, verified against the
 QMTECH KFB dual-SDRAM schematic (16 pins cross-checked). Header pin numbering
-below follows the DE10-Nano convention — **verify pins 11/12/29/30 (power) on
-the QMTECH silkscreen with a meter before connecting the module.**
+below follows the DE10-Nano convention — see "Pins to test first".
 
-## Wiring table
+## Wiring table (KMRTM28028-SPI, in module pin order 1→14)
 
-| Module pin | Function        | Net        | GPIO_0 index | Header pin | FPGA ball |
-|-----------|------------------|------------|--------------|------------|-----------|
-| VCC       | 3.3 V            | 3V3        | —            | 29         | —         |
-| GND       | Ground           | GND        | —            | 12 or 30   | —         |
-| SCK       | Display SPI clk  | LCD_SCLK   | D0           | 1          | V12       |
-| SDI/MOSI  | Display data in  | LCD_MOSI   | D1           | 2          | E8        |
-| SDO/MISO  | Display data out | LCD_MISO   | D2           | 3          | W12       |
-| CS        | Display select   | LCD_CS_n   | D3           | 4          | D11       |
-| DC        | Data/command     | LCD_DC     | D4           | 5          | D8        |
-| RESET     | Display reset    | LCD_RST_n  | D5           | 6          | AH13      |
-| LED       | Backlight        | LCD_BL     | D6           | 7          | AF7       |
-| T_CLK     | Touch SPI clk    | TP_SCLK    | D7           | 8          | AH14      |
-| T_DIN     | Touch data in    | TP_MOSI    | D8           | 9          | AF4       |
-| T_DO      | Touch data out   | TP_MISO    | D9           | 10         | AH3       |
-| T_CS      | Touch select     | TP_CS_n    | D10          | 13         | AD5       |
-| T_IRQ     | Pen interrupt    | TP_IRQ_n   | D11          | 14         | AG14      |
+The first column is the silkscreen label / physical pin number on the module;
+wire it straight down the module header.
+
+| # | Module label | Function        | Board net  | GPIO_0 idx | Header pin | FPGA ball |
+|---|--------------|-----------------|------------|------------|------------|-----------|
+| 1 | VCC          | 3.3 V power     | 3V3        | —          | **29** ⚠   | —         |
+| 2 | GND          | Ground          | GND        | —          | **12/30** ⚠| —         |
+| 3 | CS           | LCD chip select | LCD_CS_n   | D3         | 4          | D11       |
+| 4 | RESET        | LCD reset       | LCD_RST_n  | D5         | 6          | AH13      |
+| 5 | DC (RS)      | data/command    | LCD_DC     | D4         | 5          | D8        |
+| 6 | SDI (MOSI)   | LCD data in     | LCD_MOSI   | D1         | 2          | E8        |
+| 7 | SCK          | LCD SPI clock   | LCD_SCLK   | D0         | 1          | V12       |
+| 8 | LED          | backlight       | LCD_BL     | D6         | 7          | AF7       |
+| 9 | SDO (MISO)   | LCD data out    | LCD_MISO   | D2         | 3          | W12       |
+| 10| T_CLK        | touch SPI clock | TP_SCLK    | D7         | 8          | AH14      |
+| 11| T_CS         | touch select    | TP_CS_n    | D10        | 13         | AD5       |
+| 12| T_DIN        | touch data in   | TP_MOSI    | D8         | 9          | AF4       |
+| 13| T_DO         | touch data out  | TP_MISO    | D9         | 10         | AH3       |
+| 14| T_IRQ        | pen interrupt   | TP_IRQ_n   | D11        | 14         | AG14      |
+
+⚠ = **meter-check before connecting** (see next section).
 
 Notes:
-- All signals are 3.3 V LVTTL. Most ILI9341 modules are 3.3 V-native — do
-  **not** feed VCC from the 5 V pin unless your module has a regulator and
-  level shifters.
-- The backlight LED pin on some modules needs a series resistor; many have
-  one onboard. `LCD_BL` is driven as a plain on/off GPIO.
+- The KMRTM28028-SPI is **3.3 V**. Feed VCC and all logic from 3.3 V. Some
+  copies carry an AMS1117 regulator + 74HC125 level shifter (then VCC is
+  3.3–5 V tolerant); with our 3.3 V header, just use 3.3 V either way.
+- The `LED`/backlight pin is driven as a plain on/off GPIO (`LCD_BL`). On this
+  module the backlight has its onboard drive; no external resistor needed.
+- The module's micro-SD slot is unused — leave its pins unconnected.
 - `GPIO_0` is shared with the two onboard MiSTer-style SDRAM chips. The
   bitstream holds both SDRAM chip-selects high (`SDRAM_CS0_n`=Y18,
-  `SDRAM_CS1_n`=AD20), so the chips stay quiet. Don't use this display setup
-  together with a design that drives the fabric SDRAM.
+  `SDRAM_CS1_n`=AD20), so the chips stay quiet. Don't combine this display
+  setup with a design that drives the fabric SDRAM.
+
+## Pins to test first (do this BEFORE connecting the module)
+
+The DE10-Nano-style ball-out is verified, but the **power pins** on the GPIO_0
+header are the one thing assumed from convention, so confirm them with a meter.
+The signal pins don't need testing (they're driven by the FPGA at 3.3 V), but a
+mis-identified VCC/GND can kill the panel instantly.
+
+**With the board powered on, FPGA configured, nothing connected to the header:**
+
+1. **Find a true GND reference** — meter on continuity/diode mode, one probe on
+   a known chassis/board ground (e.g. a USB shell or a mounting hole), the other
+   on header **pin 12** and **pin 30**. Both should read continuity to GND
+   (≈0 Ω). These are your GND pins.
+2. **Verify the 3.3 V pin** — meter on DC volts, black on a confirmed GND from
+   step 1, red on header **pin 29**. Expect **3.30 V ±0.1**. If it reads 5 V,
+   0 V, or anything else, **stop** — do not use it as VCC.
+3. **Sanity-check a couple of signal balls are NOT power** — black on GND, red
+   on header **pin 1** (LCD_SCLK / ball V12): it should sit near 0 V or toggle,
+   **not** a steady 3.3 V or 5 V rail. Confirms you're not about to feed a
+   signal pin into the module's VCC.
+4. **After wiring, before power-on:** with the board OFF, meter continuity
+   between the module's **VCC and GND** pins — it should be high resistance
+   (no dead short). A near-0 Ω reading means a wiring short; fix before powering.
+
+If pin 29 isn't 3.3 V on your board revision, take 3.3 V from any other
+confirmed 3V3 header pin and GND from pin 12/30 — only VCC/GND placement varies;
+the signal balls in the table are fixed by the FPGA pin assignment.
 
 ## What drives it
 
