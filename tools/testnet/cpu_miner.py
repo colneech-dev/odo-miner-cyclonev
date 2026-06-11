@@ -13,9 +13,10 @@ Reconstructs the header exactly as hps/stratum.c does:
   - prevhash from notify is reversed to internal LE
   - odokey is derived from ntime: nTime - nTime % interval
 
-Usage: python3 cpu_miner.py [host] [port] [interval]
+Usage: python3 cpu_miner.py [host] [port] [interval] [blocks]
   interval: OdoCrypt epoch seconds (default 864000 regtest/mainnet;
             use 86400 for testnet).
+  blocks:   how many blocks to mine before exiting (default 1; 0 = forever).
 """
 
 import os
@@ -30,6 +31,8 @@ from odo_node import odocrypt_hash, dsha
 HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 3333
 INTERVAL = int(sys.argv[3]) if len(sys.argv) > 3 else 864000
+# How many blocks to mine before exiting. 0 = keep going forever.
+BLOCKS = int(sys.argv[4]) if len(sys.argv) > 4 else 1
 
 
 def main():
@@ -44,6 +47,7 @@ def main():
     send({"id": 2, "method": "mining.authorize", "params": ["worker", "x"]})
 
     extranonce1 = b""
+    mined = 0
     while True:
         line = f.readline()
         if not line:
@@ -97,13 +101,15 @@ def main():
 
         if msg.get("id") == 4:
             if msg.get("result"):
-                print("[miner] share ACCEPTED (block found)")
-                return 0
+                mined += 1
+                print(f"[miner] share ACCEPTED (block {mined}"
+                      + (f"/{BLOCKS}" if BLOCKS else "") + ")")
+                if BLOCKS and mined >= BLOCKS:
+                    return 0
+                # otherwise keep going — the bridge sends the next job
+                # automatically after each accepted block.
             else:
-                print(f"[miner] share rejected: {msg.get('error')}")
-                # sweep a few more nonces
-                # (kept simple; the FPGA does the real sweep)
-                return 1
+                print(f"[miner] share rejected: {msg.get('error')}; continuing")
 
 
 if __name__ == "__main__":
