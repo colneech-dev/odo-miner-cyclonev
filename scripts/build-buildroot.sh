@@ -85,7 +85,13 @@ cp "$FRAGMENTS_SRC_DIR/linux-wifi.fragment" \
    "$FRAGMENTS_SRC_DIR/linux-display.fragment" \
    "$FRAGMENTS_SRC_DIR/socfpga_cyclone5_qmtech_odo.dts" \
    "$BUILDROOT_DIR/board/qmtech/cyclonev/"
-log_info "  ✓ Defconfig + 3 kernel fragments + socfpga_cyclone5_qmtech_odo.dts installed"
+# Rootfs overlay (BusyBox init scripts + /etc/odod.conf). BR2_ROOTFS_OVERLAY
+# in the defconfig points at board/qmtech/cyclonev/overlay, so this copy is
+# REQUIRED — without it target-finalize fails and no rootfs.ext4 is produced.
+rm -rf "$BUILDROOT_DIR/board/qmtech/cyclonev/overlay"
+cp -r "$FRAGMENTS_SRC_DIR/overlay" "$BUILDROOT_DIR/board/qmtech/cyclonev/overlay"
+chmod +x "$BUILDROOT_DIR/board/qmtech/cyclonev/overlay/etc/init.d/"S*
+log_info "  ✓ Defconfig + kernel fragments + DTS + rootfs overlay installed"
 
 # Step 1.5: Clean stale configuration
 cd "$BUILDROOT_DIR"
