@@ -1,0 +1,10 @@
+server=1
+daemon=1
+testnet=1
+
+rpcuser=user
+rpcpassword=pass
+rpcallowip=127.0.0.1
+
+rpcport=14022
+fallbackfee=0.0001
