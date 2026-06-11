@@ -66,6 +66,18 @@ static void test_share_target(void)
           !target_met(a.share_target, b.share_target),
           "higher difficulty gives smaller target");
 
+    /* regtest max target nbits 0x207fffff must decode (regression: an
+     * off-by-one bound rejected word_shift==29, breaking regtest mining). */
+    {
+        job_t r;
+        job_init(&r);
+        r.nbits = 0x207fffffu;
+        CHECK(job_target_from_nbits(&r) == 0, "regtest nbits 0x207fffff decodes");
+        /* target little-endian: bytes 29,30,31 = ff,ff,7f, rest 0 */
+        CHECK(r.target[29] == 0xff && r.target[30] == 0xff && r.target[31] == 0x7f,
+              "regtest target bytes at 29,30,31");
+    }
+
     /* diff <= 0 falls back to the network target */
     job_t c;
     job_init(&c);

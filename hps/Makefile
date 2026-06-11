@@ -74,6 +74,14 @@ test_units: test_units.c job.c odocrypt_header.c
 	$(CC) $(CFLAGS) -o $@ $^
 	./test_units
 
+# Loopback: drive the real stratum/job/header/odocrypt code against a running
+# solo Stratum bridge (tools/testnet). Needs the upstream Keccak reference for
+# the full PoW hash. Run: ./test_stratum_loopback <host> <port>
+test_stratum_loopback: test_stratum_loopback.c stratum.c job.c odocrypt_header.c odocrypt_state.c
+	$(CC) $(CFLAGS) -I$(UPSTREAM_CRYPTO) -c $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c \
+	      -o /tmp/keccak800_lb.o
+	$(CC) $(CFLAGS) -I$(UPSTREAM_CRYPTO) -o $@ $^ /tmp/keccak800_lb.o $(LDFLAGS)
+
 test: test_odo
 	./test_odo
 

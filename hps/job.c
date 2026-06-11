@@ -46,7 +46,11 @@ int job_target_from_nbits(job_t *job)
     size_t shift = (size_t)(8 * (exponent - 3));
     size_t word_shift = shift / 8;
 
-    if (word_shift + 3 >= JOB_TARGET_BYTES)
+    /* The 3 mantissa bytes occupy indices word_shift..word_shift+2, so the
+     * highest valid word_shift is JOB_TARGET_BYTES-3 (=29). Using ">=" here
+     * wrongly rejected word_shift==29, which is exactly the regtest max
+     * target (nbits 0x207fffff -> bytes at 29,30,31). Must be ">". */
+    if (word_shift + 3 > JOB_TARGET_BYTES)
         return -1;
 
     job->target[word_shift + 0] = (uint8_t)(mantissa & 0xFFu);
