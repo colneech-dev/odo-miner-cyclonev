@@ -41,51 +41,46 @@ first, then `getblocktemplate {...} 'odo'` returns a real odo template + odokey.
 `getblocktemplate` returns this as the `odokey` field; `solo_stratum.py`
 passes it through and `hps/miner.c` derives the same value from `nTime`.
 
+## One command
+
+**Windows** (node + Python are native here):
+```
+tools\testnet\start_fpga_miner.bat        # regtest test bed, ready for the FPGA
+```
+Brings up the node, mines to OdoCrypt activation, starts the bridge on
+`127.0.0.1:3333`, and leaves it running. Point the board at it:
+`odo-miner <this-PC-IP> 3333 worker`.
+
+**Self-test, no FPGA** (proves the whole stack mines a block):
+```
+python tools\testnet\run_testbed.py --demo        # Windows
+bash   tools/testnet/run_regtest_demo.sh          # Linux/WSL
+```
+→ `DEMO PASS` (a block the node validated as OdoCrypt, mined over Stratum).
+
 ## Contents
 
 | File | Purpose |
 |---|---|
-| `odocrypt_wrapper.cpp` | `odocrypt_hash_header()` — wraps DigiByte's `HashOdo` for the Python share-validator. Build into `odocrypt.dll` against the DGB 8.26.2 tree (see below). |
-| `stratum/solo_stratum.py` | The bridge: GBT → Stratum v1 → FPGA, submits found blocks. Matches `hps/stratum.c`'s dialect. |
-| `stratum/{header,odocrypt,rpc}.py` | helpers: header serialisation, odocrypt.dll ctypes binding, JSON-RPC client |
-| `conf/digibyte.conf.{regtest,testnet}` | node config templates (change rpcuser/rpcpassword!) |
+| `run_testbed.py` | one-command orchestrator: node → mine to activation → bridge → (optional) CPU self-test. Used by the `.bat` and the `.sh`. |
+| `start_fpga_miner.bat` | Windows launcher (test bed, leaves the bridge running) |
+| `run_regtest_demo.sh` | Linux/WSL self-test wrapper (`--demo`) |
+| `regtest_selftest.py` | stage-2 keystone: CPU-mine one block end-to-end via RPC |
+| `cpu_miner.py` | reference CPU miner over Stratum — the FPGA's stand-in |
+| `stratum/solo_stratum.py` | the bridge: GBT → Stratum v1 → submitblock, real OdoCrypt validation |
+| `lib/odo_node.py` | reusable core: RPC, OdoCrypt hash, segwit coinbase + block assembly |
+| `odocrypt_wrapper.cpp` + `build_odocrypt_lib.sh` | portable hash lib (`.so`/`.dll`) built from `upstream/odo-miner` |
+| `regtest_up.sh` | bring a node up by hand (encodes the conf/activation gotchas) |
+| `conf/digibyte.conf.{regtest,testnet}` | node config templates |
 
-## Quick start (regtest)
+## Status: VERIFIED working (2026-06-11)
 
-1. **Node**: copy `conf/digibyte.conf.regtest` to your DigiByte data dir,
-   start `digibyted -regtest`, create a wallet + address, and
-   `generatetoaddress 601 <addr>` (601, not 100 — OdoCrypt activates at
-   block 600 on regtest, and this also matures a spendable balance).
-2. **odocrypt.dll** (for the Python share-validator):
-   ```
-   cl /LD /std:c++17 odocrypt_wrapper.cpp \
-      <dgb>/src/crypto/odocrypt.cpp <dgb>/src/crypto/KeccakP-800-reference.cpp \
-      /I <dgb>/src /Fe:odocrypt.dll
-   ```
-   Point `stratum/odocrypt.py` `DLL_PATH` at it.
-3. **Bridge**: set `stratum/rpc.py` `RPC_URL`/`RPC_AUTH` for your node, then
-   `python3 stratum/solo_stratum.py regtest` (listens on :3333).
-4. **Miner**: point the FPGA miner at the bridge —
-   `odo-miner <bridge-ip> 3333 <worker>` (or set the pool in the web UI).
+Run against a live DigiByte 8.26.2 regtest node:
+- `regtest_selftest.py` — block CPU-mined end-to-end, node **accepted** it.
+- `run_testbed.py --demo` — block mined over the Stratum wire, **DEMO PASS**.
 
-## ⚠️ Status: bridge needs one loopback validation before hardware
-
-`solo_stratum.py` is written to match `hps/stratum.c` line-for-line on byte
-order (prevhash sent big-endian so the miner's reverse yields internal LE;
-full coinbase as `coinb1` with empty `coinb2`/branches so the miner's merkle
-root = `dsha(coinbase)`). It has **not** yet been run against the miner. Two
-things to confirm on first contact, both in `hps/stratum.c`:
-
-1. **subscribe result shape** — `handle_subscribe_result()` reads the 3rd
-   quoted string as extranonce1. `solo_stratum.py` sends
-   `[[["mining.notify","odo"]],"00",0]`; verify the miner parses
-   extranonce1="" / size 0 from it (adjust either side if not).
-2. **share validation hash** — `solo_stratum.py`'s `mining.submit` handler
-   currently uses `dsha` as a placeholder; wire in `odocrypt_hash()` from
-   `odocrypt.py` (as `server.py` does) so shares are validated with the real
-   PoW before `submitblock`.
-
-The cleanest validation is a loopback: run `solo_stratum.py` against a regtest
-node and connect the miner with the FPGA stubbed, confirming
-subscribe→authorize→notify parses and a (wrong) submit round-trips, before
-trusting it with real hardware.
+`solo_stratum.py` speaks the exact dialect `hps/stratum.c` implements
+(subscribe → authorize → 9-field notify → submit), validated by `cpu_miner.py`
+which reconstructs the header the same way the FPGA does. When the board is
+ready, point it at the same bridge — only the hasher changes. See
+[TEST_PLAN.md](TEST_PLAN.md) for the staged FPGA bring-up.
