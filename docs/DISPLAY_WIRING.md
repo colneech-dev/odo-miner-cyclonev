@@ -16,8 +16,8 @@ wire it straight down the module header.
 
 | # | Module label | Function        | Board net  | GPIO_0 idx | Header pin | FPGA ball |
 |---|--------------|-----------------|------------|------------|------------|-----------|
-| 1 | VCC          | 3.3 V power     | 3V3        | —          | **29** ⚠   | —         |
-| 2 | GND          | Ground          | GND        | —          | **12/30** ⚠| —         |
+| 1 | VCC          | 3.3 V power     | 3V3        | —          | **29** ✓   | —         |
+| 2 | GND          | Ground          | GND        | —          | **12/30** ✓| —         |
 | 3 | CS           | LCD chip select | LCD_CS_n   | D3         | 4          | D11       |
 | 4 | RESET        | LCD reset       | LCD_RST_n  | D5         | 6          | AH13      |
 | 5 | DC (RS)      | data/command    | LCD_DC     | D4         | 5          | D8        |
@@ -31,7 +31,8 @@ wire it straight down the module header.
 | 13| T_DO         | touch data out  | TP_MISO    | D9         | 10         | AH3       |
 | 14| T_IRQ        | pen interrupt   | TP_IRQ_n   | D11        | 14         | AG14      |
 
-⚠ = **meter-check before connecting** (see next section).
+✓ = **confirmed on hardware** (pin 29 = 3.30 V, pins 12 & 30 = GND). The
+procedure that verified them is kept below for other board revisions.
 
 Notes:
 - The KMRTM28028-SPI is **3.3 V**. Feed VCC and all logic from 3.3 V. Some
@@ -46,6 +47,13 @@ Notes:
   setup with a design that drives the fabric SDRAM.
 
 ## Pins to test first (do this BEFORE connecting the module)
+
+> **Status on this board:** confirmed — pin 29 = 3.30 V, pins 12 & 30 = GND.
+> Note: with **no bitstream loaded**, signal pins (e.g. pin 1 / SCLK) read
+> ~**3.1 V steady** — that is the Cyclone V configuration-time weak pull-up,
+> not a power rail. Once `fpga.rbf` loads, the SPI core drives SCLK and it
+> idles low. A steady 3.1 V on a signal pin is only a concern if it persists
+> *after* the design is configured.
 
 The DE10-Nano-style ball-out is verified, but the **power pins** on the GPIO_0
 header are the one thing assumed from convention, so confirm them with a meter.
