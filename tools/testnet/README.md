@@ -33,8 +33,10 @@ DigiByte consensus (`src/primitives/block.cpp`):
 ```cpp
 uint32_t OdoKey(params, nTime) { return nTime - nTime % params.nOdoShapechangeInterval; }
 ```
-Interval per network: mainnet 864000 (10d), testnet 86400 (1d), **regtest 60
-(1m)** — regtest is ideal for exercising the epoch-roll path quickly.
+Interval per network (verified against DigiByte 8.26.2): mainnet 864000 (10d),
+testnet 86400 (1d), **regtest 864000 (10d, same as mainnet in this build)**.
+NOTE: OdoCrypt only activates at block 600 on regtest — mine 601 scrypt blocks
+first, then `getblocktemplate {...} 'odo'` returns a real odo template + odokey.
 
 `getblocktemplate` returns this as the `odokey` field; `solo_stratum.py`
 passes it through and `hps/miner.c` derives the same value from `nTime`.
