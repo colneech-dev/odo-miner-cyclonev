@@ -50,8 +50,9 @@ def main():
     target = target_from_template(tmpl)
     print("height=%d odokey=%d target=%064x" % (tmpl["height"], odokey, target))
 
-    txid, _coinb1, coinbase_hex = build_coinbase(tmpl, spk)
-    merkle = txid  # single tx -> merkle root is the coinbase txid
+    cb = build_coinbase(tmpl, spk)
+    merkle = cb["txid"]()          # single tx -> merkle root is the coinbase txid
+    coinbase_hex = cb["witness_block"]()
 
     start = rpc("getblockcount")
     nonce = 0
