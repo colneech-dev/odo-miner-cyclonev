@@ -77,6 +77,14 @@ def main():
     os.environ["ODO_RPC_URL"] = url
     os.environ["ODO_RPC_USER"] = user
     os.environ["ODO_RPC_PASS"] = pw
+    # Shared stats file for the bridge -> web view; reset it for a clean session.
+    import tempfile
+    os.environ.setdefault("ODO_STATS_FILE",
+                          os.path.join(tempfile.gettempdir(), "odo_testbed_stats.json"))
+    try:
+        os.remove(os.environ["ODO_STATS_FILE"])
+    except OSError:
+        pass
 
     os.makedirs(datadir, exist_ok=True)
     section = "regtest" if net == "regtest" else "test"
