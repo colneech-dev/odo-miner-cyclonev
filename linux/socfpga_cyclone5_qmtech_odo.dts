@@ -43,6 +43,8 @@
 			#size-cells = <0>;
 			status = "okay";
 
+			/* KMRTM28028-SPI: 2.8" 240x320 ILI9341 panel.
+			 * rotate=270 -> 320x240 landscape (matches odo_ui.c layout). */
 			display@0 {
 				compatible = "ilitek,ili9341";
 				reg = <0>;
