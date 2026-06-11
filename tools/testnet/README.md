@@ -48,8 +48,9 @@ passes it through and `hps/miner.c` derives the same value from `nTime`.
 tools\testnet\start_fpga_miner.bat        # regtest test bed, ready for the FPGA
 ```
 Brings up the node, mines to OdoCrypt activation, starts the bridge on
-`127.0.0.1:3333`, and leaves it running. Point the board at it:
-`odo-miner <this-PC-IP> 3333 worker`.
+`127.0.0.1:3333`, and a **web status view on `http://127.0.0.1:8080`**
+(stdlib-only — no Flask/pip — replacing the old `web.py`), then leaves it
+running. Point the board at it: `odo-miner <this-PC-IP> 3333 worker`.
 
 **Self-test, no FPGA** (proves the whole stack mines a block):
 ```
