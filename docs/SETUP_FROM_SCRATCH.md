@@ -41,10 +41,14 @@ scripts).
 
 ```bash
 # Build dependencies (Buildroot + kernel + host tools)
+# One command installs every build dependency (Buildroot + SD imaging + HPS):
+bash /path/to/odo-miner-cyclonev/scripts/install-deps.sh
+
+# (equivalent manual list, if you prefer:)
 sudo apt update && sudo apt install -y \
   build-essential libncurses-dev flex bison libssl-dev \
   git wget curl bc cpio unzip rsync file python3 \
-  fdisk dosfstools e2fsprogs u-boot-tools
+  dosfstools mtools e2fsprogs util-linux u-boot-tools
 
 # Buildroot — MUST live on the Linux filesystem (~), not /mnt/c
 # (kernel builds fail on case-insensitive NTFS)

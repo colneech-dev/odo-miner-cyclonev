@@ -136,14 +136,23 @@ log_info "✓ Buildroot artifacts found"
 [ -n "$BITSTREAM" ] && log_info "✓ FPGA bitstream: $BITSTREAM" || log_warn "⚠ No FPGA bitstream"
 
 # Check tools
-required_tools=(sfdisk losetup mkfs.vfat mkimage e2fsck resize2fs)
-
-for tool in "${required_tools[@]}"; do
-    if ! command -v "$tool" &> /dev/null; then
-        log_error "Missing required tool: $tool"
-        exit 1
-    fi
+# tool -> apt package, so a missing tool tells you exactly what to install
+declare -A tool_pkg=(
+    [sfdisk]=util-linux [losetup]=util-linux
+    [mkfs.vfat]=dosfstools [mkimage]=u-boot-tools
+    [e2fsck]=e2fsprogs [resize2fs]=e2fsprogs
+)
+missing_pkgs=()
+for tool in "${!tool_pkg[@]}"; do
+    command -v "$tool" &>/dev/null || missing_pkgs+=("${tool_pkg[$tool]}")
 done
+if [ "${#missing_pkgs[@]}" -gt 0 ]; then
+    uniq_pkgs=$(printf '%s\n' "${missing_pkgs[@]}" | sort -u | tr '\n' ' ')
+    log_error "Missing build tools. Install them with:"
+    log_error "    sudo apt install -y $uniq_pkgs"
+    log_error "  (or run scripts/install-deps.sh to install everything at once)"
+    exit 1
+fi
 
 log_info "✓ All required tools available"
 
