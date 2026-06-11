@@ -61,6 +61,8 @@ def main():
     ap.add_argument("--odocrypt-lib", default=os.environ.get("ODOCRYPT_LIB"))
     ap.add_argument("--demo", action="store_true")
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--no-web", action="store_true", help="don't start the web view")
+    ap.add_argument("--web-port", type=int, default=8080)
     a = ap.parse_args()
 
     net = a.net
@@ -146,6 +148,13 @@ def main():
         env=os.environ.copy())
     time.sleep(2)
 
+    # --- start the web status view (stdlib-only; replaces the old Flask web.py) ---
+    web = None
+    if not a.no_web:
+        web = subprocess.Popen(
+            [sys.executable, "-u", os.path.join(HERE, "webview.py"), str(a.web_port)],
+            env=os.environ.copy())
+
     if a.demo:
         interval = 864000 if net in ("regtest", "mainnet") else 86400
         print("[*] DEMO: running the CPU reference miner ...")
@@ -158,6 +167,8 @@ def main():
         print(f"[*] node height {before} -> {after}  (miner rc={rc})")
         if not a.keep:
             bridge.terminate()
+            if web:
+                web.terminate()
             if node_proc:
                 try:
                     rpc("stop")
@@ -169,6 +180,8 @@ def main():
     print("\n" + "=" * 56)
     print(f"  TEST BED RUNNING ({net})")
     print("  Point the FPGA miner at  <this-PC-IP>:3333")
+    if web:
+        print(f"  Web status view:      http://127.0.0.1:{a.web_port}")
     print("  Self-test (no FPGA):  python cpu_miner.py 127.0.0.1 3333")
     print("  Ctrl-C here to stop the bridge; node keeps running.")
     print("=" * 56)
@@ -176,6 +189,8 @@ def main():
         bridge.wait()
     except KeyboardInterrupt:
         bridge.terminate()
+        if web:
+            web.terminate()
     return 0
 
 
