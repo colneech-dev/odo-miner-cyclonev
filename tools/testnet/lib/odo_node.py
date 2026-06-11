@@ -115,39 +115,59 @@ def push_height(h: int) -> bytes:
     return bytes([len(out)]) + out
 
 
-def build_coinbase(tmpl, script_pubkey_hex):
-    """Assemble a segwit coinbase paying coinbasevalue to script_pubkey_hex,
-    including the witness commitment from the template.
+def build_coinbase(tmpl, script_pubkey_hex, extranonce1=b"\xde\xad\xbe\xef",
+                   en2_size=0):
+    """Assemble a segwit coinbase paying coinbasevalue to script_pubkey_hex.
 
-    Returns (txid_internal, nonwitness_hex, witness_hex):
-      txid_internal  merkle leaf = dsha(nonwitness); the header merkle root
-      nonwitness_hex coinbase WITHOUT witness — send this as Stratum coinb1 so
-                     the miner computes dsha(coinb1) == txid
-      witness_hex    coinbase WITH witness — used to assemble the block body
+    The extranonce (extranonce1 ++ extranonce2) lives in the coinbase
+    scriptSig, and the non-witness serialization is SPLIT around it so a
+    standard Stratum miner can reconstruct the exact coinbase:
+        coinbase = coinb1 + extranonce1 + extranonce2 + coinb2
+        merkle leaf (txid) = dsha(coinbase)
+
+    Returns a dict:
+      en1        extranonce1 bytes (>=1; hps/stratum.c rejects an empty one)
+      en2_size   extranonce2 size advertised to the miner
+      coinb1     hex of the serialization up to extranonce1
+      coinb2     hex of the serialization after extranonce2
+      witness_block(en2) -> hex of the WITNESS coinbase for the block body,
+                 given the miner's chosen extranonce2 (en2_size bytes)
+      txid(en2)  -> the merkle leaf for a given extranonce2
     """
     height = tmpl["height"]
     value = tmpl["coinbasevalue"]
     spk = bytes.fromhex(script_pubkey_hex)
     witcommit = bytes.fromhex(tmpl["default_witness_commitment"])
 
-    script_sig = push_height(height) + b"\x04\x00\x00\x00\x00"  # height + extranonce
-    vin = (bytes(32) + b"\xff\xff\xff\xff"
-           + varint(len(script_sig)) + script_sig + b"\xff\xff\xff\xff")
-
     out_reward = struct.pack("<Q", value) + varint(len(spk)) + spk
     out_commit = struct.pack("<Q", 0) + varint(len(witcommit)) + witcommit
     vout = b"\x02" + out_reward + out_commit
 
-    # Non-witness serialization -> txid (this is the merkle leaf, and coinb1)
-    nonwit = struct.pack("<I", 1) + b"\x01" + vin + vout + struct.pack("<I", 0)
-    txid = dsha(nonwit)  # internal order
+    hpush = push_height(height)
+    sslen = len(hpush) + len(extranonce1) + en2_size       # scriptSig length
+    pre = (struct.pack("<I", 1) + b"\x01" + bytes(32) + b"\xff\xff\xff\xff"
+           + varint(sslen) + hpush)                         # ...up to en1
+    post = b"\xff\xff\xff\xff" + vout + struct.pack("<I", 0)  # after en2
 
-    # Witness serialization (for the block body): 1 stack item, length 0x20,
-    # then the 32-byte witness reserved value.
-    witness = b"\x01" + b"\x20" + bytes(32)
-    full = (struct.pack("<I", 1) + b"\x00\x01" + b"\x01" + vin + vout
-            + witness + struct.pack("<I", 0))
-    return txid, nonwit.hex(), full.hex()
+    def txid(en2=b""):
+        return dsha(pre + extranonce1 + en2 + post)
+
+    def witness_block(en2=b""):
+        witness = b"\x01" + b"\x20" + bytes(32)
+        vin = (bytes(32) + b"\xff\xff\xff\xff" + varint(sslen)
+               + hpush + extranonce1 + en2 + b"\xff\xff\xff\xff")
+        full = (struct.pack("<I", 1) + b"\x00\x01" + b"\x01" + vin + vout
+                + witness + struct.pack("<I", 0))
+        return full.hex()
+
+    return {
+        "en1": extranonce1,
+        "en2_size": en2_size,
+        "coinb1": pre.hex(),
+        "coinb2": post.hex(),
+        "txid": txid,
+        "witness_block": witness_block,
+    }
 
 
 def serialize_header(tmpl, merkle_root_internal: bytes, nonce: int) -> bytes:
