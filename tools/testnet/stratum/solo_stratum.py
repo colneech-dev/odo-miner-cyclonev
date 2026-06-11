@@ -38,11 +38,65 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 from odo_node import (rpc, odocrypt_hash, build_coinbase, serialize_header,
                       assemble_block, target_from_template)
 
+import tempfile
+import threading as _th
+
 HOST, PORT = "0.0.0.0", 3333
 MODE = sys.argv[1] if len(sys.argv) > 1 else "regtest"
 
 EN1 = b"\xde\xad\xbe\xef"   # fixed extranonce1 (hps/stratum.c needs >=1 byte)
 EN2_SIZE = 0               # extranonce2 size advertised to the miner
+
+# Shared stats file the web view reads (same default in webview.py).
+STATS_FILE = os.environ.get(
+    "ODO_STATS_FILE", os.path.join(tempfile.gettempdir(), "odo_testbed_stats.json"))
+_stats = {"shares": 0, "blocks": 0, "hashrate": [], "recent": [], "job": {}}
+_stats_lock = _th.Lock()
+_last_share_t = [time.time()]
+
+
+def _write_stats():
+    try:
+        tmp = STATS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(_stats, f)
+        os.replace(tmp, STATS_FILE)
+    except Exception:
+        pass
+
+
+def record_job(job):
+    with _stats_lock:
+        t = job["tmpl"]
+        _stats["job"] = {
+            "job_id": job["id"], "odokey": job["odokey"],
+            "height": t["height"], "nbits": format(int(t["bits"], 16), "08x"),
+            "ntime": t["curtime"],
+            "prevhash": t["previousblockhash"],
+            "merkle": job["cb"]["txid"]().hex(),
+            "txcount": len(t.get("transactions", [])) + 1,
+        }
+        _write_stats()
+
+
+def record_share(result):
+    """result: 'block' | 'share' | 'rejected'"""
+    with _stats_lock:
+        now = time.time()
+        if result != "rejected":
+            _stats["shares"] += 1
+            elapsed = now - _last_share_t[0]
+            _last_share_t[0] = now
+            if elapsed > 0:
+                _stats["hashrate"].append(round((2 ** 32) / elapsed))
+                _stats["hashrate"] = _stats["hashrate"][-60:]
+        if result == "block":
+            _stats["blocks"] += 1
+        _stats["recent"].append({
+            "time": time.strftime("%H:%M:%S"),
+            "diff": "net", "result": result})
+        _stats["recent"] = _stats["recent"][-50:]
+        _write_stats()
 
 
 def make_job():
@@ -97,6 +151,7 @@ def handle(conn, addr):
                 elif m == "mining.authorize":
                     send(conn, {"id": mid, "result": True, "error": None})
                     job = make_job()
+                    record_job(job)
                     notify(conn, job)
                     print(f"[*] job {job['id']} odokey={job['odokey']} "
                           f"height={job['tmpl']['height']}")
@@ -110,17 +165,20 @@ def handle(conn, addr):
                     header = serialize_header(job["tmpl"], merkle, nonce)
                     h = odocrypt_hash(header, job["odokey"])
                     if int.from_bytes(h, "little") > job["target"]:
+                        record_share("rejected")
                         send(conn, {"id": mid, "result": False,
                                     "error": [23, "high-hash", None]})
                         continue
                     block = assemble_block(header, job["cb"]["witness_block"](en2))
                     res = rpc("submitblock", [block])
                     ok = res is None
+                    record_share("block" if ok else "rejected")
                     print(f"[*] share nonce={nonce} en2={en2.hex() or '-'} -> "
                           f"{'BLOCK ACCEPTED' if ok else 'REJECTED %r' % res}")
                     send(conn, {"id": mid, "result": ok, "error": None})
                     if ok:
                         job = make_job()
+                        record_job(job)
                         notify(conn, job)
                 else:
                     send(conn, {"id": mid, "result": True, "error": None})
