@@ -54,7 +54,8 @@ passes it through and `hps/miner.c` derives the same value from `nTime`.
 
 1. **Node**: copy `conf/digibyte.conf.regtest` to your DigiByte data dir,
    start `digibyted -regtest`, create a wallet + address, and
-   `generatetoaddress 100 <addr>` to mature a spendable balance.
+   `generatetoaddress 601 <addr>` (601, not 100 — OdoCrypt activates at
+   block 600 on regtest, and this also matures a spendable balance).
 2. **odocrypt.dll** (for the Python share-validator):
    ```
    cl /LD /std:c++17 odocrypt_wrapper.cpp \
