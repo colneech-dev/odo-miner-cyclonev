@@ -98,16 +98,20 @@ border-radius:10px;padding:12px;text-align:center;font-size:20px;font-weight:600
  <div class='tw'><table id='shares_t'><thead><tr><th>Time</th><th>Diff</th><th>Result</th></tr></thead><tbody></tbody></table></div></div>
 <div class='card'><h2 style='margin-top:0'>Current job</h2><div id='job'>-</div></div>
 <div class='card'><h2 style='margin-top:0'>Chain</h2><div id='chain'>-</div></div>
-<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+<script src='/chart.min.js'></script>
 <script>
 let chart=null, prevBlocks=0, started=false;
 function fmtRate(h){if(!h)return '-';if(h>=1e9)return (h/1e9).toFixed(1)+' GH/s';
  if(h>=1e6)return (h/1e6).toFixed(1)+' MH/s';if(h>=1e3)return (h/1e3).toFixed(1)+' kH/s';return h+' H/s';}
 function rows(obj){return Object.entries(obj).map(([k,v])=>
  `<div class='row'><span>${k}</span><span class='mono'>${v}</span></div>`).join('');}
+function beep(){try{var a=new (window.AudioContext||window.webkitAudioContext)();
+ var o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);
+ o.type='sine';o.frequency.value=880;g.gain.value=0.12;o.start();
+ setTimeout(()=>{o.stop();a.close();},180);}catch(e){}}
 function banner(){var b=document.getElementById('banner');b.style.display='block';
  b.animate([{opacity:.2},{opacity:1}],{duration:400,iterations:5});
- try{new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg').play();}catch(e){}
+ beep();
  setTimeout(()=>{b.style.display='none';},4000);}
 function tick(){fetch('/status.json').then(r=>r.json()).then(d=>{
  var s=d.stats||{}, c=d.chain||{};
@@ -140,13 +144,24 @@ class H(BaseHTTPRequestHandler):
         if self.path.startswith("/status.json"):
             body = json.dumps(status()).encode()
             ctype = "application/json"
+        elif self.path.startswith("/chart.min.js"):
+            # served locally — no CDN, works offline
+            try:
+                with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "static", "chart.min.js"), "rb") as f:
+                    body = f.read()
+            except OSError:
+                self.send_error(404)
+                return
+            ctype = "application/javascript"
         else:
             body = PAGE.encode()
             ctype = "text/html"
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        cache = "max-age=86400" if self.path.startswith("/chart") else "no-store"
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(body)
 
