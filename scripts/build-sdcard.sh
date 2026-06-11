@@ -40,7 +40,9 @@ set -e
 BUILDROOT_DIR="${BUILDROOT_DIR:-${HOME}/buildroot-2025.11.3}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HPS_BUILD_DIR="$PROJECT_ROOT/hps"
-BITSTREAM_DIR="$PROJECT_ROOT/bitstreams"
+# Where to find the .rbf. Default to the Quartus output dir (where the build
+# actually puts it); override with BITSTREAM_DIR=... if you stage it elsewhere.
+BITSTREAM_DIR="${BITSTREAM_DIR:-$PROJECT_ROOT/hdl/quartus/output_files}"
 IMAGE_SIZE_MB="${IMAGE_SIZE:-9216}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/sdcard-output}"
 IMAGE_FILE="$OUTPUT_DIR/odo-miner-cyclonev-$(date +%Y%m%d-%H%M%S).img"
