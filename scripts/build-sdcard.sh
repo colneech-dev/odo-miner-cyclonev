@@ -264,7 +264,7 @@ fi
 cat > "/tmp/odo-boot-$$.txt" <<UBOOT
 echo "odo-miner boot script"
 
-setenv bootargs root=/dev/mmcblk0p2 rw rootwait console=ttyS0,115200n8
+setenv bootargs root=/dev/mmcblk0p2 rw rootwait console=ttyS0,115200n8 consoleblank=0
 
 if test -e mmc 0:1 fpga.rbf; then
     echo "Loading FPGA bitstream..."

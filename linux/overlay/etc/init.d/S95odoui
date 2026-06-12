@@ -2,7 +2,8 @@
 # S95odoui — start the touch status panel on the SPI TFT (BusyBox init).
 
 DAEMON=/usr/bin/odo-ui
-PIDFILE=/var/run/odoui.pid
+# /var/run does not exist on this minimal rootfs; /run is the tmpfs.
+PIDFILE=/run/odoui.pid
 
 start() {
     printf "Starting odo-ui: "

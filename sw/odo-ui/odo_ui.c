@@ -161,6 +161,12 @@ static int fb_open(fb_t *fb)
     fb->pix = mmap(NULL, (size_t)f.line_length * v.yres,
                    PROT_READ | PROT_WRITE, MAP_SHARED, fb->fd, 0);
     if (fb->pix == MAP_FAILED) { perror("mmap fb"); return -1; }
+
+    /* Ensure the panel is unblanked (backlight on). fbtft ties the backlight
+     * to the FB blank state, and the panel can come up blanked during boot —
+     * so the boot splashes would draw but stay invisible. */
+    int bfd = open("/sys/class/graphics/fb0/blank", O_WRONLY);
+    if (bfd >= 0) { ssize_t w = write(bfd, "0\n", 2); (void)w; close(bfd); }
     return 0;
 }
 
@@ -217,6 +223,7 @@ static int fb_text(fb_t *fb, int x, int y, const char *s, int scale, uint16_t c)
 typedef struct {
     int fd;
     int raw_x, raw_y, down;
+    int cur_x, cur_y;                /* live mapped position while pressed */
     int min_x, max_x, min_y, max_y;  /* raw calibration */
     int swap_xy, inv_x, inv_y;
 } touch_t;
@@ -227,6 +234,10 @@ static int touch_open(touch_t *t)
     t->fd = -1;
     t->min_x = 150; t->max_x = 3900;
     t->min_y = 150; t->max_y = 3900;
+    /* Panel is rotate=270 in the DTS, so the touch axes are swapped relative
+     * to the display, and Y is inverted. (Calibrated on hardware: finger
+     * top-left -> screen top-left with swap_xy + inv_y.) */
+    t->swap_xy = 1;
     t->inv_y = 1;
 
     DIR *d = opendir("/dev/input");
@@ -279,6 +290,8 @@ static int touch_poll(touch_t *t, fb_t *fb, int *sx, int *sy)
                 if (py >= fb->h) py = fb->h - 1;
                 last_x = (int)px;
                 last_y = (int)py;
+                t->cur_x = (int)px;
+                t->cur_y = (int)py;
                 was_down = 1;
             } else if (was_down) {
                 was_down = 0;
@@ -402,11 +415,296 @@ static void board_ip(char *ip, size_t ip_sz)
     freeifaddrs(ifa0);
 }
 
+/* Connected WiFi SSID + signal (dBm) via `iw`. ssid empty if not associated. */
+static void wifi_status(char *ssid, size_t sz, int *dbm)
+{
+    ssid[0] = 0; *dbm = 0;
+    FILE *p = popen("iw dev wlan0 link 2>/dev/null", "r");
+    if (!p) return;
+    char line[200], *s;
+    while (fgets(line, sizeof line, p)) {
+        if ((s = strstr(line, "SSID: "))) {
+            strncpy(ssid, s + 6, sz - 1); ssid[sz - 1] = 0;
+            ssid[strcspn(ssid, "\r\n")] = 0;
+        } else if ((s = strstr(line, "signal: "))) {
+            *dbm = atoi(s + 8);            /* e.g. "signal: -55 dBm" */
+        }
+    }
+    pclose(p);
+}
+
+/* 4-bar signal-strength icon from a dBm value (0 = unknown/not connected). */
+static void fb_signal(fb_t *fb, int x, int y, int dbm, uint16_t on, uint16_t off)
+{
+    int level = dbm == 0 ? 0 :
+                dbm >= -55 ? 4 : dbm >= -65 ? 3 :
+                dbm >= -75 ? 2 : dbm >= -85 ? 1 : 0;
+    for (int i = 0; i < 4; i++) {
+        int h = 3 + i * 2;                 /* heights 3,5,7,9 */
+        fb_rect(fb, x + i * 4, y + (9 - h), 3, h, i < level ? on : off);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* WiFi setup: on-screen keyboard -> /etc/wpa_supplicant.conf          */
+/* ------------------------------------------------------------------ */
+#define WPA_CONF "/etc/wpa_supplicant.conf"
+
+enum { KC_CHAR = 0, KC_SHIFT, KC_BKSP, KC_SPACE, KC_SAVE, KC_CANCEL };
+
+typedef struct {
+    rect_t r;
+    int kind;          /* KC_* */
+    char lo, up;       /* characters for KC_CHAR */
+    const char *label; /* for non-char keys */
+} kbkey_t;
+
+/* Build the keyboard layout for a given framebuffer width. Returns key count. */
+static int kb_build(kbkey_t *k, int fbw)
+{
+    static const char *R0 = "1234567890", *R0U = "!@#$%^&*()";
+    static const char *R1 = "qwertyuiop", *R1U = "QWERTYUIOP";
+    static const char *R2 = "asdfghjkl",  *R2U = "ASDFGHJKL";
+    static const char *R3 = "zxcvbnm",    *R3U = "ZXCVBNM";
+    int n = 0, cw = fbw / 10, kh = 27, top = 84, pitch = 31;
+
+    for (int i = 0; i < 10; i++)
+        k[n++] = (kbkey_t){ {i*cw+1, top,          cw-2, kh}, KC_CHAR, R0[i], R0U[i], 0 };
+    for (int i = 0; i < 10; i++)
+        k[n++] = (kbkey_t){ {i*cw+1, top+pitch,    cw-2, kh}, KC_CHAR, R1[i], R1U[i], 0 };
+    for (int i = 0; i < 9; i++)
+        k[n++] = (kbkey_t){ {i*cw+cw/2+1, top+2*pitch, cw-2, kh}, KC_CHAR, R2[i], R2U[i], 0 };
+
+    int y3 = top + 3*pitch;
+    k[n++] = (kbkey_t){ {1, y3, 46, kh}, KC_SHIFT, 0, 0, "SHFT" };
+    for (int i = 0; i < 7; i++)
+        k[n++] = (kbkey_t){ {49+i*cw, y3, cw-2, kh}, KC_CHAR, R3[i], R3U[i], 0 };
+    k[n++] = (kbkey_t){ {49+7*cw, y3, fbw-(49+7*cw)-1, kh}, KC_BKSP, 0, 0, "DEL" };
+
+    int y4 = top + 4*pitch;
+    k[n++] = (kbkey_t){ {1,   y4, 30, kh}, KC_CHAR, '-', '-', 0 };
+    k[n++] = (kbkey_t){ {33,  y4, 30, kh}, KC_CHAR, '_', '_', 0 };
+    k[n++] = (kbkey_t){ {65,  y4, 30, kh}, KC_CHAR, '.', '.', 0 };
+    k[n++] = (kbkey_t){ {97,  y4, 92, kh}, KC_SPACE,  0, 0, "SPACE" };
+    k[n++] = (kbkey_t){ {191, y4, 60, kh}, KC_SAVE,   0, 0, "SAVE" };
+    k[n++] = (kbkey_t){ {253, y4, fbw-253-1, kh}, KC_CANCEL, 0, 0, "CXL" };
+    return n;
+}
+
+/* 9x7 eye icon — password reveal toggle */
+static void fb_eye(fb_t *fb, int x, int y, uint16_t c)
+{
+    static const char *eye[7] = {
+        "...111...", ".11...11.", "1..111..1",
+        "1.11111.1", "1..111..1", ".11...11.", "...111...",
+    };
+    for (int r = 0; r < 7; r++)
+        for (int i = 0; i < 9; i++)
+            if (eye[r][i] == '1') fb_rect(fb, x + i, y + r, 1, 1, c);
+}
+
+#define EYE_W 24
+static void wifi_draw(fb_t *fb, const kbkey_t *k, int nk, const char *ssid,
+                      const char *psk, int field, int shift, int reveal)
+{
+    fb_rect(fb, 0, 0, fb->w, fb->h, C_BG);
+    fb_rect(fb, 0, 0, fb->w, 30, C_PANEL);
+    fb_logo(fb, 6, 4, 1);
+    fb_text(fb, 26, 8, "WIFI SETUP", 2, C_TEXT);
+
+    char ln[200];
+    /* SSID field (active one highlighted) */
+    fb_rect(fb, 6, 34, fb->w - 12, 18, field == 0 ? C_NAVY : C_PANEL);
+    snprintf(ln, sizeof ln, "SSID: %s%s", ssid, (field == 0 ? "_" : ""));
+    fb_text(fb, 10, 39, ln, 1, C_TEXT);
+    /* PSK field (leaves room on the right for the eye toggle) */
+    fb_rect(fb, 6, 56, fb->w - 12 - EYE_W, 18, field == 1 ? C_NAVY : C_PANEL);
+    if (reveal) {
+        snprintf(ln, sizeof ln, "PSK:  %s%s", psk, (field == 1 ? "_" : ""));
+    } else {
+        size_t L = strlen(psk); char mask[160];
+        for (size_t i = 0; i < L && i < sizeof(mask) - 2; i++) mask[i] = '*';
+        mask[L < sizeof(mask) - 2 ? L : sizeof(mask) - 2] = 0;
+        snprintf(ln, sizeof ln, "PSK:  %s%s", mask, (field == 1 ? "_" : ""));
+    }
+    fb_text(fb, 10, 61, ln, 1, C_TEXT);
+    /* eye toggle (bright when revealed) */
+    fb_rect(fb, fb->w - 6 - EYE_W, 56, EYE_W, 18, C_PANEL);
+    fb_eye(fb, fb->w - 6 - EYE_W + 7, 61, reveal ? C_CYAN : C_DIM);
+
+    for (int i = 0; i < nk; i++) {
+        const kbkey_t *key = &k[i];
+        uint16_t bg = key->kind == KC_SAVE   ? C_OK :
+                      key->kind == KC_CANCEL ? C_BAD :
+                      (key->kind == KC_SHIFT && shift) ? C_CYAN : C_BTN;
+        fb_rect(fb, key->r.x, key->r.y, key->r.w, key->r.h, C_BLUE);
+        fb_rect(fb, key->r.x + 1, key->r.y + 1, key->r.w - 2, key->r.h - 2, bg);
+        char lab[8]; const char *s;
+        if (key->kind == KC_CHAR) { lab[0] = shift ? key->up : key->lo; lab[1] = 0; s = lab; }
+        else s = key->label;
+        fb_text(fb, key->r.x + (key->r.w - (int)strlen(s) * 8) / 2,
+                key->r.y + (key->r.h - 8) / 2, s, 1, C_TEXT);
+    }
+}
+
+/* Apply a tap. Returns 0 stay, 1 save requested, 2 cancel. */
+static int wifi_tap(int sx, int sy, const kbkey_t *k, int nk,
+                    char *ssid, size_t ssz, char *psk, size_t psz,
+                    int *field, int *shift)
+{
+    if (sy >= 34 && sy < 52) { *field = 0; return 0; }
+    if (sy >= 56 && sy < 74) { *field = 1; return 0; }
+    for (int i = 0; i < nk; i++) {
+        if (!hit(&k[i].r, sx, sy)) continue;
+        char *buf = *field == 0 ? ssid : psk;
+        size_t sz = *field == 0 ? ssz : psz, L = strlen(buf);
+        switch (k[i].kind) {
+        case KC_CHAR:  if (L + 1 < sz) { buf[L] = *shift ? k[i].up : k[i].lo; buf[L+1] = 0; }
+                       *shift = 0; break;
+        case KC_SHIFT: *shift = !*shift; break;
+        case KC_BKSP:  if (L > 0) buf[L-1] = 0; break;
+        case KC_SPACE: if (L + 1 < sz) { buf[L] = ' '; buf[L+1] = 0; } break;
+        case KC_SAVE:  return 1;
+        case KC_CANCEL:return 2;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+static void wifi_save(const char *ssid, const char *psk)
+{
+    FILE *f = fopen(WPA_CONF, "w");
+    if (!f) return;
+    /* ctrl_interface in /tmp (not /var/run, which doesn't exist here) */
+    fprintf(f, "ctrl_interface=/tmp/wpa_supplicant\nupdate_config=1\ncountry=GB\n"
+               "network={\n\tssid=\"%s\"\n", ssid);
+    if (psk[0]) fprintf(f, "\tpsk=\"%s\"\n", psk);
+    else        fprintf(f, "\tkey_mgmt=NONE\n");
+    fprintf(f, "}\n");
+    fclose(f);
+    sync();
+    int rc = system("/etc/init.d/S45wifi restart >/dev/null 2>&1 &");
+    (void)rc;
+}
+
+/* Scan nearby networks via `iw`. Returns count; fills list[][33] (deduped). */
+static int wifi_scan(char list[][33], int max)
+{
+    FILE *p = popen("iw dev wlan0 scan 2>/dev/null | sed -n 's/^[\t ]*SSID: //p'", "r");
+    if (!p) return 0;
+    int n = 0; char line[80];
+    while (n < max && fgets(line, sizeof line, p)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!line[0]) continue;                 /* skip hidden SSIDs */
+        int dup = 0;
+        for (int i = 0; i < n; i++) if (!strcmp(list[i], line)) { dup = 1; break; }
+        if (!dup) { strncpy(list[n], line, 32); list[n][32] = 0; n++; }
+    }
+    pclose(p);
+    return n;
+}
+
+#define SCAN_ROW_H 22
+#define SCAN_ROW_Y0 36
+static void scan_draw(fb_t *fb, char list[][33], int n)
+{
+    fb_rect(fb, 0, 0, fb->w, fb->h, C_BG);
+    fb_rect(fb, 0, 0, fb->w, 30, C_PANEL);
+    fb_text(fb, 8, 8, "SELECT NETWORK", 2, C_TEXT);
+    int rows = n > 8 ? 8 : n;
+    for (int i = 0; i < rows; i++) {
+        int y = SCAN_ROW_Y0 + i * SCAN_ROW_H;
+        fb_rect(fb, 6, y, fb->w - 12, SCAN_ROW_H - 2, C_PANEL);
+        fb_text(fb, 12, y + 5, list[i], 1, C_TEXT);
+    }
+    fb_rect(fb, 6, fb->h - 24, fb->w - 12, 20, C_NAVY);
+    fb_text(fb, 12, fb->h - 18,
+            n ? "tap a network, or here to type it" : "no networks - tap here to type",
+            1, C_TEXT);
+}
+
 static volatile sig_atomic_t g_stop = 0;
 static void on_sig(int s) { (void)s; g_stop = 1; }
 
+/* Full WiFi setup screen loop: keyboard + scan list. Returns when the user
+ * saves (writes wpa_supplicant.conf) or cancels. */
+static void run_wifi_setup(fb_t *fb, touch_t *tp, const kbkey_t *keys, int nk, int have_touch)
+{
+    char ssid[64] = "", psk[128] = "";
+    int field = 0, shift = 0, scan_mode = 0, scan_n = 0, reveal = 0;
+    char scan[16][33];
+    rect_t scan_btn = { fb->w - 52, 34, 46, 16 };
+    rect_t eye_btn  = { fb->w - 6 - EYE_W, 56, EYE_W, 18 };
+
+    while (!g_stop) {
+        if (scan_mode) {
+            scan_draw(fb, scan, scan_n);
+        } else {
+            wifi_draw(fb, keys, nk, ssid, psk, field, shift, reveal);
+            fb_rect(fb, scan_btn.x, scan_btn.y, scan_btn.w, scan_btn.h, C_CYAN);
+            fb_text(fb, scan_btn.x + (scan_btn.w - 4 * 8) / 2, scan_btn.y + 4,
+                    "SCAN", 1, C_BG);
+        }
+        for (int tick = 0; tick < 20 && !g_stop; tick++) {
+            int sx, sy;
+            if (have_touch && touch_poll(tp, fb, &sx, &sy)) {
+                if (scan_mode) {
+                    int rows = scan_n > 8 ? 8 : scan_n;
+                    for (int i = 0; i < rows; i++) {
+                        rect_t r = { 6, SCAN_ROW_Y0 + i * SCAN_ROW_H, fb->w - 12, SCAN_ROW_H - 2 };
+                        if (hit(&r, sx, sy)) {
+                            strncpy(ssid, scan[i], sizeof ssid - 1);
+                            ssid[sizeof ssid - 1] = 0;
+                            field = 1;       /* jump to password entry */
+                            break;
+                        }
+                    }
+                    scan_mode = 0;           /* any tap returns to the keyboard */
+                } else if (hit(&scan_btn, sx, sy)) {
+                    fb_rect(fb, 0, fb->h / 2 - 10, fb->w, 20, C_NAVY);
+                    fb_text(fb, fb->w / 2 - 44, fb->h / 2 - 4, "Scanning...", 1, C_TEXT);
+                    scan_n = wifi_scan(scan, 16);
+                    scan_mode = 1;
+                } else if (hit(&eye_btn, sx, sy)) {
+                    reveal = !reveal;             /* toggle password reveal */
+                } else {
+                    int r = wifi_tap(sx, sy, keys, nk, ssid, sizeof ssid,
+                                     psk, sizeof psk, &field, &shift);
+                    if (r == 1) { wifi_save(ssid, psk); return; }
+                    if (r == 2) return;
+                }
+                tick = 99;
+            }
+            struct timespec ts = { 0, 100 * 1000000L };
+            nanosleep(&ts, NULL);
+        }
+    }
+}
+
+/* Centered splash: shield logo + ODO MINER + a status/loading message. */
+static void draw_splash(fb_t *fb, const char *msg)
+{
+    fb_rect(fb, 0, 0, fb->w, fb->h, C_BG);
+    fb_logo(fb, fb->w / 2 - 16, fb->h / 2 - 52, 2);            /* 32x32 */
+    const char *title = "ODO MINER";
+    fb_text(fb, (fb->w - (int)strlen(title) * 16) / 2, fb->h / 2 - 12, title, 2, C_TEXT);
+    fb_text(fb, (fb->w - (int)strlen(msg) * 8) / 2, fb->h / 2 + 16, msg, 1, C_CYAN);
+}
+
 int main(int argc, char **argv)
 {
+    /* Splash mode: `odo-ui splash "message"` paints a centered splash and
+     * exits — used by the init scripts to show boot progress on the TFT. */
+    if (argc >= 2 && strcmp(argv[1], "splash") == 0) {
+        fb_t sfb;
+        if (fb_open(&sfb) != 0) return 1;
+        draw_splash(&sfb, argc >= 3 ? argv[2] : "Loading...");
+        struct timespec ts = { 0, 300 * 1000000L };  /* let fbtft push it out */
+        nanosleep(&ts, NULL);
+        return 0;
+    }
+
     const char *status_path = argc > 1 ? argv[1] : "/run/odod/status.json";
 
     signal(SIGINT, on_sig);
@@ -421,17 +719,36 @@ int main(int argc, char **argv)
     if (!have_touch)
         fprintf(stderr, "odo-ui: no ADS7846 touch device found; display-only mode\n");
 
-    rect_t btn_restart = { 8,            fb.h - 42, fb.w / 2 - 14, 34 };
-    rect_t btn_reboot  = { fb.w / 2 + 6, fb.h - 42, fb.w / 2 - 14, 34 };
+    /* three-button row at the bottom: RESTART | WIFI | REBOOT */
+    int bw = (fb.w - 8 * 4) / 3;
+    rect_t btn_restart = { 8,                fb.h - 42, bw, 34 };
+    rect_t btn_wifi    = { 8 + (bw + 8),     fb.h - 42, bw, 34 };
+    rect_t btn_reboot  = { 8 + 2 * (bw + 8), fb.h - 42, bw, 34 };
+
+    /* WiFi setup keyboard layout */
+    kbkey_t keys[64];
+    int nk = kb_build(keys, fb.w);
+    /* initial load: no WiFi configured yet -> open the setup screen */
+    if (have_touch && access(WPA_CONF, F_OK) != 0)
+        run_wifi_setup(&fb, &tp, keys, nk, have_touch);
 
     int confirm = 0;            /* 0 none, 1 restart, 2 reboot */
+    int rebooting = 0;
     time_t confirm_at = 0;
 
     while (!g_stop) {
+        time_t now = time(NULL);
+
+        if (rebooting) {        /* hold a "Rebooting..." splash until killed */
+            draw_splash(&fb, "Rebooting...");
+            struct timespec ts = { 0, 400 * 1000000L };
+            nanosleep(&ts, NULL);
+            continue;
+        }
+
         status_t st;
         memset(&st, 0, sizeof(st));
         int have = status_read(status_path, &st) == 0;
-        time_t now = time(NULL);
         int stale = !have || (st.updated && now - st.updated > 120);
 
         /* ---- background + header bar with shield logo ---- */
@@ -493,6 +810,16 @@ int main(int argc, char **argv)
                     ip[0] ? C_TEXT : C_WARN);
             y += 14;
 
+            /* WiFi: connected SSID + signal-strength bars */
+            char wssid[40]; int wdbm = 0;
+            wifi_status(wssid, sizeof wssid, &wdbm);
+            fb_text(&fb, xL, y, "WIFI", 1, C_DIM);
+            char wsh[26];
+            snprintf(wsh, sizeof wsh, "%s", wssid[0] ? wssid : "-");
+            fb_text(&fb, xLv, y, wsh, 1, wssid[0] ? C_TEXT : C_DIM);
+            if (wssid[0]) fb_signal(&fb, fb.w - 24, y, wdbm, C_OK, C_PANEL);
+            y += 14;
+
             /* epoch line: countdown, or amber ROLLING state at the boundary */
             fb_text(&fb, xL, y, "EPOCH", 1, C_DIM);
             if (st.epoch && st.epoch_next && now >= st.epoch_next) {
@@ -515,36 +842,45 @@ int main(int argc, char **argv)
             confirm = 0;     /* confirmation times out */
 
         if (!confirm) {
-            fb_rect(&fb, btn_restart.x, btn_restart.y, btn_restart.w, btn_restart.h, C_BLUE);
-            fb_rect(&fb, btn_restart.x + 1, btn_restart.y + 1,
-                    btn_restart.w - 2, btn_restart.h - 2, C_BTN);
-            fb_text(&fb, btn_restart.x + 10, btn_restart.y + 13, "RESTART MINER", 1, C_TEXT);
-            fb_rect(&fb, btn_reboot.x, btn_reboot.y, btn_reboot.w, btn_reboot.h, C_BLUE);
-            fb_rect(&fb, btn_reboot.x + 1, btn_reboot.y + 1,
-                    btn_reboot.w - 2, btn_reboot.h - 2, C_BTN);
-            fb_text(&fb, btn_reboot.x + 10, btn_reboot.y + 13, "REBOOT", 1, C_TEXT);
+            struct { rect_t r; const char *t; } b3[3] = {
+                { btn_restart, "RESTART" }, { btn_wifi, "WIFI" }, { btn_reboot, "REBOOT" }
+            };
+            for (int i = 0; i < 3; i++) {
+                fb_rect(&fb, b3[i].r.x, b3[i].r.y, b3[i].r.w, b3[i].r.h, C_BLUE);
+                fb_rect(&fb, b3[i].r.x + 1, b3[i].r.y + 1, b3[i].r.w - 2, b3[i].r.h - 2, C_BTN);
+                fb_text(&fb, b3[i].r.x + (b3[i].r.w - (int)strlen(b3[i].t) * 8) / 2,
+                        b3[i].r.y + 13, b3[i].t, 1, C_TEXT);
+            }
         } else {
-            fb_rect(&fb, btn_restart.x, btn_restart.y, btn_restart.w, btn_restart.h, C_BAD);
-            fb_text(&fb, btn_restart.x + 10, btn_restart.y + 10,
+            int cw = btn_wifi.x + btn_wifi.w - btn_restart.x;   /* span restart+wifi */
+            fb_rect(&fb, btn_restart.x, btn_restart.y, cw, btn_restart.h, C_BAD);
+            fb_text(&fb, btn_restart.x + 8, btn_restart.y + 13,
                     confirm == 1 ? "CONFIRM RESTART" : "CONFIRM REBOOT", 1, C_TEXT);
             fb_rect(&fb, btn_reboot.x, btn_reboot.y, btn_reboot.w, btn_reboot.h, C_BTNHI);
-            fb_text(&fb, btn_reboot.x + 10, btn_reboot.y + 10, "CANCEL", 1, C_TEXT);
+            fb_text(&fb, btn_reboot.x + (btn_reboot.w - 6 * 8) / 2, btn_reboot.y + 13,
+                    "CANCEL", 1, C_TEXT);
         }
 
         /* ---- input ---- */
         for (int tick = 0; tick < 20 && !g_stop; tick++) {
             int sx, sy;
-            if (have_touch && touch_poll(&tp, &fb, &sx, &sy)) {
+            int tapped = have_touch ? touch_poll(&tp, &fb, &sx, &sy) : 0;
+            if (tapped) {
                 if (!confirm) {
                     if (hit(&btn_restart, sx, sy)) { confirm = 1; confirm_at = now; }
+                    else if (hit(&btn_wifi, sx, sy)) { run_wifi_setup(&fb, &tp, keys, nk, have_touch); }
                     else if (hit(&btn_reboot, sx, sy)) { confirm = 2; confirm_at = now; }
                 } else {
-                    if (hit(&btn_restart, sx, sy)) {
+                    rect_t cfm = { btn_restart.x, btn_restart.y,
+                                   btn_wifi.x + btn_wifi.w - btn_restart.x, btn_restart.h };
+                    if (hit(&cfm, sx, sy)) {
                         if (confirm == 1) {
                             int rc = system("/etc/init.d/S90odod restart >/dev/null 2>&1 || "
                                             "systemctl restart odod >/dev/null 2>&1");
                             (void)rc;
                         } else {
+                            rebooting = 1;
+                            draw_splash(&fb, "Rebooting...");
                             sync();
                             int rc = system("reboot");
                             (void)rc;
@@ -557,6 +893,16 @@ int main(int argc, char **argv)
             struct timespec ts = { 0, 100 * 1000000L };
             nanosleep(&ts, NULL);
         }
+    }
+
+    /* Clear the panel on exit (odo-ui catches SIGTERM on reboot/stop) so a
+     * stale frame doesn't linger on the TFT. Pause briefly so fbtft's
+     * deferred IO pushes the cleared frame out before the process exits. */
+    if (fb.pix && fb.pix != MAP_FAILED) {
+        if (rebooting) draw_splash(&fb, "Rebooting...");
+        else           fb_rect(&fb, 0, 0, fb.w, fb.h, RGB565(0, 0, 0));
+        struct timespec ts = { 0, 250 * 1000000L };
+        nanosleep(&ts, NULL);
     }
 
     return 0;

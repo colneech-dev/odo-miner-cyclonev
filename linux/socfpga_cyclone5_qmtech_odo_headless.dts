@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * QMTECH Cyclone V SoC KFB — odo-miner HEADLESS bring-up device tree.
+ *
+ * Identical HPS setup to socfpga_cyclone5_qmtech_odo.dts but with ALL fabric
+ * (LWH2F) peripherals removed: no SPI display/touch, no PIO gpio/keys/leds.
+ *
+ * Why: the altera_spi driver hangs the boot when it probes the fabric SPI
+ * masters if the LWH2F access doesn't respond. With no display wired, those
+ * nodes are pure liability. The miner core (0xFF200000) has no kernel driver —
+ * odod/fpga_smoke_test reach it via /dev/mem — so mining needs none of this.
+ *
+ * Use this DTB to reach a login prompt and verify the FPGA from a shell, then
+ * switch back to the full DTS once the display is wired and the LWH2F path is
+ * confirmed. Built to the SAME output name (socfpga_cyclone5_qmtech_odo.dtb)
+ * so boot.scr finds it unchanged.
+ */
+
+#include "intel/socfpga/socfpga_cyclone5_socdk.dts"
+
+/ {
+	model = "QMTECH Cyclone V SoC KFB (odo-miner, headless)";
+};
+
+/* Fixed MAC for EMAC1. U-Boot reported "ethernet address not set" (no MAC in
+ * its env), and without one Linux assigns a random MAC each boot. 02:.. is a
+ * locally-administered address — safe for a single board on a test network. */
+&gmac1 {
+	local-mac-address = [02 de ad be ef 01];
+};
