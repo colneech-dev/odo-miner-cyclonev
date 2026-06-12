@@ -38,7 +38,10 @@
 		spi_lcd: spi@ff201000 {
 			compatible = "altr,spi-1.0";
 			reg = <0xff201000 0x20>;
-			interrupts = <0 72 IRQ_TYPE_LEVEL_HIGH>;
+			/* No interrupts property -> spi-altera runs in POLLING mode.
+			 * The fabric f2h IRQ to the GIC does not fire on this board
+			 * (SPI transfers time out -110 in IRQ mode); polling the
+			 * status register works since LWH2F register access is fine. */
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "okay";
@@ -62,7 +65,7 @@
 		spi_touch: spi@ff201100 {
 			compatible = "altr,spi-1.0";
 			reg = <0xff201100 0x20>;
-			interrupts = <0 73 IRQ_TYPE_LEVEL_HIGH>;
+			/* polling mode — see spi_lcd above */
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "okay";
@@ -100,7 +103,10 @@
 		pio_in: gpio@ff201300 {
 			compatible = "altr,pio-1.0";
 			reg = <0xff201300 0x10>;
-			interrupts = <0 74 IRQ_TYPE_LEVEL_HIGH>;
+			/* f2h_irq0[2] = GIC SPI 74 = DT <0 42 4> (number = GIC_ID-32).
+			 * Was <0 74 4> (= GIC 106, the unconnected f2h_irq1 range) — the
+			 * classic off-by-32; that's why the touch pen IRQ never fired. */
+			interrupts = <0 42 IRQ_TYPE_LEVEL_HIGH>;
 			altr,ngpio = <3>;
 			altr,interrupt-type = <IRQ_TYPE_EDGE_FALLING>;
 			gpio-controller;
@@ -148,4 +154,10 @@
 		led6 { label = "odo:green:user6";   gpios = <&pio_led 6 GPIO_ACTIVE_HIGH>; };
 		led7 { label = "odo:green:user7";   gpios = <&pio_led 7 GPIO_ACTIVE_HIGH>; };
 	};
+};
+
+/* Fixed MAC for EMAC1 (U-Boot has no MAC in its env; without one Linux picks a
+ * random MAC each boot). 02:.. = locally administered, fine for a test net. */
+&gmac1 {
+	local-mac-address = [02 de ad be ef 01];
 };

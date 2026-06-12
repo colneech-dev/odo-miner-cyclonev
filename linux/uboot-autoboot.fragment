@@ -1,0 +1,10 @@
+# U-Boot config fragment — bake in autoboot so the board starts mining with no
+# console interaction. Merged into the socfpga_de10_nano U-Boot .config by
+# Buildroot (BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES).
+#
+# The DE10-Nano U-Boot's default environment does NOT auto-run our boot.scr;
+# this sets the default bootcmd to load + source it, with a 10 s interruptible
+# countdown (hit a key to drop to the U-Boot prompt for recovery/reflash).
+CONFIG_USE_BOOTCOMMAND=y
+CONFIG_BOOTCOMMAND="fatload mmc 0:1 0x1000000 boot.scr && source 0x1000000"
+CONFIG_BOOTDELAY=10

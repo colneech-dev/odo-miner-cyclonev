@@ -163,12 +163,22 @@ def handle(conn, addr):
                     # rebuild the EXACT coinbase the miner hashed (coinb1+en1+en2+coinb2)
                     merkle = job["cb"]["txid"](en2)
                     header = serialize_header(job["tmpl"], merkle, nonce)
-                    h = odocrypt_hash(header, job["odokey"])
-                    if int.from_bytes(h, "little") > job["target"]:
-                        record_share("rejected")
-                        send(conn, {"id": mid, "result": False,
-                                    "error": [23, "high-hash", None]})
-                        continue
+                    # Local OdoCrypt pre-check is best-effort: it needs the
+                    # odocrypt.dll/.so on THIS host. If the lib can't load (e.g.
+                    # Windows without a built odocrypt.dll), skip the pre-check —
+                    # digibyted's submitblock is the authoritative PoW validator.
+                    try:
+                        h = odocrypt_hash(header, job["odokey"])
+                        if int.from_bytes(h, "little") > job["target"]:
+                            record_share("rejected")
+                            send(conn, {"id": mid, "result": False,
+                                        "error": [23, "high-hash", None]})
+                            continue
+                    except Exception as e:
+                        if not globals().get("_warned_nolib"):
+                            print(f"[!] local OdoCrypt lib unavailable ({e}); "
+                                  f"relying on node submitblock for validation")
+                            globals()["_warned_nolib"] = True
                     block = assemble_block(header, job["cb"]["witness_block"](en2))
                     res = rpc("submitblock", [block])
                     ok = res is None

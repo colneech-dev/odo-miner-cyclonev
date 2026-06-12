@@ -1,14 +1,23 @@
 #!/bin/sh
 # S45wifi — bring up USB WiFi if configured (BusyBox init).
 #
-# Uses /etc/wpa_supplicant.conf, which is written either by hand or from the
-# web dashboard (odo-webd WiFi form). If the file or the adapter is missing,
-# this script is a no-op — the board keeps working over Ethernet.
-# dhcpcd (master mode) picks up wlan0 automatically once it associates.
+# Uses /etc/wpa_supplicant.conf, written either by hand or from the web
+# dashboard (odo-webd WiFi form). If the file or the adapter is missing, this
+# script is a no-op — the board keeps working over Ethernet.
+#
+# Notes from hardware bring-up (2026-06-11):
+#  - the wifi driver (rtl8xxxu for the RTL8192EU, etc.) is a *module* and
+#    BusyBox does not auto-load it on hotplug, so we modprobe it here.
+#  - DHCP is busybox udhcpc (dhcpcd is not in the image).
+#  - wpa_supplicant's ctrl_interface must exist at boot — use /tmp, NOT
+#    /var/run (which doesn't exist on this rootfs).
 
 CONF=/etc/wpa_supplicant.conf
 IFACE=wlan0
-PIDFILE=/var/run/wpa_supplicant.$IFACE.pid
+PIDFILE=/tmp/wpa_supplicant.$IFACE.pid
+DHCPPID=/tmp/udhcpc.$IFACE.pid
+# Drivers to try (harmless if a module is absent).
+WIFI_MODULES="rtl8xxxu rtl8192cu mt7601u rtl8188eu"
 
 start() {
     printf "Starting WiFi: "
@@ -16,9 +25,13 @@ start() {
         echo "SKIPPED (no $CONF)"
         return 0
     fi
+    [ -e /dev/fb0 ] && /usr/bin/odo-ui splash "Connecting WiFi..." 2>/dev/null
+    for m in $WIFI_MODULES; do
+        modprobe "$m" 2>/dev/null
+    done
     # USB adapter may enumerate slightly after init; wait briefly
     n=0
-    while [ ! -d "/sys/class/net/$IFACE" ] && [ $n -lt 10 ]; do
+    while [ ! -d "/sys/class/net/$IFACE" ] && [ $n -lt 15 ]; do
         sleep 1
         n=$((n + 1))
     done
@@ -28,13 +41,23 @@ start() {
     fi
     ip link set "$IFACE" up
     wpa_supplicant -B -i "$IFACE" -c "$CONF" -P "$PIDFILE"
+    # Wait for association, then lease an IP via udhcpc (-b daemonizes).
+    n=0
+    while [ $n -lt 15 ]; do
+        state=$(wpa_cli -i "$IFACE" status 2>/dev/null | sed -n 's/^wpa_state=//p')
+        [ "$state" = "COMPLETED" ] && break
+        sleep 1
+        n=$((n + 1))
+    done
+    udhcpc -i "$IFACE" -b -p "$DHCPPID" >/dev/null 2>&1
     echo "OK"
 }
 
 stop() {
     printf "Stopping WiFi: "
+    [ -f "$DHCPPID" ] && kill "$(cat "$DHCPPID")" 2>/dev/null
     [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
-    rm -f "$PIDFILE"
+    rm -f "$PIDFILE" "$DHCPPID"
     killall wpa_supplicant 2>/dev/null
     echo "OK"
 }

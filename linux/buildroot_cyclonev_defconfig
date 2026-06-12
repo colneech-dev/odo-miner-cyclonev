@@ -61,11 +61,18 @@ BR2_TARGET_UBOOT=y
 BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
 BR2_TARGET_UBOOT_CUSTOM_VERSION=y
 BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2023.10"
-BR2_TARGET_UBOOT_BOARD_DEFCONFIG="socfpga_cyclone5"
+# DE10-Nano preloader: this QMTECH board is DE10-Nano ball-/MiSTer-compatible,
+# so its HPS DDR3 is 32-bit non-ECC (NOT the SoCDK's 40-bit ECC). The SoCDK
+# "socfpga_cyclone5" preloader hangs in DDR calibration before UART init
+# (silent board). socfpga_de10_nano carries the matching DDR3/pinmux/PLL/IOCSR
+# handoff. See scripts/diag-ddr.sh for the proof.
+BR2_TARGET_UBOOT_BOARD_DEFCONFIG="socfpga_de10_nano"
 BR2_TARGET_UBOOT_FORMAT_CUSTOM=y
 BR2_TARGET_UBOOT_FORMAT_CUSTOM_NAME="u-boot-with-spl.sfp"
 BR2_TARGET_UBOOT_SPL=y
 BR2_TARGET_UBOOT_SPL_NAME="spl/u-boot-spl.sfp"
+# Bake autoboot into U-Boot (default bootcmd runs boot.scr; 10 s countdown).
+BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES="board/qmtech/cyclonev/uboot-autoboot.fragment"
 
 # -----------------------------------------------------------------------------
 # Root Filesystem (ext4 = EXT2 builder with the _4 generation choice;

@@ -103,6 +103,31 @@ module soc_top (
     assign SDRAM_CS0_n = 1'b1;
     assign SDRAM_CS1_n = 1'b1;
 
+    // ---- Fabric power-on reset --------------------------------------------
+    // The external RESET_n pin (AE25) is a DE10-Nano-convention guess that is
+    // NOT verified against the QMTECH silkscreen. On first silicon the fabric
+    // was frozen (every LWH2F register access hung) — consistent with that
+    // input floating low and holding soc_system in reset forever, even though
+    // the FPGA configured (MODE=user) and the bridges were enabled.
+    //
+    // Remove the dependence on that pin ENTIRELY: generate reset internally
+    // from the 50 MHz clock. Hold reset asserted for 256 cycles (~5 us) after
+    // config, then release. RESET_n (AE25) is deliberately NOT used — if it
+    // floats low it would re-wedge the fabric, which is exactly the failure
+    // we are fixing. (Re-introduce a real button reset only once AE25 is
+    // confirmed against the silkscreen.)
+    reg [7:0] por_cnt = 8'd0;
+    reg       por_rst_n = 1'b0;
+    always @(posedge CLOCK_50) begin
+        if (por_cnt != 8'hFF) begin
+            por_cnt   <= por_cnt + 8'd1;
+            por_rst_n <= 1'b0;
+        end else begin
+            por_rst_n <= 1'b1;
+        end
+    end
+    wire fabric_reset_n = por_rst_n;   // RESET_n (AE25) intentionally ignored
+
     // ---- LCD control PIO bit mapping (bit0=D/C, bit1=RESET_n, bit2=BL) ----
     wire [2:0] pio_lcd_export;
     assign LCD_DC    = pio_lcd_export[0];
@@ -113,7 +138,7 @@ module soc_top (
     soc_system u_soc (
         // Clock & reset
         .clk_clk                               (CLOCK_50),
-        .reset_reset_n                         (RESET_n),
+        .reset_reset_n                         (fabric_reset_n),
 
         // SPI display
         .spi_lcd_SCLK                          (LCD_SCLK),

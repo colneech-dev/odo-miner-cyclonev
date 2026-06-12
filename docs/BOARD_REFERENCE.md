@@ -9,6 +9,12 @@ re-mine the PDF.
 Confidence legend: ✅ verified (cross-checked against a second source or the
 working design), ◐ read from the schematic text only, ? inferred.
 
+> **See also `docs/SCHEMATIC_PINMAP.md`** — the detailed clock / reset / config
+> / I/O ball map extracted during the 2026-06-11 hardware bring-up, cross-checked
+> against `odo_miner.qsf`. It documents the `CLOCK_50=V11` verification, the
+> `RESET_n=AE25`→NCEO mistake (root cause of the frozen fabric), and a flag that
+> the LCD SPI pins sit on clock-capable balls.
+
 ---
 
 ## The headline fact ✅
