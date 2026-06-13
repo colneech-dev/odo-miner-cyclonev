@@ -180,16 +180,44 @@ def handle(conn, addr):
                                   f"relying on node submitblock for validation")
                             globals()["_warned_nolib"] = True
                     block = assemble_block(header, job["cb"]["witness_block"](en2))
-                    res = rpc("submitblock", [block])
+                    try:
+                        res = rpc("submitblock", [block])
+                    except Exception as e:
+                        record_share("rejected")
+                        err_text = str(e)
+                        print(f"[*] submitblock RPC failed: {err_text}")
+                        send(conn, {"id": mid, "result": False,
+                                    "error": [25, "submitblock-rpc-failure", err_text]})
+                        try:
+                            job = make_job()
+                            record_job(job)
+                            notify(conn, job)
+                            print(f"[*] new job {job['id']} after RPC failure")
+                        except Exception as e2:
+                            print(f"[!] failed to refresh job after RPC failure: {e2}")
+                        continue
+
                     ok = res is None
-                    record_share("block" if ok else "rejected")
-                    print(f"[*] share nonce={nonce} en2={en2.hex() or '-'} -> "
-                          f"{'BLOCK ACCEPTED' if ok else 'REJECTED %r' % res}")
-                    send(conn, {"id": mid, "result": ok, "error": None})
-                    if ok:
-                        job = make_job()
-                        record_job(job)
-                        notify(conn, job)
+                    if not ok:
+                        record_share("rejected")
+                        print(f"[*] submitblock rejected: {res!r}")
+                        send(conn, {"id": mid, "result": False,
+                                    "error": [24, "submitblock-rejected", str(res)]})
+                        try:
+                            job = make_job()
+                            record_job(job)
+                            notify(conn, job)
+                            print(f"[*] new job {job['id']} after reject")
+                        except Exception as e:
+                            print(f"[!] failed to refresh job after reject: {e}")
+                        continue
+
+                    record_share("block")
+                    print(f"[*] share nonce={nonce} en2={en2.hex() or '-'} -> BLOCK ACCEPTED")
+                    send(conn, {"id": mid, "result": True, "error": None})
+                    job = make_job()
+                    record_job(job)
+                    notify(conn, job)
                 else:
                     send(conn, {"id": mid, "result": True, "error": None})
     except Exception as e:

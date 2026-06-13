@@ -11,7 +11,7 @@ REM  and used a non-working server.py.
 REM
 REM  Usage:  start_fpga_miner.bat [1|2]      1=regtest (default), 2=testnet
 REM ===========================================================================
-setlocal
+setlocal enabledelayedexpansion
 title OdoCrypt FPGA Miner Test Bed
 
 REM ---- edit these paths if your layout differs ----
@@ -26,8 +26,14 @@ if not defined MODE (
     echo 2^) TESTNET  ^(public DigiByte testnet^)
     set /p MODE=Select mode [1]:
 )
-if "%MODE%"=="2" ( set "NET=testnet" ) else ( set "NET=regtest" )
+set "NET=regtest"
+if /I "%MODE%"=="2" set "NET=testnet"
+if /I "%MODE%"=="testnet" set "NET=testnet"
+if /I "%MODE%"=="t" set "NET=testnet"
 
+echo Selected mode: %MODE%
+echo Using network: %NET%
+echo Running: "%PYTHON%" "%HARNESS%run_testbed.py" --net %NET% --dgb-bin "%DGB_BIN%" --odocrypt-lib "%ODOCRYPT_LIB%"
 "%PYTHON%" "%HARNESS%run_testbed.py" --net %NET% --dgb-bin "%DGB_BIN%" --odocrypt-lib "%ODOCRYPT_LIB%"
 
 endlocal

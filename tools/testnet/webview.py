@@ -169,7 +169,13 @@ class H(BaseHTTPRequestHandler):
 def main():
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), H)
     print(f"web view on http://127.0.0.1:{PORT}")
-    srv.serve_forever()
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 if __name__ == "__main__":
