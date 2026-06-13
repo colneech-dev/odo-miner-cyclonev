@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; }
+  * { box-sizing: border-box; }
+  ::selection { background: #F0B23C; color: #15140F; }
+</style>
+</helmet>
+
+<div style="background:#100F0B; min-height:100vh; font-family:'Space Grotesk',-apple-system,sans-serif; color:#F2EFE6; padding:0 0 90px; background-image:radial-gradient(900px 500px at 80% -5%, rgba(240,178,60,0.08), transparent 70%);">
+
+  <!-- ===================== BRAND BAND ===================== -->
+  <div style="max-width:1180px; margin:0 auto; padding:56px 32px 0;">
+    <div style="font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:0.22em; text-transform:uppercase; color:#F0B23C; font-weight:600;">Redesign Proposal · Identity v2</div>
+    <div style="display:flex; align-items:center; gap:20px; margin-top:26px;">
+      <svg width="64" height="64" viewBox="0 0 100 100" style="flex:0 0 auto;">
+        <polygon points="96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17" fill="none" stroke="#F0B23C" stroke-width="5"></polygon>
+        <polygon points="50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39" fill="#F0B23C"></polygon>
+      </svg>
+      <div>
+        <div style="font-size:40px; font-weight:700; letter-spacing:-0.01em; line-height:1;">ODO <span style="color:#F0B23C;">MINER</span></div>
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#9A9483; letter-spacing:0.1em; margin-top:6px;">OdoCrypt FPGA mining appliance · Cyclone V SoC</div>
+      </div>
+    </div>
+    <p style="font-size:18px; line-height:1.55; color:#C7C2B4; max-width:660px; margin:26px 0 0;">A ground-up identity the project actually owns — no borrowed shield, no Miningcore palette — applied across both surfaces, with the review's UX fixes built in.</p>
+  </div>
+
+  <!-- ===================== IDENTITY SYSTEM ===================== -->
+  <div style="max-width:1180px; margin:0 auto; padding:44px 32px 0;">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px;">
+
+      <!-- mark -->
+      <div style="background:#1A1812; border:1px solid #2E2A1F; border-radius:16px; padding:24px;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#7E7868; font-weight:600;">The mark</div>
+        <div style="display:flex; align-items:center; gap:20px; margin:22px 0 18px;">
+          <svg width="78" height="78" viewBox="0 0 100 100">
+            <polygon points="96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17" fill="none" stroke="#F0B23C" stroke-width="5"></polygon>
+            <polygon points="50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39" fill="#F0B23C"></polygon>
+          </svg>
+          <div style="display:flex; gap:14px; align-items:center;">
+            <svg width="36" height="36" viewBox="0 0 100 100"><polygon points="96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17" fill="none" stroke="#F0B23C" stroke-width="7"></polygon><polygon points="50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39" fill="#F0B23C"></polygon></svg>
+            <svg width="22" height="22" viewBox="0 0 100 100"><polygon points="96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17" fill="none" stroke="#F2EFE6" stroke-width="9"></polygon><polygon points="50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39" fill="#F2EFE6"></polygon></svg>
+          </div>
+        </div>
+        <div style="font-size:14px; line-height:1.55; color:#9A9483;">A hexagonal aperture with an offset inner core — a nod to OdoCrypt's periodic <strong style="color:#C7C2B4;">shapechange</strong>, where the algorithm rewrites itself every epoch. Holds up at 16&nbsp;px on the TFT and in one color.</div>
+      </div>
+
+      <!-- palette -->
+      <div style="background:#1A1812; border:1px solid #2E2A1F; border-radius:16px; padding:24px;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#7E7868; font-weight:600;">Palette</div>
+        <div style="display:flex; flex-direction:column; gap:9px; margin-top:20px;">
+          <div style="display:flex; align-items:center; gap:12px;"><div style="width:30px; height:30px; border-radius:7px; background:#100F0B; border:1px solid #2E2A1F;"></div><div style="font-family:'IBM Plex Mono',monospace; font-size:12px; color:#C7C2B4;">#100F0B <span style="color:#7E7868;">· ink / background</span></div></div>
+          <div style="display:flex; align-items:center; gap:12px;"><div style="width:30px; height:30px; border-radius:7px; background:#1A1812; border:1px solid #2E2A1F;"></div><div style="font-family:'IBM Plex Mono',monospace; font-size:12px; color:#C7C2B4;">#1A1812 <span style="color:#7E7868;">· surface</span></div></div>
+          <div style="display:flex; align-items:center; gap:12px;"><div style="width:30px; height:30px; border-radius:7px; background:#F0B23C;"></div><div style="font-family:'IBM Plex Mono',monospace; font-size:12px; color:#C7C2B4;">#F0B23C <span style="color:#7E7868;">· gold / brand + live</span></div></div>
+          <div style="display:flex; align-items:center; gap:12px;"><div style="width:30px; height:30px; border-radius:7px; background:#F2EFE6;"></div><div style="font-family:'IBM Plex Mono',monospace; font-size:12px; color:#C7C2B4;">#F2EFE6 <span style="color:#7E7868;">· text</span></div></div>
+          <div style="display:flex; gap:9px; margin-top:3px;">
+            <div style="flex:1; display:flex; align-items:center; gap:8px;"><div style="width:18px; height:18px; border-radius:5px; background:#56C878;"></div><span style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#9A9483;">OK</span></div>
+            <div style="flex:1; display:flex; align-items:center; gap:8px;"><div style="width:18px; height:18px; border-radius:5px; background:#E07B3A;"></div><span style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#9A9483;">WARN</span></div>
+            <div style="flex:1; display:flex; align-items:center; gap:8px;"><div style="width:18px; height:18px; border-radius:5px; background:#E5564A;"></div><span style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#9A9483;">DOWN</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- type -->
+      <div style="background:#1A1812; border:1px solid #2E2A1F; border-radius:16px; padding:24px;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#7E7868; font-weight:600;">Type</div>
+        <div style="margin-top:18px; border-bottom:1px solid #2E2A1F; padding-bottom:16px;">
+          <div style="font-size:38px; font-weight:600; letter-spacing:-0.01em; line-height:1;">Space Grotesk</div>
+          <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#7E7868; margin-top:8px;">Display · wordmark · hero figures</div>
+        </div>
+        <div style="margin-top:16px;">
+          <div style="font-family:'IBM Plex Mono',monospace; font-size:30px; font-weight:500; letter-spacing:-0.01em;">0123 · MH/s</div>
+          <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#7E7868; margin-top:8px;">IBM Plex Mono · labels · all live data (tabular)</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===================== WEB DASHBOARD REDESIGN ===================== -->
+  <div style="max-width:1180px; margin:0 auto; padding:60px 32px 0;">
+    <div style="display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;">
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:#100F0B; background:#F0B23C; border-radius:6px; padding:4px 10px;">01</div>
+      <h2 style="font-size:28px; font-weight:700; letter-spacing:-0.01em; margin:0;">Web dashboard</h2>
+      <span style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#7E7868;">interactive — switch tabs, save config</span>
+    </div>
+    <p style="font-size:16px; line-height:1.55; color:#9A9483; max-width:700px; margin:14px 0 0;">Monitoring and configuration are now two tabs, so a glance never scrolls past a reboot button. The hero leads, live figures are tabular, and saving gives real feedback. <span style="color:#C7C2B4;">Try it &mdash; it's live.</span></p>
+
+    <div style="display:flex; gap:48px; margin-top:36px; align-items:flex-start; flex-wrap:wrap;">
+
+      <!-- phone -->
+      <div style="flex:0 0 auto;">
+        <div style="width:420px; background:#000; border-radius:46px; padding:13px; box-shadow:0 40px 80px -30px rgba(0,0,0,0.8); border:1px solid #2a2a2a;">
+          <div style="background:#100F0B; border-radius:34px; overflow:hidden; position:relative; min-height:740px;">
+            <div style="position:absolute; top:0; left:50%; transform:translateX(-50%); width:128px; height:26px; background:#000; border-radius:0 0 16px 16px; z-index:5;"></div>
+
+            <!-- app bar -->
+            <div style="display:flex; align-items:center; gap:11px; padding:20px 20px 14px;">
+              <svg width="26" height="26" viewBox="0 0 100 100"><polygon points="96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17" fill="none" stroke="#F0B23C" stroke-width="6"></polygon><polygon points="50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39" fill="#F0B23C"></polygon></svg>
+              <div style="font-size:18px; font-weight:700; letter-spacing:0.01em;">ODO <span style="color:#F0B23C;">MINER</span></div>
+              <div style="margin-left:auto; display:flex; align-items:center; gap:7px;">
+                <div style="width:8px; height:8px; border-radius:50%; background:#56C878; box-shadow:0 0 8px #56C878;"></div>
+                <span style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#56C878; letter-spacing:0.08em;">MINING</span>
+              </div>
+            </div>
+
+            <!-- segmented tabs -->
+            <div style="margin:0 20px; display:flex; gap:4px; background:#1A1812; border:1px solid #2E2A1F; border-radius:11px; padding:4px;">
+              <button style="{{ monitorTabStyle }}" onClick="{{ setMonitor }}">Monitor</button>
+              <button style="{{ settingsTabStyle }}" onClick="{{ setSettings }}">Settings</button>
+            </div>
+
+            <!-- ============ MONITOR VIEW ============ -->
+            <sc-if value="{{ monitor }}" hint-placeholder-val="{{ true }}">
+            <div style="padding:18px 20px 28px;">
+
+              <!-- hero -->
+              <div style="background:#1A1812; border:1px solid #2E2A1F; border-radius:16px; padding:20px; position:relative; overflow:hidden;">
+                <div style="position:absolute; right:-30px; top:-30px; width:130px; height:130px; border-radius:50%; background:radial-gradient(circle, rgba(240,178,60,0.14), transparent 70%);"></div>
+                <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; color:#7E7868;">HASHRATE</div>
+                <div style="display:flex; align-items:baseline; gap:10px; margin-top:6px;">
+                  <div style="font-size:58px; font-weight:600; letter-spacing:-0.02em; line-height:0.95; font-variant-numeric:tabular-nums;">4.21</div>
+                  <div style="font-family:'IBM Plex Mono',monospace; font-size:20px; color:#F0B23C; font-weight:500;">MH/s</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; margin-top:16px; padding-top:14px; border-top:1px solid #2E2A1F;">
+                  <div style="width:7px; height:7px; border-radius:50%; background:#56C878;"></div>
+                  <span style="font-family:'IBM Plex Mono',monospace; font-size:12px; color:#C7C2B4;">eu.odopool.net:4445</span>
+                  <span style="margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:12px; color:#7E7868;">share 47s ago</span>
+                </div>
+              </div>
+
+              <!-- shapechange card (thematic hero) -->
+              <div style="background:#1A1812; border:1px solid #2E2A1F; border-radius:16px; padding:18px 20px; margin-top:14px;">
+                <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                  <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; color:#7E7868;">SHAPECHANGE IN</div>
+                  <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#7E7868;">epoch 5021 &rarr; 5022</div>
+                </div>
+                <div style="font-size:30px; font-weight:600; margin:7px 0 12px; font-variant-numeric:tabular-nums;">5d 14h 09m</div>
+                <div style="height:7px; border-radius:4px; background:#100F0B; overflow:hidden;"><div style="height:100%; width:38%; border-radius:4px; background:#F0B23C;"></div></div>
+              </div>
+
+              <!-- stat tiles -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px;">
+                <div style="background:#1A1812; border:1px solid #2E2A1F; border-radius:13px; padding:14px 16px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.14em; color:#7E7868;">SHARES F/S</div><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; margin-top:5px; font-variant-numeric:tabular-nums;">1284<span style="color:#7E7868;">/</span>1281</div></div>
+                <div style="background:#1A1812; border:1px solid #2E2A1F; border-radius:13px; padding:14px 16px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.14em; color:#7E7868;">MINER UPTIME</div><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; margin-top:5px; font-variant-numeric:tabular-nums;">3d 6h 12m</div></div>
+                <div style="background:#1A1812; border:1px solid #2E2A1F; border-radius:13px; padding:14px 16px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.14em; color:#7E7868;">BOARD IP</div><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; margin-top:5px; font-variant-numeric:tabular-nums;">192.168.1.42</div></div>
+                <div style="background:#1A1812; border:1px solid #2E2A1F; border-radius:13px; padding:14px 16px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:0.14em; color:#7E7868;">CPU · MEM FREE</div><div style="font-family:'IBM Plex Mono',monospace; font-size:18px; margin-top:5px; font-variant-numeric:tabular-nums;">0.71 · 118M</div></div>
+              </div>
+            </div>
+            </sc-if>
+
+            <!-- ============ SETTINGS VIEW ============ -->
+            <sc-if value="{{ settings }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:18px 20px 28px;">
+
+              <!-- pool -->
+              <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; color:#7E7868; margin-bottom:10px;">POOL</div>
+              <label style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#9A9483; display:block; margin-bottom:5px;">Host</label>
+              <input type="text" value="eu.odopool.net" style="width:100%; box-sizing:border-box; background:#100F0B; color:#F2EFE6; border:1px solid #2E2A1F; border-radius:9px; padding:11px 12px; font-family:'IBM Plex Mono',monospace; font-size:14px; margin-bottom:11px;">
+              <div style="display:flex; gap:11px; margin-bottom:11px;">
+                <div style="flex:1;"><label style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#9A9483; display:block; margin-bottom:5px;">Port</label><input type="text" value="4445" style="width:100%; box-sizing:border-box; background:#100F0B; color:#F2EFE6; border:1px solid #2E2A1F; border-radius:9px; padding:11px 12px; font-family:'IBM Plex Mono',monospace; font-size:14px;"></div>
+              </div>
+              <label style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#9A9483; display:block; margin-bottom:5px;">Worker / payout address</label>
+              <input type="text" value="YOUR_PAYOUT_ADDRESS" style="width:100%; box-sizing:border-box; background:#100F0B; color:#56C878; border:1px solid #2E2A1F; border-radius:9px; padding:11px 12px; font-family:'IBM Plex Mono',monospace; font-size:13px; margin-bottom:18px;">
+
+              <!-- network -->
+              <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; color:#7E7868; margin-bottom:10px;">NETWORK</div>
+              <label style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#9A9483; display:block; margin-bottom:5px;">WiFi SSID</label>
+              <input type="text" value="garage-2.4G" style="width:100%; box-sizing:border-box; background:#100F0B; color:#F2EFE6; border:1px solid #2E2A1F; border-radius:9px; padding:11px 12px; font-family:'IBM Plex Mono',monospace; font-size:14px; margin-bottom:18px;">
+
+              <!-- primary save -->
+              <button onClick="{{ save }}" style="width:100%; background:#F0B23C; color:#100F0B; border:0; border-radius:11px; padding:14px; font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:600; cursor:pointer;">Save &amp; restart miner</button>
+
+              <!-- power / danger -->
+              <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; color:#7E7868; margin:22px 0 10px;">POWER</div>
+              <div style="display:flex; gap:11px;">
+                <button style="flex:1; background:transparent; color:#F0B23C; border:1px solid #5a4a26; border-radius:10px; padding:12px; font-family:'IBM Plex Mono',monospace; font-size:13px; cursor:pointer;">Restart miner</button>
+                <button style="flex:1; background:transparent; color:#E5564A; border:1px solid #5a2e2a; border-radius:10px; padding:12px; font-family:'IBM Plex Mono',monospace; font-size:13px; cursor:pointer;">Reboot board</button>
+              </div>
+            </div>
+            </sc-if>
+
+            <!-- toast -->
+            <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute; left:20px; right:20px; bottom:22px; background:#21261C; border:1px solid #56C878; border-radius:12px; padding:13px 16px; display:flex; align-items:center; gap:11px; z-index:6; box-shadow:0 16px 40px -10px rgba(0,0,0,0.7);">
+              <div style="width:20px; height:20px; border-radius:50%; background:#56C878; color:#100F0B; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700;">&#10003;</div>
+              <span style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#F2EFE6;">Saved &mdash; miner restarting&hellip;</span>
+            </div>
+            </sc-if>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- what changed -->
+      <div style="flex:1 1 320px; min-width:300px;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#7E7868; font-weight:600; margin-bottom:16px;">What changed</div>
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <div style="display:flex; gap:13px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#100F0B; background:#56C878; border-radius:5px; padding:2px 7px; height:fit-content; font-weight:600; white-space:nowrap;">W2</div><div style="font-size:14.5px; line-height:1.55; color:#C7C2B4;"><strong style="color:#F2EFE6;">Monitor / Settings tabs.</strong> Glance data and config no longer share one scroll.</div></div>
+          <div style="display:flex; gap:13px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#100F0B; background:#56C878; border-radius:5px; padding:2px 7px; height:fit-content; font-weight:600; white-space:nowrap;">W3</div><div style="font-size:14.5px; line-height:1.55; color:#C7C2B4;"><strong style="color:#F2EFE6;">Save feedback.</strong> A real &ldquo;Saved &mdash; restarting&rdquo; toast instead of a silent redirect.</div></div>
+          <div style="display:flex; gap:13px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#100F0B; background:#56C878; border-radius:5px; padding:2px 7px; height:fit-content; font-weight:600; white-space:nowrap;">W4</div><div style="font-size:14.5px; line-height:1.55; color:#C7C2B4;"><strong style="color:#F2EFE6;">Tabular figures.</strong> Every live number is monospaced &mdash; no jitter on refresh.</div></div>
+          <div style="display:flex; gap:13px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#100F0B; background:#56C878; border-radius:5px; padding:2px 7px; height:fit-content; font-weight:600; white-space:nowrap;">W5</div><div style="font-size:14.5px; line-height:1.55; color:#C7C2B4;"><strong style="color:#F2EFE6;">Real hierarchy.</strong> Hashrate hero + a celebrated shapechange card; config recedes.</div></div>
+          <div style="display:flex; gap:13px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#100F0B; background:#56C878; border-radius:5px; padding:2px 7px; height:fit-content; font-weight:600; white-space:nowrap;">W6</div><div style="font-size:14.5px; line-height:1.55; color:#C7C2B4;"><strong style="color:#F2EFE6;">Button intent.</strong> One gold primary; restart/reboot are outline &amp; separated in a Power zone.</div></div>
+          <div style="display:flex; gap:13px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#100F0B; background:#56C878; border-radius:5px; padding:2px 7px; height:fit-content; font-weight:600; white-space:nowrap;">W7</div><div style="font-size:14.5px; line-height:1.55; color:#C7C2B4;"><strong style="color:#F2EFE6;">Full-width address.</strong> Payout shown monospace, in green, easy to verify.</div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===================== TFT REDESIGN ===================== -->
+  <div style="max-width:1180px; margin:0 auto; padding:64px 32px 0;">
+    <div style="display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;">
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:#100F0B; background:#F0B23C; border-radius:6px; padding:4px 10px;">02</div>
+      <h2 style="font-size:28px; font-weight:700; letter-spacing:-0.01em; margin:0;">On-device TFT panel</h2>
+      <span style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#7E7868;">320&times;240 · shown at 2&times;</span>
+    </div>
+    <p style="font-size:16px; line-height:1.55; color:#9A9483; max-width:700px; margin:14px 0 0;">Split into a calm <strong style="color:#C7C2B4;">Glance</strong> screen and an opt-in <strong style="color:#C7C2B4;">Detail</strong> screen. Vital numbers get big; everything truncates; touch targets grow.</p>
+
+    <div style="display:flex; gap:40px; margin-top:36px; flex-wrap:wrap;">
+
+      <!-- GLANCE -->
+      <div style="flex:0 0 auto;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#7E7868; margin-bottom:12px;">Glance — default</div>
+        <div style="width:684px; background:#000; border-radius:16px; padding:22px; box-shadow:0 30px 60px -25px rgba(0,0,0,0.7);">
+          <div style="position:relative; width:640px; height:480px;">
+            <div style="position:absolute; top:0; left:0; width:320px; height:240px; transform:scale(2); transform-origin:top left; background:#100F0B; overflow:hidden; font-family:'IBM Plex Mono',monospace;">
+              <!-- header -->
+              <div style="position:absolute; left:0; top:0; width:320px; height:34px; display:flex; align-items:center; gap:7px; padding:0 10px; box-sizing:border-box; border-bottom:1px solid #2E2A1F;">
+                <svg width="18" height="18" viewBox="0 0 100 100"><polygon points="96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17" fill="none" stroke="#F0B23C" stroke-width="8"></polygon><polygon points="50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39" fill="#F0B23C"></polygon></svg>
+                <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:#F2EFE6; letter-spacing:0.04em; white-space:nowrap;">ODO MINER</div>
+                <div style="margin-left:auto; display:flex; align-items:center; gap:5px;"><div style="width:6px; height:6px; border-radius:50%; background:#56C878;"></div><span style="font-size:9px; color:#56C878;">POOL OK</span></div>
+              </div>
+              <!-- hero hashrate -->
+              <div style="position:absolute; left:0; top:50px; width:320px; text-align:center;">
+                <div style="font-size:9px; color:#7E7868; letter-spacing:1px;">HASHRATE</div>
+                <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:48px; color:#F2EFE6; margin-top:4px; letter-spacing:-0.02em; line-height:1; font-variant-numeric:tabular-nums;">4.21</div>
+                <div style="font-size:13px; color:#F0B23C; margin-top:4px; font-weight:500;">MH/s</div>
+              </div>
+              <!-- status line -->
+              <div style="position:absolute; left:14px; top:150px; font-size:9px; color:#9A9483; letter-spacing:0.5px;">SHARE 47s AGO &middot; 1284 FOUND</div>
+              <!-- shapechange -->
+              <div style="position:absolute; left:14px; right:14px; top:166px;">
+                <div style="font-size:9px; color:#7E7868; letter-spacing:0.5px;">SHAPECHANGE 5d 14h</div>
+                <div style="height:6px; background:#1A1812; border:1px solid #2E2A1F; margin-top:4px;"><div style="height:100%; width:38%; background:#F0B23C;"></div></div>
+              </div>
+              <!-- buttons (taller) -->
+              <div style="position:absolute; left:8px; top:198px; width:140px; height:34px; background:#1A1812; border:1px solid #F0B23C; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Space Grotesk',sans-serif; font-weight:500; color:#F0B23C;">DETAILS</div>
+              <div style="position:absolute; left:156px; top:198px; width:74px; height:34px; background:#1A1812; border:1px solid #2E2A1F; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Space Grotesk',sans-serif; font-weight:500; color:#F2EFE6;">WIFI</div>
+              <div style="position:absolute; left:238px; top:198px; width:74px; height:34px; background:#1A1812; border:1px solid #2E2A1F; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Space Grotesk',sans-serif; font-weight:500; color:#F2EFE6;">MENU</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DETAIL -->
+      <div style="flex:0 0 auto;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#7E7868; margin-bottom:12px;">Detail — on tap</div>
+        <div style="width:684px; background:#000; border-radius:16px; padding:22px; box-shadow:0 30px 60px -25px rgba(0,0,0,0.7);">
+          <div style="position:relative; width:640px; height:480px;">
+            <div style="position:absolute; top:0; left:0; width:320px; height:240px; transform:scale(2); transform-origin:top left; background:#100F0B; overflow:hidden; font-family:'IBM Plex Mono',monospace;">
+              <div style="position:absolute; left:0; top:0; width:320px; height:34px; display:flex; align-items:center; gap:7px; padding:0 10px; box-sizing:border-box; border-bottom:1px solid #2E2A1F;">
+                <svg width="18" height="18" viewBox="0 0 100 100"><polygon points="96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17" fill="none" stroke="#F0B23C" stroke-width="8"></polygon><polygon points="50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39" fill="#F0B23C"></polygon></svg>
+                <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:#F2EFE6; letter-spacing:0.04em; white-space:nowrap;">DETAILS</div>
+                <div style="margin-left:auto; display:flex; align-items:center; gap:4px; height:9px; align-items:flex-end;"><div style="width:3px; height:3px; background:#56C878;"></div><div style="width:3px; height:5px; background:#56C878;"></div><div style="width:3px; height:7px; background:#56C878;"></div><div style="width:3px; height:9px; background:#56C878;"></div></div>
+              </div>
+              <!-- detail rows, generous spacing -->
+              <div style="position:absolute; left:14px; right:14px; top:44px; display:flex; justify-content:space-between; font-size:10px;"><span style="color:#7E7868;">POOL</span><span style="color:#F2EFE6; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">eu.odopool.net:4445</span></div>
+              <div style="position:absolute; left:14px; right:14px; top:62px; display:flex; justify-content:space-between; font-size:10px;"><span style="color:#7E7868;">JOB</span><span style="color:#F2EFE6;">a7f3</span></div>
+              <div style="position:absolute; left:14px; right:14px; top:80px; display:flex; justify-content:space-between; font-size:10px;"><span style="color:#7E7868;">SHARES</span><span style="color:#F2EFE6;">1284 / 1281</span></div>
+              <div style="position:absolute; left:14px; right:14px; top:98px; display:flex; justify-content:space-between; font-size:10px;"><span style="color:#7E7868;">UPTIME</span><span style="color:#F2EFE6;">3d 6h 12m</span></div>
+              <div style="position:absolute; left:14px; right:14px; top:116px; display:flex; justify-content:space-between; font-size:10px;"><span style="color:#7E7868;">BOARD IP</span><span style="color:#F2EFE6;">192.168.1.42</span></div>
+              <div style="position:absolute; left:14px; right:14px; top:134px; display:flex; justify-content:space-between; font-size:10px;"><span style="color:#7E7868;">WIFI</span><span style="color:#F2EFE6; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">garage-2.4G</span></div>
+              <div style="position:absolute; left:14px; right:14px; top:152px; display:flex; justify-content:space-between; font-size:10px;"><span style="color:#7E7868;">EPOCH</span><span style="color:#F2EFE6;">5021 &middot; 5d 14h</span></div>
+              <!-- buttons -->
+              <div style="position:absolute; left:8px; top:198px; width:140px; height:34px; background:#1A1812; border:1px solid #F0B23C; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Space Grotesk',sans-serif; font-weight:500; color:#F0B23C;">&larr; BACK</div>
+              <div style="position:absolute; left:156px; top:198px; width:74px; height:34px; background:#1A1812; border:1px solid #2E2A1F; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Space Grotesk',sans-serif; font-weight:500; color:#F2EFE6;">RESTART</div>
+              <div style="position:absolute; left:238px; top:198px; width:74px; height:34px; background:#1A1812; border:1px solid #5a2e2a; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Space Grotesk',sans-serif; font-weight:500; color:#E5564A;">REBOOT</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WiFi screens -->
+    <div style="margin-top:48px; padding-top:40px; border-top:1px solid #2E2A1F;">
+      <div style="display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:8px;">
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; color:#100F0B; background:#F0B23C; border-radius:6px; padding:4px 10px;">WiFi</div>
+        <h3 style="font-size:20px; font-weight:700; margin:0;">Entry screen &amp; on-screen keyboard</h3>
+        <span style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#7E7868;">T5 fix — keys 32px tall vs 27px original</span>
+      </div>
+      <p style="font-size:15px; line-height:1.55; color:#9A9483; max-width:700px; margin:0 0 28px;">Number row removed (accessible via a 123 key, freeing vertical space), letter rows taller, special keys grouped by intent. Scan list pre-fills the SSID field on tap.</p>
+
+      <div style="display:flex; gap:32px; flex-wrap:wrap; align-items:flex-start;">
+
+        <!-- WiFi keyboard screen -->
+        <div>
+          <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#7E7868; margin-bottom:12px;">WiFi entry — fields + keyboard</div>
+          <div style="width:684px; background:#000; border-radius:16px; padding:22px; box-shadow:0 30px 60px -25px rgba(0,0,0,0.7);">
+            <div style="position:relative; width:640px; height:480px;">
+              <div style="position:absolute; top:0; left:0; width:320px; height:240px; transform:scale(2); transform-origin:top left; background:#100F0B; overflow:hidden; font-family:'IBM Plex Mono',monospace;">
+
+                <!-- header -->
+                <div style="position:absolute; left:0; top:0; width:320px; height:34px; background:#1A1812; border-bottom:1px solid #2E2A1F; display:flex; align-items:center; padding:0 10px; box-sizing:border-box; gap:8px;">
+                  <svg width="16" height="16" viewBox="0 0 100 100"><polygon points="96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17" fill="none" stroke="#F0B23C" stroke-width="8"></polygon><polygon points="50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39" fill="#F0B23C"></polygon></svg>
+                  <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; color:#F2EFE6; letter-spacing:0.04em; white-space:nowrap;">WIFI SETUP</div>
+                  <div style="margin-left:auto; font-size:9px; color:#F0B23C; border:1px solid #5a4a26; border-radius:3px; padding:1px 6px;">SCAN</div>
+                </div>
+
+                <!-- SSID field (active) -->
+                <div style="position:absolute; left:8px; right:8px; top:38px; height:16px; background:#2A2517; border:1px solid #F0B23C; border-radius:3px; display:flex; align-items:center; padding:0 6px;">
+                  <span style="font-size:8px; color:#7E7868;">SSID </span>
+                  <span style="font-size:8px; color:#F2EFE6; margin-left:4px;">garage-2.4G</span>
+                  <span style="font-size:8px; color:#F0B23C;">|</span>
+                </div>
+                <!-- PSK field -->
+                <div style="position:absolute; left:8px; right:32px; top:58px; height:16px; background:#1A1812; border:1px solid #2E2A1F; border-radius:3px; display:flex; align-items:center; padding:0 6px;">
+                  <span style="font-size:8px; color:#7E7868;">PSK  </span>
+                  <span style="font-size:8px; color:#9A9483; margin-left:4px;">••••••••</span>
+                </div>
+                <!-- eye icon -->
+                <div style="position:absolute; right:8px; top:58px; width:22px; height:16px; background:#1A1812; border:1px solid #2E2A1F; border-radius:3px; display:flex; align-items:center; justify-content:center;">
+                  <svg width="11" height="7" viewBox="0 0 11 7"><ellipse cx="5.5" cy="3.5" rx="5" ry="3" fill="none" stroke="#7E7868" stroke-width="1"></ellipse><circle cx="5.5" cy="3.5" r="1.5" fill="#7E7868"></circle></svg>
+                </div>
+
+                <!-- keyboard rows (native px, key h=32, pitch=34) -->
+                <!-- Row 0: QWERTYUIOP — each key x = 8 + i*30, w=28, y=78 -->
+                <svg style="position:absolute; left:0; top:0; width:320px; height:240px;" viewBox="0 0 320 240">
+                  <!-- row QWERTYUIOP y=78 -->
+                  <g fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5">
+                    <rect x="8"   y="78" width="28" height="32" rx="2"></rect>
+                    <rect x="38"  y="78" width="28" height="32" rx="2"></rect>
+                    <rect x="68"  y="78" width="28" height="32" rx="2"></rect>
+                    <rect x="98"  y="78" width="28" height="32" rx="2"></rect>
+                    <rect x="128" y="78" width="28" height="32" rx="2"></rect>
+                    <rect x="158" y="78" width="28" height="32" rx="2"></rect>
+                    <rect x="188" y="78" width="28" height="32" rx="2"></rect>
+                    <rect x="218" y="78" width="28" height="32" rx="2"></rect>
+                    <rect x="248" y="78" width="28" height="32" rx="2"></rect>
+                    <rect x="278" y="78" width="28" height="32" rx="2"></rect>
+                  </g>
+                  <g font-family="'IBM Plex Mono',monospace" font-size="10" fill="#F2EFE6" text-anchor="middle">
+                    <text x="22"  y="99">Q</text><text x="52"  y="99">W</text><text x="82"  y="99">E</text>
+                    <text x="112" y="99">R</text><text x="142" y="99">T</text><text x="172" y="99">Y</text>
+                    <text x="202" y="99">U</text><text x="232" y="99">I</text><text x="262" y="99">O</text>
+                    <text x="292" y="99">P</text>
+                  </g>
+
+                  <!-- row ASDFGHJKL y=112 offset 15px -->
+                  <g fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5">
+                    <rect x="23"  y="112" width="28" height="32" rx="2"></rect>
+                    <rect x="53"  y="112" width="28" height="32" rx="2"></rect>
+                    <rect x="83"  y="112" width="28" height="32" rx="2"></rect>
+                    <rect x="113" y="112" width="28" height="32" rx="2"></rect>
+                    <rect x="143" y="112" width="28" height="32" rx="2"></rect>
+                    <rect x="173" y="112" width="28" height="32" rx="2"></rect>
+                    <rect x="203" y="112" width="28" height="32" rx="2"></rect>
+                    <rect x="233" y="112" width="28" height="32" rx="2"></rect>
+                    <rect x="263" y="112" width="28" height="32" rx="2"></rect>
+                  </g>
+                  <g font-family="'IBM Plex Mono',monospace" font-size="10" fill="#F2EFE6" text-anchor="middle">
+                    <text x="37"  y="133">A</text><text x="67"  y="133">S</text><text x="97"  y="133">D</text>
+                    <text x="127" y="133">F</text><text x="157" y="133">G</text><text x="187" y="133">H</text>
+                    <text x="217" y="133">J</text><text x="247" y="133">K</text><text x="277" y="133">L</text>
+                  </g>
+
+                  <!-- row ZXCVBNM y=146 with SHF + DEL -->
+                  <g fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5">
+                    <rect x="8"   y="146" width="42" height="32" rx="2" fill="#272319" stroke="#3a351e"></rect>
+                    <rect x="52"  y="146" width="28" height="32" rx="2"></rect>
+                    <rect x="82"  y="146" width="28" height="32" rx="2"></rect>
+                    <rect x="112" y="146" width="28" height="32" rx="2"></rect>
+                    <rect x="142" y="146" width="28" height="32" rx="2"></rect>
+                    <rect x="172" y="146" width="28" height="32" rx="2"></rect>
+                    <rect x="202" y="146" width="28" height="32" rx="2"></rect>
+                    <rect x="232" y="146" width="28" height="32" rx="2"></rect>
+                    <rect x="262" y="146" width="50" height="32" rx="2" fill="#272319" stroke="#3a351e"></rect>
+                  </g>
+                  <g font-family="'IBM Plex Mono',monospace" font-size="9" fill="#C7C2B4" text-anchor="middle">
+                    <text x="29" y="166">SHF</text>
+                  </g>
+                  <g font-family="'IBM Plex Mono',monospace" font-size="10" fill="#F2EFE6" text-anchor="middle">
+                    <text x="66"  y="167">Z</text><text x="96"  y="167">X</text><text x="126" y="167">C</text>
+                    <text x="156" y="167">V</text><text x="186" y="167">B</text><text x="216" y="167">N</text>
+                    <text x="246" y="167">M</text>
+                  </g>
+                  <g font-family="'IBM Plex Mono',monospace" font-size="9" fill="#C7C2B4" text-anchor="middle">
+                    <text x="287" y="166">DEL</text>
+                  </g>
+
+                  <!-- row special y=180 -->
+                  <g fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5">
+                    <rect x="8"   y="180" width="28" height="32" rx="2"></rect>
+                    <rect x="38"  y="180" width="28" height="32" rx="2"></rect>
+                    <rect x="68"  y="180" width="28" height="32" rx="2"></rect>
+                    <rect x="98"  y="180" width="104" height="32" rx="2" fill="#272319"></rect>
+                    <rect x="204" y="180" width="40" height="32" rx="2" fill="#272319" stroke="#3a351e"></rect>
+                    <rect x="246" y="180" width="66" height="32" rx="2" fill="#2a3a1e" stroke="#56C878"></rect>
+                  </g>
+                  <g font-family="'IBM Plex Mono',monospace" font-size="9" fill="#C7C2B4" text-anchor="middle">
+                    <text x="22" y="200">-</text><text x="52" y="200">_</text><text x="82" y="200">.</text>
+                    <text x="150" y="200">SPACE</text>
+                    <text x="224" y="200">123</text>
+                  </g>
+                  <g font-family="'Space Grotesk',sans-serif" font-size="10" font-weight="600" fill="#56C878" text-anchor="middle">
+                    <text x="279" y="201">SAVE</text>
+                  </g>
+                </svg>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Network scan list -->
+        <div>
+          <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#7E7868; margin-bottom:12px;">Network scan list</div>
+          <div style="width:684px; background:#000; border-radius:16px; padding:22px; box-shadow:0 30px 60px -25px rgba(0,0,0,0.7);">
+            <div style="position:relative; width:640px; height:480px;">
+              <div style="position:absolute; top:0; left:0; width:320px; height:240px; transform:scale(2); transform-origin:top left; background:#100F0B; overflow:hidden; font-family:'IBM Plex Mono',monospace;">
+
+                <!-- header -->
+                <div style="position:absolute; left:0; top:0; width:320px; height:34px; background:#1A1812; border-bottom:1px solid #2E2A1F; display:flex; align-items:center; padding:0 10px; box-sizing:border-box; gap:8px;">
+                  <svg width="16" height="16" viewBox="0 0 100 100"><polygon points="96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17" fill="none" stroke="#F0B23C" stroke-width="8"></polygon><polygon points="50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39" fill="#F0B23C"></polygon></svg>
+                  <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; color:#F2EFE6; letter-spacing:0.04em; white-space:nowrap;">SELECT NETWORK</div>
+                  <div style="margin-left:auto; font-size:8px; color:#9A9483;">7 found</div>
+                </div>
+
+                <!-- network rows (each 24px, tap to select) -->
+                <svg style="position:absolute; left:0; top:0; width:320px; height:240px;" viewBox="0 0 320 240">
+                  <!-- row 1 selected (first one tapped) -->
+                  <rect x="8" y="38" width="304" height="22" rx="3" fill="#2A2517" stroke="#F0B23C" stroke-width="0.5"></rect>
+                  <text x="16" y="53" font-family="'IBM Plex Mono',monospace" font-size="9" fill="#F0B23C">garage-2.4G</text>
+                  <g transform="translate(285,45)">
+                    <rect x="0" y="5" width="3" height="3" fill="#F0B23C"></rect>
+                    <rect x="4" y="3" width="3" height="5" fill="#F0B23C"></rect>
+                    <rect x="8" y="1" width="3" height="7" fill="#F0B23C"></rect>
+                    <rect x="12" y="0" width="3" height="9" fill="#F0B23C"></rect>
+                  </g>
+
+                  <!-- rows 2-7 -->
+                  <g font-family="'IBM Plex Mono',monospace" font-size="9" fill="#C7C2B4">
+                    <rect x="8" y="62" width="304" height="22" rx="3" fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5"></rect>
+                    <text x="16" y="77">HomeNetwork_5G</text>
+
+                    <rect x="8" y="86" width="304" height="22" rx="3" fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5"></rect>
+                    <text x="16" y="101">NETGEAR-Workshop</text>
+
+                    <rect x="8" y="110" width="304" height="22" rx="3" fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5"></rect>
+                    <text x="16" y="125">BT-Hub6-7K2P</text>
+
+                    <rect x="8" y="134" width="304" height="22" rx="3" fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5"></rect>
+                    <text x="16" y="149">SKY12345</text>
+
+                    <rect x="8" y="158" width="304" height="22" rx="3" fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5"></rect>
+                    <text x="16" y="173">VM9876543</text>
+
+                    <rect x="8" y="182" width="304" height="22" rx="3" fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5"></rect>
+                    <text x="16" y="197">iPhone (guest)</text>
+                  </g>
+
+                  <!-- bottom action bar -->
+                  <rect x="8" y="210" width="140" height="26" rx="3" fill="#1A1812" stroke="#F0B23C" stroke-width="0.5"></rect>
+                  <text x="78" y="226" font-family="'Space Grotesk',sans-serif" font-size="9" font-weight="600" fill="#F0B23C" text-anchor="middle">TYPE MANUALLY</text>
+                  <rect x="154" y="210" width="76" height="26" rx="3" fill="#1A1812" stroke="#2E2A1F" stroke-width="0.5"></rect>
+                  <text x="192" y="226" font-family="'IBM Plex Mono',monospace" font-size="9" fill="#9A9483" text-anchor="middle">RESCAN</text>
+                  <rect x="234" y="210" width="78" height="26" rx="3" fill="#1A1812" stroke="#5a2e2a" stroke-width="0.5"></rect>
+                  <text x="273" y="226" font-family="'IBM Plex Mono',monospace" font-size="9" fill="#E5564A" text-anchor="middle">CANCEL</text>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- background image option -->
+    <div style="margin-top:36px;">
+      <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:#7E7868; margin-bottom:12px;">Optional &mdash; background image + scrim</div>
+      <div style="display:flex; gap:40px; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:0 0 auto;">
+          <div style="width:684px; background:#000; border-radius:16px; padding:22px; box-shadow:0 30px 60px -25px rgba(0,0,0,0.7);">
+            <div style="position:relative; width:640px; height:480px;">
+              <div style="position:absolute; top:0; left:0; width:320px; height:240px; transform:scale(2); transform-origin:top left; overflow:hidden; font-family:'IBM Plex Mono',monospace; background:#100F0B;">
+                <!-- photographic stand-in for /etc/odo-ui/bg.png -->
+                <div style="position:absolute; inset:0; background:radial-gradient(120% 95% at 22% -10%, #4a3f23, #1a160d 52%, #0b0905 100%);"></div>
+                <div style="position:absolute; inset:0; background:linear-gradient(135deg, rgba(240,178,60,0.14), transparent 42%);"></div>
+                <!-- legibility scrim (gfx_background dim) -->
+                <div style="position:absolute; inset:0; background:rgba(9,8,5,0.40);"></div>
+                <!-- header as a translucent panel (gfx_rect_a) -->
+                <div style="position:absolute; left:0; top:0; width:320px; height:34px; display:flex; align-items:center; gap:7px; padding:0 10px; box-sizing:border-box; background:rgba(20,18,14,0.72); border-bottom:1px solid rgba(240,178,60,0.28);">
+                  <svg width="18" height="18" viewBox="0 0 100 100"><polygon points="96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17" fill="none" stroke="#F0B23C" stroke-width="8"></polygon><polygon points="50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39" fill="#F0B23C"></polygon></svg>
+                  <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:#F2EFE6; letter-spacing:0.04em; white-space:nowrap;">ODO MINER</div>
+                  <div style="margin-left:auto; display:flex; align-items:center; gap:5px;"><div style="width:6px; height:6px; border-radius:50%; background:#56C878;"></div><span style="font-size:9px; color:#56C878;">POOL OK</span></div>
+                </div>
+                <!-- hero -->
+                <div style="position:absolute; left:0; top:52px; width:320px; text-align:center;">
+                  <div style="font-size:9px; color:#C7C2B4; letter-spacing:1px;">HASHRATE</div>
+                  <div style="font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:48px; color:#F2EFE6; margin-top:4px; letter-spacing:-0.02em; line-height:1; font-variant-numeric:tabular-nums;">4.21</div>
+                  <div style="font-size:13px; color:#F0B23C; margin-top:4px; font-weight:500;">MH/s</div>
+                </div>
+                <!-- translucent stat strip -->
+                <div style="position:absolute; left:14px; right:14px; top:158px; background:rgba(20,18,14,0.66); border:1px solid rgba(240,178,60,0.18); border-radius:4px; padding:6px 8px;">
+                  <div style="font-size:9px; color:#C7C2B4;">SHARE 47s AGO &middot; SHAPECHANGE 5d 14h</div>
+                </div>
+                <!-- buttons -->
+                <div style="position:absolute; left:8px; top:198px; width:140px; height:34px; background:rgba(26,24,18,0.82); border:1px solid #F0B23C; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Space Grotesk',sans-serif; font-weight:500; color:#F0B23C;">DETAILS</div>
+                <div style="position:absolute; left:156px; top:198px; width:74px; height:34px; background:rgba(26,24,18,0.82); border:1px solid #2E2A1F; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Space Grotesk',sans-serif; font-weight:500; color:#F2EFE6;">WIFI</div>
+                <div style="position:absolute; left:238px; top:198px; width:74px; height:34px; background:rgba(26,24,18,0.82); border:1px solid #2E2A1F; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Space Grotesk',sans-serif; font-weight:500; color:#F2EFE6;">MENU</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1 1 280px; min-width:260px;">
+          <p style="font-size:15px; line-height:1.6; color:#9A9483; margin:0;">Yes &mdash; an image can sit under the UI. <span style="color:#C7C2B4;">gfx_background()</span> loads a 320&times;240 PNG/JPG, scales it to the panel and dims it; panels are then drawn translucent with <span style="color:#C7C2B4;">gfx_rect_a()</span> so the photo shows through while the hashrate stays legible.</p>
+          <p style="font-size:15px; line-height:1.6; color:#9A9483; margin:14px 0 0;">Keep it <strong style="color:#C7C2B4;">dark and low-contrast</strong> &mdash; this is a status panel first. Drop the file at <span style="font-family:'IBM Plex Mono',monospace; font-size:13px; color:#C7C2B4;">/etc/odo-ui/bg.png</span>; no recompile needed to swap the image.</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:20px; margin-top:36px; flex-wrap:wrap;">
+      <div style="display:flex; gap:11px; align-items:flex-start; flex:1 1 240px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#100F0B; background:#56C878; border-radius:5px; padding:2px 7px; font-weight:600;">T3</div><div style="font-size:14px; line-height:1.5; color:#9A9483;">Glance shows only what matters; the six detail rows move one tap away.</div></div>
+      <div style="display:flex; gap:11px; align-items:flex-start; flex:1 1 240px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#100F0B; background:#56C878; border-radius:5px; padding:2px 7px; font-weight:600;">T4</div><div style="font-size:14px; line-height:1.5; color:#9A9483;">Every variable field ellipsizes &mdash; no more column collisions.</div></div>
+      <div style="display:flex; gap:11px; align-items:flex-start; flex:1 1 240px;"><div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#100F0B; background:#56C878; border-radius:5px; padding:2px 7px; font-weight:600;">T5</div><div style="font-size:14px; line-height:1.5; color:#9A9483;">Fewer, wider buttons; the cramped keyboard gets larger keys.</div></div>
+    </div>
+
+    <div style="font-family:'IBM Plex Mono',monospace; font-size:12px; color:#5c574a; margin-top:48px; text-align:center;">odo-miner · identity v2 &amp; surface redesign · original mark, palette &amp; type</div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { tab: "monitor", toast: false };
+
+  setTab(t) { this.setState({ tab: t }); }
+
+  doSave() {
+    this.setState({ toast: true });
+    clearTimeout(this._t);
+    this._t = setTimeout(() => this.setState({ toast: false }), 2800);
+  }
+
+  renderVals() {
+    const gold = "#F0B23C", dim = "#9A9483";
+    const tab = this.state.tab;
+    const seg = (active) => ({
+      flex: "1",
+      textAlign: "center",
+      padding: "9px 0",
+      fontFamily: "'IBM Plex Mono', monospace",
+      fontSize: "12px",
+      letterSpacing: "0.12em",
+      textTransform: "uppercase",
+      borderRadius: "8px",
+      cursor: "pointer",
+      border: "0",
+      background: active ? "#322E22" : "transparent",
+      color: active ? gold : dim,
+      fontWeight: active ? 600 : 400,
+    });
+    return {
+      monitor: tab === "monitor",
+      settings: tab === "settings",
+      monitorTabStyle: seg(tab === "monitor"),
+      settingsTabStyle: seg(tab === "settings"),
+      setMonitor: () => this.setTab("monitor"),
+      setSettings: () => this.setTab("settings"),
+      save: () => this.doSave(),
+      toast: this.state.toast,
+    };
+  }
+}
+</script>
+</body>
+</html>
