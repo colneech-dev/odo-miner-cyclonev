@@ -470,6 +470,7 @@ int main(int argc, char **argv)
          * current batch instead of waiting for it to finish. */
         int    batch_active   = 0;
         time_t batch_started  = 0;
+        char   batch_job_id[sizeof(job.job_id)] = "";
 
         while (!g_terminate) {
             watchdog_pet();
@@ -534,6 +535,11 @@ int main(int argc, char **argv)
                 if (rc == 0) {
                     batch_active = 0;
                     log_info("found nonce=0x%08" PRIx32, found_nonce);
+                    if (strncmp(batch_job_id, job.job_id, sizeof(batch_job_id)) != 0) {
+                        log_info("stale nonce (batch job=%s, current job=%s); discarding",
+                                 batch_job_id, job.job_id);
+                        goto dispatch_next;
+                    }
 #ifdef ODO_VALIDATE_HASH
                     validate_fpga_hash(&job, found_nonce, found_hash);
 #endif
@@ -577,6 +583,7 @@ int main(int argc, char **argv)
             }
 
             /* Dispatch the next nonce batch */
+dispatch_next:
             if (!batch_active) {
                 uint32_t cnt, start = nonce_get(&alloc, &cnt);
                 int rc = miner_io_dispatch_job(job.header, sizeof(job.header),
@@ -592,6 +599,7 @@ int main(int argc, char **argv)
                     sleep(1);
                     continue;
                 }
+                snprintf(batch_job_id, sizeof(batch_job_id), "%s", job.job_id);
                 batch_active  = 1;
                 batch_started = time(NULL);
             }
