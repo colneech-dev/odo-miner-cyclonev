@@ -33,6 +33,46 @@
 #include "miner_io.h"
 #include "job.h"
 #include "epoch_watcher.h"
+#include "odocrypt_state.h"
+
+#ifdef ODO_VALIDATE_HASH
+#include "KeccakP-800-SnP.h"
+
+/*
+ * Cross-check: compute the full OdoCrypt+Keccak hash in software and compare
+ * against the hash the FPGA reported.  Prints a diagnostic if they differ.
+ * Called every time the FPGA reports a found nonce.
+ */
+static void validate_fpga_hash(const job_t *job, uint32_t nonce,
+                                const uint8_t fpga_hash[32])
+{
+    uint8_t state[KeccakP800_stateSizeInBytes];
+    memset(state, 0, sizeof(state));
+    memcpy(state, job->header, 80);
+    state[76] = (uint8_t)(nonce);
+    state[77] = (uint8_t)(nonce >>  8);
+    state[78] = (uint8_t)(nonce >> 16);
+    state[79] = (uint8_t)(nonce >> 24);
+    state[80] = 1;
+
+    odo_epoch_state_t epoch_st;
+    odo_epoch_generate(&epoch_st, job->epoch);
+    odo_encrypt(&epoch_st, state, state);
+    KeccakP800_Permute_12rounds(state);
+
+    int match = (memcmp(state, fpga_hash, 32) == 0);
+    fprintf(stderr, "[VALIDATE] %s nonce=0x%08" PRIx32 " epoch=%" PRIu32 "\n",
+            match ? "hash OK" : "HASH MISMATCH", nonce, job->epoch);
+    fprintf(stderr, "[VALIDATE]   fpga  : ");
+    for (int i = 0; i < 32; i++) fprintf(stderr, "%02x", fpga_hash[i]);
+    fprintf(stderr, "\n[VALIDATE]   oracle: ");
+    for (int i = 0; i < 32; i++) fprintf(stderr, "%02x", state[i]);
+    fprintf(stderr, "\n[VALIDATE]   header: ");
+    for (int i = 0; i < 80; i++) fprintf(stderr, "%02x", job->header[i]);
+    fprintf(stderr, "\n");
+    fflush(stderr);
+}
+#endif /* ODO_VALIDATE_HASH */
 
 /* -----------------------------------------------------------------------
  * Configuration (from environment variables or defaults)
@@ -141,6 +181,8 @@ static struct {
     uint32_t epoch_interval;   /* Odo shapechange interval (s) */
     char     pool[160];
     char     job_id[64];
+    double   best_diff_session; /* highest difficulty share this session */
+    double   best_diff_alltime; /* highest difficulty share ever (persisted) */
 } g_stat;
 
 /* -----------------------------------------------------------------------
@@ -153,10 +195,14 @@ static void stats_load(void)
     FILE *f = fopen(STATS_PATH, "r");
     if (!f) return;
     unsigned long long found = 0, submitted = 0;
-    if (fscanf(f, "%llu %llu", &found, &submitted) == 2) {
+    double best = 0.0;
+    int n = fscanf(f, "%llu %llu %lf", &found, &submitted, &best);
+    if (n >= 2) {
         g_stat.shares_found     = found;
         g_stat.shares_submitted = submitted;
     }
+    if (n >= 3)
+        g_stat.best_diff_alltime = best;
     fclose(f);
 }
 
@@ -164,11 +210,35 @@ static void stats_save(void)
 {
     FILE *f = fopen(STATS_PATH ".tmp", "w");
     if (!f) return;
-    fprintf(f, "%llu %llu\n",
+    fprintf(f, "%llu %llu %.6g\n",
             (unsigned long long)g_stat.shares_found,
-            (unsigned long long)g_stat.shares_submitted);
+            (unsigned long long)g_stat.shares_submitted,
+            g_stat.best_diff_alltime);
     fclose(f);
     rename(STATS_PATH ".tmp", STATS_PATH);
+}
+
+/* -----------------------------------------------------------------------
+ * Difficulty of a 32-byte LE hash relative to the OdoCrypt diff-1 target
+ * (0xFFFF << 208).  Uses the top 8 bytes for a good double approximation.
+ * Returns 0 if the hash bytes are all zero (shouldn't happen in practice).
+ * ---------------------------------------------------------------------- */
+static double hash_to_difficulty(const uint8_t hash_le[32])
+{
+    double h = 0.0;
+    int i;
+    for (i = 31; i >= 24; i--)
+        h = h * 256.0 + (double)hash_le[i];
+    if (h < 1.0) {
+        /* Hash is very near zero — approximate from next 8 bytes */
+        for (i = 23; i >= 16; i--)
+            h = h * 256.0 + (double)hash_le[i];
+        if (h < 1.0) return 1e15;
+        /* Diff1 bytes 24..31 = 0, so shift diff1 down by 2^64 */
+        return (double)0xFFFF0000U / h * 18446744073709551616.0;
+    }
+    /* diff1 bytes 24..31 treated as BE u64 = 0x0000FFFF00000000 = 0xFFFF0000 shifted */
+    return (double)0xFFFF0000U / h;
 }
 
 /* -----------------------------------------------------------------------
@@ -215,6 +285,8 @@ static void status_write(void)
         "  \"shares_found\": %" PRIu64 ",\n"
         "  \"shares_submitted\": %" PRIu64 ",\n"
         "  \"last_share\": %ld,\n"
+        "  \"best_diff_session\": %.6g,\n"
+        "  \"best_diff_alltime\": %.6g,\n"
         "  \"uptime\": %ld,\n"
         "  \"updated\": %ld\n"
         "}\n",
@@ -230,6 +302,8 @@ static void status_write(void)
         g_stat.shares_found,
         g_stat.shares_submitted,
         (long)g_stat.last_share,
+        g_stat.best_diff_session,
+        g_stat.best_diff_alltime,
         (long)(now - g_stat.started),
         (long)now);
     fclose(f);
@@ -460,8 +534,18 @@ int main(int argc, char **argv)
                 if (rc == 0) {
                     batch_active = 0;
                     log_info("found nonce=0x%08" PRIx32, found_nonce);
+#ifdef ODO_VALIDATE_HASH
+                    validate_fpga_hash(&job, found_nonce, found_hash);
+#endif
                     g_stat.shares_found++;
                     g_stat.last_share = time(NULL);
+                    {
+                        double d = hash_to_difficulty(found_hash);
+                        if (d > g_stat.best_diff_session)
+                            g_stat.best_diff_session = d;
+                        if (d > g_stat.best_diff_alltime)
+                            g_stat.best_diff_alltime = d;
+                    }
                     if (target_met(found_hash, job.target))
                         log_info("*** BLOCK CANDIDATE (meets network target) ***");
                     stats_save();

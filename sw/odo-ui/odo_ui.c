@@ -38,64 +38,17 @@
 #include <linux/fb.h>
 #include <linux/input.h>
 
-/* ------------------------------------------------------------------ */
-/* 8x8 bitmap font, ASCII 32..127 (public domain, classic IBM style)  */
-/* Each glyph: 8 bytes, LSB = leftmost pixel.                          */
-/* ------------------------------------------------------------------ */
-static const uint8_t font8x8[96][8] = {
- {0,0,0,0,0,0,0,0},{0x18,0x3C,0x3C,0x18,0x18,0,0x18,0},
- {0x36,0x36,0,0,0,0,0,0},{0x36,0x36,0x7F,0x36,0x7F,0x36,0x36,0},
- {0x0C,0x3E,0x03,0x1E,0x30,0x1F,0x0C,0},{0,0x63,0x33,0x18,0x0C,0x66,0x63,0},
- {0x1C,0x36,0x1C,0x6E,0x3B,0x33,0x6E,0},{0x06,0x06,0x03,0,0,0,0,0},
- {0x18,0x0C,0x06,0x06,0x06,0x0C,0x18,0},{0x06,0x0C,0x18,0x18,0x18,0x0C,0x06,0},
- {0,0x66,0x3C,0xFF,0x3C,0x66,0,0},{0,0x0C,0x0C,0x3F,0x0C,0x0C,0,0},
- {0,0,0,0,0,0x0C,0x0C,0x06},{0,0,0,0x3F,0,0,0,0},
- {0,0,0,0,0,0x0C,0x0C,0},{0x60,0x30,0x18,0x0C,0x06,0x03,0x01,0},
- {0x3E,0x63,0x73,0x7B,0x6F,0x67,0x3E,0},{0x0C,0x0E,0x0C,0x0C,0x0C,0x0C,0x3F,0},
- {0x1E,0x33,0x30,0x1C,0x06,0x33,0x3F,0},{0x1E,0x33,0x30,0x1C,0x30,0x33,0x1E,0},
- {0x38,0x3C,0x36,0x33,0x7F,0x30,0x78,0},{0x3F,0x03,0x1F,0x30,0x30,0x33,0x1E,0},
- {0x1C,0x06,0x03,0x1F,0x33,0x33,0x1E,0},{0x3F,0x33,0x30,0x18,0x0C,0x0C,0x0C,0},
- {0x1E,0x33,0x33,0x1E,0x33,0x33,0x1E,0},{0x1E,0x33,0x33,0x3E,0x30,0x18,0x0E,0},
- {0,0x0C,0x0C,0,0,0x0C,0x0C,0},{0,0x0C,0x0C,0,0,0x0C,0x0C,0x06},
- {0x18,0x0C,0x06,0x03,0x06,0x0C,0x18,0},{0,0,0x3F,0,0,0x3F,0,0},
- {0x06,0x0C,0x18,0x30,0x18,0x0C,0x06,0},{0x1E,0x33,0x30,0x18,0x0C,0,0x0C,0},
- {0x3E,0x63,0x7B,0x7B,0x7B,0x03,0x1E,0},{0x0C,0x1E,0x33,0x33,0x3F,0x33,0x33,0},
- {0x3F,0x66,0x66,0x3E,0x66,0x66,0x3F,0},{0x3C,0x66,0x03,0x03,0x03,0x66,0x3C,0},
- {0x1F,0x36,0x66,0x66,0x66,0x36,0x1F,0},{0x7F,0x46,0x16,0x1E,0x16,0x46,0x7F,0},
- {0x7F,0x46,0x16,0x1E,0x16,0x06,0x0F,0},{0x3C,0x66,0x03,0x03,0x73,0x66,0x7C,0},
- {0x33,0x33,0x33,0x3F,0x33,0x33,0x33,0},{0x1E,0x0C,0x0C,0x0C,0x0C,0x0C,0x1E,0},
- {0x78,0x30,0x30,0x30,0x33,0x33,0x1E,0},{0x67,0x66,0x36,0x1E,0x36,0x66,0x67,0},
- {0x0F,0x06,0x06,0x06,0x46,0x66,0x7F,0},{0x63,0x77,0x7F,0x7F,0x6B,0x63,0x63,0},
- {0x63,0x67,0x6F,0x7B,0x73,0x63,0x63,0},{0x1C,0x36,0x63,0x63,0x63,0x36,0x1C,0},
- {0x3F,0x66,0x66,0x3E,0x06,0x06,0x0F,0},{0x1E,0x33,0x33,0x33,0x3B,0x1E,0x38,0},
- {0x3F,0x66,0x66,0x3E,0x36,0x66,0x67,0},{0x1E,0x33,0x07,0x0E,0x38,0x33,0x1E,0},
- {0x3F,0x2D,0x0C,0x0C,0x0C,0x0C,0x1E,0},{0x33,0x33,0x33,0x33,0x33,0x33,0x3F,0},
- {0x33,0x33,0x33,0x33,0x33,0x1E,0x0C,0},{0x63,0x63,0x63,0x6B,0x7F,0x77,0x63,0},
- {0x63,0x63,0x36,0x1C,0x1C,0x36,0x63,0},{0x33,0x33,0x33,0x1E,0x0C,0x0C,0x1E,0},
- {0x7F,0x63,0x31,0x18,0x4C,0x66,0x7F,0},{0x1E,0x06,0x06,0x06,0x06,0x06,0x1E,0},
- {0x03,0x06,0x0C,0x18,0x30,0x60,0x40,0},{0x1E,0x18,0x18,0x18,0x18,0x18,0x1E,0},
- {0x08,0x1C,0x36,0x63,0,0,0,0},{0,0,0,0,0,0,0,0xFF},
- {0x0C,0x0C,0x18,0,0,0,0,0},{0,0,0x1E,0x30,0x3E,0x33,0x6E,0},
- {0x07,0x06,0x06,0x3E,0x66,0x66,0x3B,0},{0,0,0x1E,0x33,0x03,0x33,0x1E,0},
- {0x38,0x30,0x30,0x3E,0x33,0x33,0x6E,0},{0,0,0x1E,0x33,0x3F,0x03,0x1E,0},
- {0x1C,0x36,0x06,0x0F,0x06,0x06,0x0F,0},{0,0,0x6E,0x33,0x33,0x3E,0x30,0x1F},
- {0x07,0x06,0x36,0x6E,0x66,0x66,0x67,0},{0x0C,0,0x0E,0x0C,0x0C,0x0C,0x1E,0},
- {0x30,0,0x30,0x30,0x30,0x33,0x33,0x1E},{0x07,0x06,0x66,0x36,0x1E,0x36,0x67,0},
- {0x0E,0x0C,0x0C,0x0C,0x0C,0x0C,0x1E,0},{0,0,0x33,0x7F,0x7F,0x6B,0x63,0},
- {0,0,0x1F,0x33,0x33,0x33,0x33,0},{0,0,0x1E,0x33,0x33,0x33,0x1E,0},
- {0,0,0x3B,0x66,0x66,0x3E,0x06,0x0F},{0,0,0x6E,0x33,0x33,0x3E,0x30,0x78},
- {0,0,0x3B,0x6E,0x66,0x06,0x0F,0},{0,0,0x3E,0x03,0x1E,0x30,0x1F,0},
- {0x08,0x0C,0x3E,0x0C,0x0C,0x2C,0x18,0},{0,0,0x33,0x33,0x33,0x33,0x6E,0},
- {0,0,0x33,0x33,0x33,0x1E,0x0C,0},{0,0,0x63,0x6B,0x7F,0x7F,0x36,0},
- {0,0,0x63,0x36,0x1C,0x36,0x63,0},{0,0,0x33,0x33,0x33,0x3E,0x30,0x1F},
- {0,0,0x3F,0x19,0x0C,0x26,0x3F,0},{0x38,0x0C,0x0C,0x07,0x0C,0x0C,0x38,0},
- {0x18,0x18,0x18,0,0x18,0x18,0x18,0},{0x07,0x0C,0x0C,0x38,0x0C,0x0C,0x07,0},
- {0x6E,0x3B,0,0,0,0,0,0},{0,0,0,0,0,0,0,0},
-};
+#include "odoui_gfx.h"
 
 /* ------------------------------------------------------------------ */
-/* Framebuffer                                                         */
+/* TrueType font support via odoui_gfx.                               */
 /* ------------------------------------------------------------------ */
+#define FDIR "/etc/odo-ui/fonts/"
+static gfx_font g_body;   /* labels + data        (IBM Plex Mono) */
+static gfx_font g_head;   /* section headings     (Space Grotesk)   */
+static gfx_font g_hero;   /* big metrics          (Space Grotesk)   */
+static int ui_font_ready = 0;
+
 typedef struct {
     int fd;
     uint16_t *pix;
@@ -104,40 +57,69 @@ typedef struct {
 
 #define RGB565(r,g,b) (uint16_t)((((r)>>3)<<11) | (((g)>>2)<<5) | ((b)>>3))
 
-/* Miningcore-inspired palette: dark navy surfaces, two blues + cyan accent */
-#define C_BG     RGB565(8, 14, 32)        /* page background          */
-#define C_PANEL  RGB565(16, 28, 62)       /* header / card surface    */
-#define C_TEXT   RGB565(226, 232, 246)
-#define C_DIM    RGB565(118, 132, 168)
-#define C_OK     RGB565(70, 200, 120)
-#define C_WARN   RGB565(240, 180, 60)
-#define C_BAD    RGB565(230, 80, 80)
-#define C_BLUE   RGB565(45, 127, 240)     /* miningcore bright blue   */
-#define C_NAVY   RGB565(17, 39, 155)      /* miningcore deep blue     */
-#define C_CYAN   RGB565(56, 200, 240)     /* accent / hashrate        */
-#define C_ACCENT C_BLUE
-#define C_BTN    C_NAVY
-#define C_BTNHI  C_BLUE
+static void fb_color565(uint16_t c, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    *r = (uint8_t)(((c >> 11) & 0x1F) * 255 / 31);
+    *g = (uint8_t)(((c >> 5) & 0x3F) * 255 / 63);
+    *b = (uint8_t)((c & 0x1F) * 255 / 31);
+}
 
-/* 16x16 two-tone shield mark (.=transparent 1=bright 2=navy 3=white),
- * a pixel rendition of the Miningcore shield-and-slash logo. */
+static int fb_init_fonts(void)
+{
+    if (ui_font_ready) return 0;
+    if (gfx_font_load(&g_body, FDIR "IBMPlexMono-Medium.ttf", 16.0f) != 0 ||
+        gfx_font_load(&g_head, FDIR "SpaceGrotesk-SemiBold.ttf", 22.0f) != 0 ||
+        gfx_font_load(&g_hero, FDIR "SpaceGrotesk-SemiBold.ttf", 48.0f) != 0) {
+        fprintf(stderr, "odo-ui: cannot load fonts from %s\n", FDIR);
+        gfx_font_free(&g_body);
+        gfx_font_free(&g_head);
+        gfx_font_free(&g_hero);
+        return -1;
+    }
+    ui_font_ready = 1;
+    return 0;
+}
+
+static void fb_free_fonts(void)
+{
+    if (!ui_font_ready) return;
+    gfx_font_free(&g_body);
+    gfx_font_free(&g_head);
+    gfx_font_free(&g_hero);
+    ui_font_ready = 0;
+}
+
+/* Redesign palette: dark surfaces, gold accents, neutral text */
+#define C_BG     RGB565(16, 15, 11)       /* page background          */
+#define C_PANEL  RGB565(26, 24, 18)       /* header / card surface    */
+#define C_TEXT   RGB565(242, 239, 230)
+#define C_DIM    RGB565(172, 165, 144)
+#define C_OK     RGB565(70, 200, 120)
+#define C_WARN   RGB565(224, 123, 58)
+#define C_BAD    RGB565(229, 86, 74)
+#define C_ACCENT RGB565(240, 178, 60)     /* gold accent              */
+#define C_BTN    C_PANEL
+#define C_BTNHI  C_ACCENT
+
+/* 16×16 hexagonal mark: outer ring (1=gold) + inner solid hex (2=gold).
+ * Flat-top orientation matching the web SVG mark. */
 static const char *logo_px[16] = {
-    "211111....111112",
-    "1111111111111111",
-    "1111111111111111",
-    ".11111111111111.",
-    ".11111111111333.",
-    ".1111111133331..",
-    ".11111333312222.",
-    ".13333122222222.",
-    ".33122222222222.",
-    "..2222222222222.",
-    "..222222222222..",
-    "...2222222222...",
-    "....22222222....",
-    ".....222222.....",
-    "......2222......",
-    ".......22......."
+    "................",   /* 0 */
+    "....11111111....",   /* 1: outer top edge */
+    "...1........1...",   /* 2 */
+    "..1..........1..",   /* 3 */
+    ".1....2222....1.",   /* 4: inner hex top */
+    ".1...222222...1.",   /* 5 */
+    "1...22222222...1",   /* 6 */
+    "1...22222222...1",   /* 7 */
+    "1...22222222...1",   /* 8 */
+    ".1...222222...1.",   /* 9 */
+    ".1....2222....1.",   /* 10: inner hex bottom */
+    "..1..........1..",   /* 11 */
+    "...1........1...",   /* 12 */
+    "....11111111....",   /* 13: outer bottom edge */
+    "................",   /* 14 */
+    "................",   /* 15 */
 };
 
 static int fb_open(fb_t *fb)
@@ -183,6 +165,39 @@ static void fb_rect(fb_t *fb, int x, int y, int w, int h, uint16_t c)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Background image cache                                              */
+/* ------------------------------------------------------------------ */
+#define BG_PATH "/etc/odo-ui/bg.png"
+static uint16_t *g_bg_cache = NULL;   /* heap-allocated 320×240 RGB565 */
+static int       g_bg_ready = 0;
+
+/* Load bg.png once into a pixel buffer. Call after fb_open. */
+static void bg_load(fb_t *fb)
+{
+    if (g_bg_ready) return;
+    size_t npix = (size_t)fb->w * fb->h;
+    g_bg_cache = malloc(npix * sizeof(uint16_t));
+    if (!g_bg_cache) return;
+    /* Temporarily draw into the live framebuffer then snapshot it. */
+    if (gfx_background((gfx_fb *)fb, BG_PATH, 90) == 0) {
+        memcpy(g_bg_cache, fb->pix, npix * sizeof(uint16_t));
+        g_bg_ready = 1;
+    } else {
+        free(g_bg_cache);
+        g_bg_cache = NULL;
+    }
+}
+
+/* Fill framebuffer with cached bg, or solid C_BG if no image. */
+static void bg_blit(fb_t *fb)
+{
+    if (g_bg_ready && g_bg_cache)
+        memcpy(fb->pix, g_bg_cache, (size_t)fb->w * fb->h * sizeof(uint16_t));
+    else
+        fb_rect(fb, 0, 0, fb->w, fb->h, C_BG);
+}
+
 /* Draw the shield logo at integer scale */
 static void fb_logo(fb_t *fb, int x, int y, int scale)
 {
@@ -190,8 +205,8 @@ static void fb_logo(fb_t *fb, int x, int y, int scale)
         for (int cidx = 0; cidx < 16; cidx++) {
             uint16_t col;
             switch (logo_px[r][cidx]) {
-            case '1': col = C_BLUE; break;
-            case '2': col = C_NAVY; break;
+            case '1': col = C_ACCENT; break;
+            case '2': col = C_ACCENT; break;
             case '3': col = RGB565(255, 255, 255); break;
             default: continue;
             }
@@ -203,18 +218,23 @@ static void fb_logo(fb_t *fb, int x, int y, int scale)
 /* Draw text with integer scale; returns advance width */
 static int fb_text(fb_t *fb, int x, int y, const char *s, int scale, uint16_t c)
 {
-    int x0 = x;
-    for (; *s; s++) {
-        unsigned ch = (unsigned char)*s;
-        if (ch < 32 || ch > 127) ch = '?';
-        const uint8_t *g = font8x8[ch - 32];
-        for (int gy = 0; gy < 8; gy++)
-            for (int gx = 0; gx < 8; gx++)
-                if (g[gy] & (1 << gx))
-                    fb_rect(fb, x + gx * scale, y + gy * scale, scale, scale, c);
-        x += 8 * scale;
-    }
-    return x - x0;
+    if (!ui_font_ready)
+        return (int)strlen(s) * 8 * scale;
+
+    gfx_font *font = scale >= 3 ? &g_hero : scale == 2 ? &g_head : &g_body;
+    uint8_t r, g, b;
+    fb_color565(c, &r, &g, &b);
+    gfx_text((gfx_fb *)fb, font, x, y, s, r, g, b);
+    return gfx_text_w(font, s);
+}
+
+static int fb_text_w(int scale, const char *s)
+{
+    if (!ui_font_ready)
+        return (int)strlen(s) * 8 * scale;
+
+    gfx_font *font = scale >= 3 ? &g_hero : scale == 2 ? &g_head : &g_body;
+    return gfx_text_w(font, s);
 }
 
 /* ------------------------------------------------------------------ */
@@ -316,6 +336,7 @@ typedef struct {
     double hashrate;
     long long shares_found, shares_submitted;
     long   last_share, uptime, updated;
+    double best_diff_session, best_diff_alltime;
 } status_t;
 
 static long json_long(const char *buf, const char *key, long def)
@@ -363,11 +384,13 @@ static int status_read(const char *path, status_t *s)
     s->epoch            = json_long(buf, "epoch", 0);
     s->epoch_next       = json_long(buf, "epoch_next", 0);
     s->hashrate         = json_double(buf, "hashrate", 0);
-    s->shares_found     = json_long(buf, "shares_found", 0);
-    s->shares_submitted = json_long(buf, "shares_submitted", 0);
-    s->last_share       = json_long(buf, "last_share", 0);
-    s->uptime           = json_long(buf, "uptime", 0);
-    s->updated          = json_long(buf, "updated", 0);
+    s->shares_found       = json_long(buf, "shares_found", 0);
+    s->shares_submitted   = json_long(buf, "shares_submitted", 0);
+    s->last_share         = json_long(buf, "last_share", 0);
+    s->best_diff_session  = json_double(buf, "best_diff_session", 0.0);
+    s->best_diff_alltime  = json_double(buf, "best_diff_alltime", 0.0);
+    s->uptime             = json_long(buf, "uptime", 0);
+    s->updated            = json_long(buf, "updated", 0);
     return 0;
 }
 
@@ -394,6 +417,16 @@ static void fmt_age(long secs, char *out, size_t sz)
     else if (secs < 60)      snprintf(out, sz, "%lds ago", secs);
     else if (secs < 3600)    snprintf(out, sz, "%ldm ago", secs / 60);
     else                     snprintf(out, sz, "%ldh ago", secs / 3600);
+}
+
+static void fmt_diff(double d, char *out, size_t sz)
+{
+    if (d <= 0.0)        snprintf(out, sz, "-");
+    else if (d >= 1e9)   snprintf(out, sz, "%.2fG", d / 1e9);
+    else if (d >= 1e6)   snprintf(out, sz, "%.2fM", d / 1e6);
+    else if (d >= 1e3)   snprintf(out, sz, "%.2fK", d / 1e3);
+    else if (d >= 1.0)   snprintf(out, sz, "%.3f",  d);
+    else                 snprintf(out, sz, "%.5f",  d);
 }
 
 /* First non-loopback IPv4 — shown on screen so the web UI is findable */
@@ -466,7 +499,7 @@ static int kb_build(kbkey_t *k, int fbw)
     static const char *R1 = "qwertyuiop", *R1U = "QWERTYUIOP";
     static const char *R2 = "asdfghjkl",  *R2U = "ASDFGHJKL";
     static const char *R3 = "zxcvbnm",    *R3U = "ZXCVBNM";
-    int n = 0, cw = fbw / 10, kh = 27, top = 84, pitch = 31;
+    int n = 0, cw = fbw / 10, kh = 26, top = 84, pitch = 30;
 
     for (int i = 0; i < 10; i++)
         k[n++] = (kbkey_t){ {i*cw+1, top,          cw-2, kh}, KC_CHAR, R0[i], R0U[i], 0 };
@@ -507,18 +540,18 @@ static void fb_eye(fb_t *fb, int x, int y, uint16_t c)
 static void wifi_draw(fb_t *fb, const kbkey_t *k, int nk, const char *ssid,
                       const char *psk, int field, int shift, int reveal)
 {
-    fb_rect(fb, 0, 0, fb->w, fb->h, C_BG);
-    fb_rect(fb, 0, 0, fb->w, 30, C_PANEL);
+    bg_blit(fb);
+    gfx_rect_a((gfx_fb *)fb, 0, 0, fb->w, 30, 26, 24, 18, 210);
     fb_logo(fb, 6, 4, 1);
     fb_text(fb, 26, 8, "WIFI SETUP", 2, C_TEXT);
 
     char ln[200];
     /* SSID field (active one highlighted) */
-    fb_rect(fb, 6, 34, fb->w - 12, 18, field == 0 ? C_NAVY : C_PANEL);
+    fb_rect(fb, 6, 34, fb->w - 12, 18, field == 0 ? C_ACCENT : C_PANEL);
     snprintf(ln, sizeof ln, "SSID: %s%s", ssid, (field == 0 ? "_" : ""));
-    fb_text(fb, 10, 39, ln, 1, C_TEXT);
+    fb_text(fb, 10, 37, ln, 1, field == 0 ? C_BG : C_TEXT);
     /* PSK field (leaves room on the right for the eye toggle) */
-    fb_rect(fb, 6, 56, fb->w - 12 - EYE_W, 18, field == 1 ? C_NAVY : C_PANEL);
+    fb_rect(fb, 6, 56, fb->w - 12 - EYE_W, 18, field == 1 ? C_ACCENT : C_PANEL);
     if (reveal) {
         snprintf(ln, sizeof ln, "PSK:  %s%s", psk, (field == 1 ? "_" : ""));
     } else {
@@ -527,23 +560,25 @@ static void wifi_draw(fb_t *fb, const kbkey_t *k, int nk, const char *ssid,
         mask[L < sizeof(mask) - 2 ? L : sizeof(mask) - 2] = 0;
         snprintf(ln, sizeof ln, "PSK:  %s%s", mask, (field == 1 ? "_" : ""));
     }
-    fb_text(fb, 10, 61, ln, 1, C_TEXT);
+    fb_text(fb, 10, 59, ln, 1, C_TEXT);
     /* eye toggle (bright when revealed) */
     fb_rect(fb, fb->w - 6 - EYE_W, 56, EYE_W, 18, C_PANEL);
-    fb_eye(fb, fb->w - 6 - EYE_W + 7, 61, reveal ? C_CYAN : C_DIM);
+    fb_eye(fb, fb->w - 6 - EYE_W + 7, 61, reveal ? C_ACCENT : C_DIM);
 
     for (int i = 0; i < nk; i++) {
         const kbkey_t *key = &k[i];
-        uint16_t bg = key->kind == KC_SAVE   ? C_OK :
-                      key->kind == KC_CANCEL ? C_BAD :
-                      (key->kind == KC_SHIFT && shift) ? C_CYAN : C_BTN;
-        fb_rect(fb, key->r.x, key->r.y, key->r.w, key->r.h, C_BLUE);
-        fb_rect(fb, key->r.x + 1, key->r.y + 1, key->r.w - 2, key->r.h - 2, bg);
+        uint16_t inner = C_PANEL;
+        uint16_t text = C_TEXT;
+        if (key->kind == KC_SAVE) { inner = C_ACCENT; text = C_BG; }
+        else if (key->kind == KC_CANCEL) { inner = C_BAD; }
+        else if (key->kind == KC_SHIFT && shift) { inner = C_ACCENT; text = C_BG; }
+        fb_rect(fb, key->r.x, key->r.y, key->r.w, key->r.h, C_PANEL);
+        fb_rect(fb, key->r.x + 1, key->r.y + 1, key->r.w - 2, key->r.h - 2, inner);
         char lab[8]; const char *s;
         if (key->kind == KC_CHAR) { lab[0] = shift ? key->up : key->lo; lab[1] = 0; s = lab; }
         else s = key->label;
-        fb_text(fb, key->r.x + (key->r.w - (int)strlen(s) * 8) / 2,
-                key->r.y + (key->r.h - 8) / 2, s, 1, C_TEXT);
+        fb_text(fb, key->r.x + (key->r.w - fb_text_w(1, s)) / 2,
+                key->r.y + (key->r.h - 12) / 2, s, 1, text);
     }
 }
 
@@ -599,7 +634,13 @@ static int wifi_scan(char list[][33], int max)
         if (!line[0]) continue;                 /* skip hidden SSIDs */
         int dup = 0;
         for (int i = 0; i < n; i++) if (!strcmp(list[i], line)) { dup = 1; break; }
-        if (!dup) { strncpy(list[n], line, 32); list[n][32] = 0; n++; }
+        if (!dup) {
+            size_t len = strlen(line);
+            if (len >= sizeof list[n]) len = sizeof list[n] - 1;
+            memcpy(list[n], line, len);
+            list[n][len] = '\0';
+            n++;
+        }
     }
     pclose(p);
     return n;
@@ -609,8 +650,8 @@ static int wifi_scan(char list[][33], int max)
 #define SCAN_ROW_Y0 36
 static void scan_draw(fb_t *fb, char list[][33], int n)
 {
-    fb_rect(fb, 0, 0, fb->w, fb->h, C_BG);
-    fb_rect(fb, 0, 0, fb->w, 30, C_PANEL);
+    bg_blit(fb);
+    gfx_rect_a((gfx_fb *)fb, 0, 0, fb->w, 30, 26, 24, 18, 210);
     fb_text(fb, 8, 8, "SELECT NETWORK", 2, C_TEXT);
     int rows = n > 8 ? 8 : n;
     for (int i = 0; i < rows; i++) {
@@ -618,7 +659,7 @@ static void scan_draw(fb_t *fb, char list[][33], int n)
         fb_rect(fb, 6, y, fb->w - 12, SCAN_ROW_H - 2, C_PANEL);
         fb_text(fb, 12, y + 5, list[i], 1, C_TEXT);
     }
-    fb_rect(fb, 6, fb->h - 24, fb->w - 12, 20, C_NAVY);
+    fb_rect(fb, 6, fb->h - 24, fb->w - 12, 20, C_PANEL);
     fb_text(fb, 12, fb->h - 18,
             n ? "tap a network, or here to type it" : "no networks - tap here to type",
             1, C_TEXT);
@@ -634,7 +675,7 @@ static void run_wifi_setup(fb_t *fb, touch_t *tp, const kbkey_t *keys, int nk, i
     char ssid[64] = "", psk[128] = "";
     int field = 0, shift = 0, scan_mode = 0, scan_n = 0, reveal = 0;
     char scan[16][33];
-    rect_t scan_btn = { fb->w - 52, 34, 46, 16 };
+    rect_t scan_btn = { fb->w - 52, 7, 46, 16 };
     rect_t eye_btn  = { fb->w - 6 - EYE_W, 56, EYE_W, 18 };
 
     while (!g_stop) {
@@ -642,9 +683,9 @@ static void run_wifi_setup(fb_t *fb, touch_t *tp, const kbkey_t *keys, int nk, i
             scan_draw(fb, scan, scan_n);
         } else {
             wifi_draw(fb, keys, nk, ssid, psk, field, shift, reveal);
-            fb_rect(fb, scan_btn.x, scan_btn.y, scan_btn.w, scan_btn.h, C_CYAN);
-            fb_text(fb, scan_btn.x + (scan_btn.w - 4 * 8) / 2, scan_btn.y + 4,
-                    "SCAN", 1, C_BG);
+            fb_rect(fb, scan_btn.x, scan_btn.y, scan_btn.w, scan_btn.h, C_ACCENT);
+            fb_text(fb, scan_btn.x + (scan_btn.w - fb_text_w(1, "SCAN")) / 2,
+                    scan_btn.y + (scan_btn.h - 12) / 2, "SCAN", 1, C_BG);
         }
         for (int tick = 0; tick < 20 && !g_stop; tick++) {
             int sx, sy;
@@ -662,7 +703,7 @@ static void run_wifi_setup(fb_t *fb, touch_t *tp, const kbkey_t *keys, int nk, i
                     }
                     scan_mode = 0;           /* any tap returns to the keyboard */
                 } else if (hit(&scan_btn, sx, sy)) {
-                    fb_rect(fb, 0, fb->h / 2 - 10, fb->w, 20, C_NAVY);
+                    fb_rect(fb, 0, fb->h / 2 - 10, fb->w, 20, C_PANEL);
                     fb_text(fb, fb->w / 2 - 44, fb->h / 2 - 4, "Scanning...", 1, C_TEXT);
                     scan_n = wifi_scan(scan, 16);
                     scan_mode = 1;
@@ -682,14 +723,147 @@ static void run_wifi_setup(fb_t *fb, touch_t *tp, const kbkey_t *keys, int nk, i
     }
 }
 
+/* ---- Glance screen: big hashrate hero + shapechange countdown + bar ---- */
+static void draw_glance(fb_t *fb, const status_t *st, time_t now,
+                        const char *wssid, int wdbm)
+{
+    (void)wssid; (void)wdbm;
+    bg_blit(fb);
+    /* header */
+    gfx_rect_a((gfx_fb *)fb, 0, 0, fb->w, 36, 26, 24, 18, 210);
+    fb_rect(fb, 0, 36, fb->w, 2, C_ACCENT);
+    fb_logo(fb, 6, 2, 2);
+    fb_text(fb, 44, 10, "ODO MINER", 2, C_TEXT);
+    /* status pill, right-aligned */
+    {
+        const char *txt; uint16_t col;
+        int stale = !st->updated || (now - (time_t)st->updated > 120);
+        if (stale)              { txt = "MINER DOWN"; col = C_BAD; }
+        else if (st->connected) { txt = "POOL OK";    col = C_OK; }
+        else                    { txt = "OFFLINE";    col = C_WARN; }
+        int pw = fb_text_w(1, txt) + 12;
+        fb_rect(fb, fb->w - pw - 6, 10, pw, 16, C_BG);
+        fb_text(fb, fb->w - pw, 14, txt, 1, col);
+    }
+    /* hashrate hero */
+    char rate[48];
+    fb_text(fb, 14, 42, "HASHRATE", 1, C_DIM);
+    fmt_rate(st->hashrate, rate, sizeof(rate));
+    fb_text(fb, 14, 54, rate, 3, C_TEXT);
+    /* shapechange countdown + progress bar */
+    fb_text(fb, 14, 110, "SHAPECHANGE IN", 1, C_DIM);
+    if (st->epoch && st->epoch_next > (long)st->epoch) {
+        long left = (long)st->epoch_next - now;
+        if (left < 0) left = 0;
+        char cntdn[32];
+        snprintf(cntdn, sizeof(cntdn), "%ldd %ldh %ldm",
+                 left / 86400, (left % 86400) / 3600, (left % 3600) / 60);
+        fb_text(fb, 14, 122, cntdn, 2, C_TEXT);
+        long bar_total = (long)st->epoch_next - (long)st->epoch;
+        long bar_done  = now - (long)st->epoch;
+        if (bar_done < 0) bar_done = 0;
+        int bar_full = fb->w - 28;
+        int bar_fill = (bar_total > 0) ? (int)((long)bar_full * bar_done / bar_total) : 0;
+        if (bar_fill > bar_full) bar_fill = bar_full;
+        fb_rect(fb, 14, 148, bar_full, 7, C_PANEL);
+        if (bar_fill > 0) fb_rect(fb, 14, 148, bar_fill, 7, C_ACCENT);
+    } else {
+        fb_text(fb, 14, 122, "loading...", 1, C_DIM);
+        fb_rect(fb, 14, 148, fb->w - 28, 7, C_PANEL);
+    }
+    /* status line */
+    {
+        char age[24], sline[80];
+        long ls = st->last_share ? now - (time_t)st->last_share : -1L;
+        fmt_age(ls, age, sizeof(age));
+        snprintf(sline, sizeof(sline), "share %s  ep %ld", age, st->epoch);
+        fb_text(fb, 14, 164, sline, 1, C_DIM);
+    }
+}
+
+/* ---- Detail screen: expanded key/value stat rows ---- */
+static void draw_detail(fb_t *fb, const status_t *st, time_t now,
+                        const char *wssid, int wdbm)
+{
+    bg_blit(fb);
+    /* header */
+    gfx_rect_a((gfx_fb *)fb, 0, 0, fb->w, 36, 26, 24, 18, 210);
+    fb_rect(fb, 0, 36, fb->w, 2, C_ACCENT);
+    fb_logo(fb, 6, 2, 2);
+    fb_text(fb, 44, 10, "DETAILS", 2, C_TEXT);
+    if (wssid[0]) fb_signal(fb, fb->w - 24, 14, wdbm, C_OK, C_PANEL);
+    /* stat rows */
+    int y = 44;
+    int xL = 14, xLv = 68, xR = 168, xRv = 216;
+    char val[80], age[24];
+
+    fb_text(fb, xL, y, "POOL",   1, C_DIM);
+    fb_text(fb, xLv, y, st->pool[0] ? st->pool : "?", 1, C_TEXT);
+    y += 14;
+
+    fb_text(fb, xL, y, "JOB",    1, C_DIM);
+    fb_text(fb, xLv, y, st->job_id[0] ? st->job_id : "-", 1, C_TEXT);
+    fb_text(fb, xR, y, "SBM/FND", 1, C_DIM);
+    snprintf(val, sizeof(val), "%lld/%lld", st->shares_submitted, st->shares_found);
+    fb_text(fb, xRv, y, val, 1, C_TEXT);
+    y += 14;
+
+    fb_text(fb, xL, y, "UPTIME", 1, C_DIM);
+    snprintf(val, sizeof(val), "%ldh %ldm", st->uptime / 3600, (st->uptime % 3600) / 60);
+    fb_text(fb, xLv, y, val, 1, C_TEXT);
+    fb_text(fb, xR, y, "LAST",   1, C_DIM);
+    fmt_age(st->last_share ? now - (time_t)st->last_share : -1L, age, sizeof(age));
+    fb_text(fb, xRv, y, age, 1, C_TEXT);
+    y += 14;
+
+    char ip[64];
+    board_ip(ip, sizeof(ip));
+    fb_text(fb, xL, y, "IP",     1, C_DIM);
+    fb_text(fb, xLv, y, ip[0] ? ip : "no network", 1, ip[0] ? C_TEXT : C_WARN);
+    y += 14;
+
+    {
+        char wsh[26];
+        snprintf(wsh, sizeof(wsh), "%s", wssid[0] ? wssid : "-");
+        fb_text(fb, xL, y, "WIFI",   1, C_DIM);
+        fb_text(fb, xLv, y, wsh, 1, wssid[0] ? C_TEXT : C_DIM);
+        if (wssid[0]) fb_signal(fb, fb->w - 24, y, wdbm, C_OK, C_PANEL);
+    }
+    y += 14;
+
+    fb_text(fb, xL, y, "EPOCH",  1, C_DIM);
+    if (st->epoch && st->epoch_next && now >= st->epoch_next) {
+        snprintf(val, sizeof(val), "%ld  ROLLING", st->epoch);
+        fb_text(fb, xLv, y, val, 1, C_WARN);
+    } else if (st->epoch && st->epoch_next > now) {
+        long left = (long)st->epoch_next - now;
+        snprintf(val, sizeof(val), "%ld (%ldd %ldh)", st->epoch,
+                 left / 86400, (left % 86400) / 3600);
+        fb_text(fb, xLv, y, val, 1, C_TEXT);
+    } else {
+        snprintf(val, sizeof(val), "%ld", st->epoch);
+        fb_text(fb, xLv, y, val, 1, st->epoch ? C_TEXT : C_DIM);
+    }
+    y += 14;
+
+    /* Best difficulty: session (since miner start) and all-time (persisted) */
+    char ds[20], da[20];
+    fmt_diff(st->best_diff_session, ds, sizeof(ds));
+    fmt_diff(st->best_diff_alltime, da, sizeof(da));
+    fb_text(fb, xL, y, "BEST-S", 1, C_DIM);
+    fb_text(fb, xLv, y, ds, 1, C_ACCENT);
+    fb_text(fb, xR, y, "BEST-A", 1, C_DIM);
+    fb_text(fb, xRv, y, da, 1, C_ACCENT);
+}
+
 /* Centered splash: shield logo + ODO MINER + a status/loading message. */
 static void draw_splash(fb_t *fb, const char *msg)
 {
     fb_rect(fb, 0, 0, fb->w, fb->h, C_BG);
     fb_logo(fb, fb->w / 2 - 16, fb->h / 2 - 52, 2);            /* 32x32 */
     const char *title = "ODO MINER";
-    fb_text(fb, (fb->w - (int)strlen(title) * 16) / 2, fb->h / 2 - 12, title, 2, C_TEXT);
-    fb_text(fb, (fb->w - (int)strlen(msg) * 8) / 2, fb->h / 2 + 16, msg, 1, C_CYAN);
+    fb_text(fb, (fb->w - fb_text_w(2, title)) / 2, fb->h / 2 - 12, title, 2, C_TEXT);
+    fb_text(fb, (fb->w - fb_text_w(1, msg)) / 2, fb->h / 2 + 16, msg, 1, C_ACCENT);
 }
 
 int main(int argc, char **argv)
@@ -713,17 +887,18 @@ int main(int argc, char **argv)
     fb_t fb;
     if (fb_open(&fb) != 0)
         return 1;
+    fb_init_fonts();
+    bg_load(&fb);
 
     touch_t tp;
     int have_touch = touch_open(&tp) == 0;
     if (!have_touch)
         fprintf(stderr, "odo-ui: no ADS7846 touch device found; display-only mode\n");
 
-    /* three-button row at the bottom: RESTART | WIFI | REBOOT */
-    int bw = (fb.w - 8 * 4) / 3;
-    rect_t btn_restart = { 8,                fb.h - 42, bw, 34 };
-    rect_t btn_wifi    = { 8 + (bw + 8),     fb.h - 42, bw, 34 };
-    rect_t btn_reboot  = { 8 + 2 * (bw + 8), fb.h - 42, bw, 34 };
+    /* button row — wide left (DETAILS / ← BACK), two narrow (WIFI/RESTART, MENU/REBOOT) */
+    rect_t btn_left  = { 6,   fb.h - 42, 148, 34 };
+    rect_t btn_mid   = { 160, fb.h - 42,  74, 34 };
+    rect_t btn_right = { 240, fb.h - 42,  74, 34 };
 
     /* WiFi setup keyboard layout */
     kbkey_t keys[64];
@@ -735,11 +910,12 @@ int main(int argc, char **argv)
     int confirm = 0;            /* 0 none, 1 restart, 2 reboot */
     int rebooting = 0;
     time_t confirm_at = 0;
+    int ui_screen = 0;          /* 0 = glance, 1 = detail */
 
     while (!g_stop) {
         time_t now = time(NULL);
 
-        if (rebooting) {        /* hold a "Rebooting..." splash until killed */
+        if (rebooting) {
             draw_splash(&fb, "Rebooting...");
             struct timespec ts = { 0, 400 * 1000000L };
             nanosleep(&ts, NULL);
@@ -748,117 +924,73 @@ int main(int argc, char **argv)
 
         status_t st;
         memset(&st, 0, sizeof(st));
-        int have = status_read(status_path, &st) == 0;
-        int stale = !have || (st.updated && now - st.updated > 120);
+        status_read(status_path, &st);
 
-        /* ---- background + header bar with shield logo ---- */
-        fb_rect(&fb, 0, 0, fb.w, fb.h, C_BG);
-        fb_rect(&fb, 0, 0, fb.w, 36, C_PANEL);
-        fb_rect(&fb, 0, 36, fb.w, 2, C_NAVY);
-        fb_logo(&fb, 6, 2, 2);
-        fb_text(&fb, 44, 10, "ODO MINER", 2, C_TEXT);
+        char wssid[40]; int wdbm = 0;
+        wifi_status(wssid, sizeof wssid, &wdbm);
 
-        /* status pill, right-aligned */
-        {
-            const char *txt; uint16_t col;
-            if (stale)              { txt = "MINER DOWN"; col = C_BAD; }
-            else if (st.connected)  { txt = "POOL OK";    col = C_OK; }
-            else                    { txt = "OFFLINE";    col = C_WARN; }
-            int w = (int)strlen(txt) * 8 + 12;
-            fb_rect(&fb, fb.w - w - 6, 10, w, 16, C_BG);
-            fb_text(&fb, fb.w - w, 14, txt, 1, col);
-        }
+        /* ---- draw active screen ---- */
+        if (ui_screen == 0)
+            draw_glance(&fb, &st, now, wssid, wdbm);
+        else
+            draw_detail(&fb, &st, now, wssid, wdbm);
 
-        /* ---- hashrate hero ---- */
-        char line[128];
-        fb_text(&fb, 10, 44, "HASHRATE", 1, C_DIM);
-        fmt_rate(st.hashrate, line, sizeof(line));
-        fb_text(&fb, 10, 56, line, 3, C_CYAN);
-
-        /* ---- pool line + two-column stat grid ---- */
-        int y = 88;
-        snprintf(line, sizeof(line), "%s", have ? st.pool : "?");
-        fb_text(&fb, 10, y, "POOL", 1, C_DIM);
-        fb_text(&fb, 58, y, line, 1, C_TEXT);
-        y += 14;
-
-        {
-            char age[32], val[64];
-            int xL = 10, xLv = 58, xR = 168, xRv = 216;
-
-            fb_text(&fb, xL, y, "JOB", 1, C_DIM);
-            fb_text(&fb, xLv, y, st.job_id[0] ? st.job_id : "-", 1, C_TEXT);
-            fb_text(&fb, xR, y, "UPTIME", 1, C_DIM);
-            snprintf(val, sizeof(val), "%ldh %ldm",
-                     st.uptime / 3600, (st.uptime % 3600) / 60);
-            fb_text(&fb, xRv, y, val, 1, C_TEXT);
-            y += 14;
-
-            fb_text(&fb, xL, y, "SHARES", 1, C_DIM);
-            snprintf(val, sizeof(val), "%lld/%lld",
-                     st.shares_found, st.shares_submitted);
-            fb_text(&fb, xLv, y, val, 1, C_TEXT);
-            fb_text(&fb, xR, y, "LAST", 1, C_DIM);
-            fmt_age(st.last_share ? now - st.last_share : -1, age, sizeof(age));
-            fb_text(&fb, xRv, y, age, 1, C_TEXT);
-            y += 14;
-
-            fb_text(&fb, xL, y, "IP", 1, C_DIM);
-            char ip[64];
-            board_ip(ip, sizeof(ip));
-            fb_text(&fb, xLv, y, ip[0] ? ip : "no network", 1,
-                    ip[0] ? C_TEXT : C_WARN);
-            y += 14;
-
-            /* WiFi: connected SSID + signal-strength bars */
-            char wssid[40]; int wdbm = 0;
-            wifi_status(wssid, sizeof wssid, &wdbm);
-            fb_text(&fb, xL, y, "WIFI", 1, C_DIM);
-            char wsh[26];
-            snprintf(wsh, sizeof wsh, "%s", wssid[0] ? wssid : "-");
-            fb_text(&fb, xLv, y, wsh, 1, wssid[0] ? C_TEXT : C_DIM);
-            if (wssid[0]) fb_signal(&fb, fb.w - 24, y, wdbm, C_OK, C_PANEL);
-            y += 14;
-
-            /* epoch line: countdown, or amber ROLLING state at the boundary */
-            fb_text(&fb, xL, y, "EPOCH", 1, C_DIM);
-            if (st.epoch && st.epoch_next && now >= st.epoch_next) {
-                snprintf(val, sizeof(val), "%ld  ROLLING NOW...", st.epoch);
-                fb_text(&fb, xLv, y, val, 1, C_WARN);
-            } else if (st.epoch && st.epoch_next > now) {
-                long left = st.epoch_next - now;
-                snprintf(val, sizeof(val), "%ld (rolls %ldd %ldh)",
-                         st.epoch, left / 86400, (left % 86400) / 3600);
-                fb_text(&fb, xLv, y, val, 1, C_TEXT);
-            } else {
-                snprintf(val, sizeof(val), "%ld", st.epoch);
-                fb_text(&fb, xLv, y, val, 1, C_TEXT);
-            }
-            y += 14;
-        }
-
-        /* ---- buttons / confirmation ---- */
+        /* ---- buttons ---- */
         if (confirm && now - confirm_at > 6)
-            confirm = 0;     /* confirmation times out */
+            confirm = 0;
 
-        if (!confirm) {
-            struct { rect_t r; const char *t; } b3[3] = {
-                { btn_restart, "RESTART" }, { btn_wifi, "WIFI" }, { btn_reboot, "REBOOT" }
-            };
-            for (int i = 0; i < 3; i++) {
-                fb_rect(&fb, b3[i].r.x, b3[i].r.y, b3[i].r.w, b3[i].r.h, C_BLUE);
-                fb_rect(&fb, b3[i].r.x + 1, b3[i].r.y + 1, b3[i].r.w - 2, b3[i].r.h - 2, C_BTN);
-                fb_text(&fb, b3[i].r.x + (b3[i].r.w - (int)strlen(b3[i].t) * 8) / 2,
-                        b3[i].r.y + 13, b3[i].t, 1, C_TEXT);
+        if (confirm > 0) {
+            /* Confirm dialog (restart or reboot): spans left+mid, cancel right.
+             * Shown from either screen. */
+            int cw2 = btn_mid.x + btn_mid.w - btn_left.x;
+            fb_rect(&fb, btn_left.x, btn_left.y, cw2, btn_left.h, C_BAD);
+            fb_text(&fb, btn_left.x + 8, btn_left.y + 11,
+                    confirm == 1 ? "CONFIRM RESTART" : "CONFIRM REBOOT", 1, C_TEXT);
+            fb_rect(&fb, btn_right.x, btn_right.y, btn_right.w, btn_right.h, C_ACCENT);
+            fb_rect(&fb, btn_right.x+1, btn_right.y+1, btn_right.w-2, btn_right.h-2, C_PANEL);
+            fb_text(&fb, btn_right.x + (btn_right.w - fb_text_w(1, "CANCEL")) / 2,
+                    btn_right.y + 11, "CANCEL", 1, C_TEXT);
+        } else if (ui_screen == 0) {
+            if (confirm == -1) {
+                /* Glance quick-action menu: [CANCEL] [RESTART] [REBOOT] */
+                struct { rect_t r; const char *t; uint16_t border, fill, tc; } bm[3] = {
+                    { btn_left,  "CANCEL",  C_PANEL,  C_PANEL,  C_TEXT  },
+                    { btn_mid,   "RESTART", C_ACCENT, C_PANEL,  C_ACCENT },
+                    { btn_right, "REBOOT",  C_BAD,    C_PANEL,  C_BAD   },
+                };
+                for (int i = 0; i < 3; i++) {
+                    fb_rect(&fb, bm[i].r.x, bm[i].r.y, bm[i].r.w, bm[i].r.h, bm[i].border);
+                    fb_rect(&fb, bm[i].r.x+1, bm[i].r.y+1, bm[i].r.w-2, bm[i].r.h-2, bm[i].fill);
+                    fb_text(&fb, bm[i].r.x + (bm[i].r.w - fb_text_w(1, bm[i].t)) / 2,
+                            bm[i].r.y + 11, bm[i].t, 1, bm[i].tc);
+                }
+            } else {
+                /* Glance: [DETAILS (wide)] [WIFI] [MENU] */
+                struct { rect_t r; const char *t; uint16_t border, fill, tc; } b3[3] = {
+                    { btn_left,  "DETAILS", C_ACCENT, C_ACCENT, C_BG   },
+                    { btn_mid,   "WIFI",    C_ACCENT, C_PANEL,  C_TEXT  },
+                    { btn_right, "MENU",    C_ACCENT, C_PANEL,  C_TEXT  },
+                };
+                for (int i = 0; i < 3; i++) {
+                    fb_rect(&fb, b3[i].r.x, b3[i].r.y, b3[i].r.w, b3[i].r.h, b3[i].border);
+                    fb_rect(&fb, b3[i].r.x+1, b3[i].r.y+1, b3[i].r.w-2, b3[i].r.h-2, b3[i].fill);
+                    fb_text(&fb, b3[i].r.x + (b3[i].r.w - fb_text_w(1, b3[i].t)) / 2,
+                            b3[i].r.y + 13, b3[i].t, 1, b3[i].tc);
+                }
             }
         } else {
-            int cw = btn_wifi.x + btn_wifi.w - btn_restart.x;   /* span restart+wifi */
-            fb_rect(&fb, btn_restart.x, btn_restart.y, cw, btn_restart.h, C_BAD);
-            fb_text(&fb, btn_restart.x + 8, btn_restart.y + 13,
-                    confirm == 1 ? "CONFIRM RESTART" : "CONFIRM REBOOT", 1, C_TEXT);
-            fb_rect(&fb, btn_reboot.x, btn_reboot.y, btn_reboot.w, btn_reboot.h, C_BTNHI);
-            fb_text(&fb, btn_reboot.x + (btn_reboot.w - 6 * 8) / 2, btn_reboot.y + 13,
-                    "CANCEL", 1, C_TEXT);
+            /* Detail: [← BACK (wide)] [RESTART] [REBOOT] */
+            struct { rect_t r; const char *t; uint16_t border, fill, tc; } b3[3] = {
+                { btn_left,  "< BACK",  C_ACCENT, C_ACCENT, C_BG  },
+                { btn_mid,   "RESTART", C_ACCENT, C_PANEL,  C_TEXT },
+                { btn_right, "REBOOT",  C_BAD,    C_PANEL,  C_BAD  },
+            };
+            for (int i = 0; i < 3; i++) {
+                fb_rect(&fb, b3[i].r.x, b3[i].r.y, b3[i].r.w, b3[i].r.h, b3[i].border);
+                fb_rect(&fb, b3[i].r.x+1, b3[i].r.y+1, b3[i].r.w-2, b3[i].r.h-2, b3[i].fill);
+                fb_text(&fb, b3[i].r.x + (b3[i].r.w - fb_text_w(1, b3[i].t)) / 2,
+                        b3[i].r.y + 11, b3[i].t, 1, b3[i].tc);
+            }
         }
 
         /* ---- input ---- */
@@ -866,13 +998,10 @@ int main(int argc, char **argv)
             int sx, sy;
             int tapped = have_touch ? touch_poll(&tp, &fb, &sx, &sy) : 0;
             if (tapped) {
-                if (!confirm) {
-                    if (hit(&btn_restart, sx, sy)) { confirm = 1; confirm_at = now; }
-                    else if (hit(&btn_wifi, sx, sy)) { run_wifi_setup(&fb, &tp, keys, nk, have_touch); }
-                    else if (hit(&btn_reboot, sx, sy)) { confirm = 2; confirm_at = now; }
-                } else {
-                    rect_t cfm = { btn_restart.x, btn_restart.y,
-                                   btn_wifi.x + btn_wifi.w - btn_restart.x, btn_restart.h };
+                if (confirm > 0) {
+                    /* Confirm dialog: left+mid area executes, anything else cancels */
+                    rect_t cfm = { btn_left.x, btn_left.y,
+                                   btn_mid.x + btn_mid.w - btn_left.x, btn_left.h };
                     if (hit(&cfm, sx, sy)) {
                         if (confirm == 1) {
                             int rc = system("/etc/init.d/S90odod restart >/dev/null 2>&1 || "
@@ -887,8 +1016,37 @@ int main(int argc, char **argv)
                         }
                     }
                     confirm = 0;
+                } else if (ui_screen == 0) {
+                    if (confirm == -1) {
+                        /* Quick-action menu taps */
+                        if (hit(&btn_left, sx, sy)) {
+                            confirm = 0;
+                        } else if (hit(&btn_mid, sx, sy)) {
+                            confirm = 1; confirm_at = now;
+                        } else if (hit(&btn_right, sx, sy)) {
+                            confirm = 2; confirm_at = now;
+                        }
+                    } else {
+                        /* Normal glance taps */
+                        if (hit(&btn_left, sx, sy)) {
+                            ui_screen = 1;
+                        } else if (hit(&btn_mid, sx, sy)) {
+                            run_wifi_setup(&fb, &tp, keys, nk, have_touch);
+                        } else if (hit(&btn_right, sx, sy)) {
+                            confirm = -1; confirm_at = now;
+                        }
+                    }
+                } else {
+                    /* Detail taps */
+                    if (hit(&btn_left, sx, sy)) {
+                        ui_screen = 0;
+                    } else if (hit(&btn_mid, sx, sy)) {
+                        confirm = 1; confirm_at = now;
+                    } else if (hit(&btn_right, sx, sy)) {
+                        confirm = 2; confirm_at = now;
+                    }
                 }
-                tick = 99;   /* redraw immediately after a tap */
+                tick = 99;
             }
             struct timespec ts = { 0, 100 * 1000000L };
             nanosleep(&ts, NULL);
@@ -905,5 +1063,6 @@ int main(int argc, char **argv)
         nanosleep(&ts, NULL);
     }
 
+    fb_free_fonts();
     return 0;
 }

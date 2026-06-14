@@ -48,137 +48,11 @@
 /* Embedded dashboard page                                             */
 /* ------------------------------------------------------------------ */
 static const char PAGE[] =
-"<!DOCTYPE html><html><head><meta charset='utf-8'>"
-"<meta name='viewport' content='width=device-width,initial-scale=1'>"
-"<title>odo-miner</title><style>"
-"body{font-family:system-ui,sans-serif;background:#0a1228;color:#e2e8f6;"
-"margin:0;padding:16px;max-width:560px;margin-inline:auto}"
-"h1{font-size:21px;color:#e2e8f6;margin:8px 0 16px;display:flex;align-items:center;gap:10px}"
-"h1 small{color:#7684a8;font-weight:400;font-size:13px;margin-left:4px}"
-".card{background:#121f44;border:1px solid #1d2f63;border-radius:10px;"
-"padding:14px 16px;margin-bottom:14px}"
-".big{font-size:34px;font-weight:600;margin:2px 0 8px;color:#38c8f0}"
-".row{display:flex;justify-content:space-between;padding:3px 0;font-size:14px}"
-".row span:first-child{color:#7684a8}"
-".chip{padding:2px 10px;border-radius:10px;font-size:12px;font-weight:600}"
-".ok{background:#15402a;color:#52d68a}.warn{background:#4a3a12;color:#f0b43c}"
-".bad{background:#491b1b;color:#f07878}"
-"label{display:block;color:#7684a8;font-size:12px;margin:10px 0 2px}"
-"input[type=text],input[type=password]{width:100%;box-sizing:border-box;"
-"background:#0a1228;color:#e2e8f6;border:1px solid #24386f;border-radius:6px;"
-"padding:8px;font-size:14px}"
-"button{background:#2d7ff0;color:#fff;border:0;border-radius:6px;padding:10px 16px;"
-"font-size:14px;margin:12px 8px 0 0;cursor:pointer}"
-"button:hover{background:#1f66cc}"
-"button.danger{background:#a32d2d}"
-"#bar{height:6px;border-radius:3px;background:#1d2f63;margin-top:6px}"
-"#barfill{height:6px;border-radius:3px;background:#38c8f0;width:0%}"
-"</style></head><body>"
-"<h1>"
-"<svg width='30' height='32' viewBox='0 0 100 110'>"
-"<path d='M50 4 L8 18 V58 C8 84 28 100 50 108 C72 100 92 84 92 58 V18 Z' fill='#11279b'/>"
-"<path d='M50 4 L8 18 V52 L92 30 V18 Z' fill='#2d7ff0'/>"
-"<path d='M4 60 L96 34 L96 42 L4 70 Z' fill='#fff'/>"
-"</svg>"
-"ODO MINER<small id='host'></small></h1>"
-"<div class='card'>"
-"<div class='row'><span>Pool connection</span><span class='chip warn' id='conn'>...</span></div>"
-"<div class='big' id='rate'>-</div>"
-"<div class='row'><span>Pool</span><span id='pool'>-</span></div>"
-"<div class='row'><span>Job</span><span id='job'>-</span></div>"
-"<div class='row'><span>Shares found / sent</span><span id='shares'>-</span></div>"
-"<div class='row'><span>Last share</span><span id='last'>-</span></div>"
-"<div class='row'><span>Miner uptime</span><span id='up'>-</span></div>"
-"</div>"
-"<div class='card'>"
-"<div class='row'><span>OdoCrypt epoch key</span><span id='epoch'>-</span></div>"
-"<div class='row'><span>Next shapechange</span><span id='roll'>-</span></div>"
-"<div id='bar'><div id='barfill'></div></div>"
-"</div>"
-"<div class='card'>"
-"<div class='row'><span>Board IP</span><span id='ip'>-</span></div>"
-"<div class='row'><span>CPU load (1m)</span><span id='load'>-</span></div>"
-"<div class='row'><span>Memory free</span><span id='mem'>-</span></div>"
-"<div class='row'><span>System uptime</span><span id='sysup'>-</span></div>"
-"</div>"
-"<div class='card'>"
-"<b style='font-size:14px'>WiFi</b>"
-"<div class='row'><span>Adapter</span><span id='w_if'>-</span></div>"
-"<div class='row'><span>Network</span><span id='w_ssid'>-</span></div>"
-"<div class='row'><span>WiFi IP</span><span id='w_ip'>-</span></div>"
-"<form method='POST' action='/wifi'>"
-"<label>SSID</label><input type='text' name='ssid' id='w_in' list='ssids'>"
-"<datalist id='ssids'></datalist>"
-"<label>Password (empty for open network)</label><input type='password' name='psk'>"
-"<button type='submit' onclick='return confirm(\"Save WiFi settings and reconnect?\")'>Save &amp; connect</button>"
-"<button type='button' id='scanbtn' onclick='scanWifi()'>Scan networks</button>"
-"</form></div>"
-"<div class='card'><form method='POST' action='/config'>"
-"<b style='font-size:14px'>Pool configuration</b>"
-"<label>Host</label><input type='text' name='host' id='c_host'>"
-"<label>Port</label><input type='text' name='port' id='c_port'>"
-"<label>Worker / payout address</label><input type='text' name='worker' id='c_worker'>"
-"<label>Password</label><input type='password' name='pass' value='x'>"
-"<label>Backup pool host (optional)</label><input type='text' name='host2'>"
-"<label>Backup pool port</label><input type='text' name='port2'>"
-"<label><input type='checkbox' name='testnet' value='1' style='width:auto'> testnet (1-day epochs)</label>"
-"<button type='submit' onclick='return confirm(\"Save config and restart the miner?\")'>Save &amp; restart miner</button>"
-"</form>"
-"<form method='POST' action='/action' style='display:inline'>"
-"<input type='hidden' name='action' value='restart'>"
-"<button onclick='return confirm(\"Restart the miner?\")'>Restart miner</button></form>"
-"<form method='POST' action='/action' style='display:inline'>"
-"<input type='hidden' name='action' value='reboot'>"
-"<button class='danger' onclick='return confirm(\"Reboot the whole board?\")'>Reboot board</button></form>"
-"</div>"
-"<script>"
-"function fmtRate(h){if(h>=1e6)return (h/1e6).toFixed(2)+' MH/s';"
-"if(h>=1e3)return (h/1e3).toFixed(1)+' kH/s';return h.toFixed(0)+' H/s';}"
-"function fmtDur(s){if(s<0)return '-';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),"
-"m=Math.floor(s%3600/60);return (d?d+'d ':'')+(h?h+'h ':'')+m+'m';}"
-"function tick(){fetch('/status.json').then(r=>r.json()).then(s=>{"
-"var now=Math.floor(Date.now()/1000);"
-"document.getElementById('rate').textContent=fmtRate(s.hashrate||0);"
-"document.getElementById('pool').textContent=s.pool||'-';"
-"document.getElementById('job').textContent=s.job_id||'-';"
-"document.getElementById('shares').textContent=(s.shares_found||0)+' / '+(s.shares_submitted||0);"
-"document.getElementById('last').textContent=s.last_share?fmtDur(now-s.last_share)+' ago':'never';"
-"document.getElementById('up').textContent=fmtDur(s.uptime||0);"
-"document.getElementById('epoch').textContent=s.epoch||'-';"
-"var c=document.getElementById('conn');"
-"var stale=!s.updated||now-s.updated>120;"
-"c.textContent=stale?'MINER DOWN':(s.connected?'CONNECTED':'OFFLINE');"
-"c.className='chip '+(stale?'bad':(s.connected?'ok':'warn'));"
-"if(s.epoch&&s.epoch_interval&&s.epoch_next){"
-"var left=s.epoch_next-now,frac=1-left/s.epoch_interval;"
-"document.getElementById('roll').textContent="
-"left<=0?'ROLLING NOW — new tables load with the next job':fmtDur(left)+' from now';"
-"document.getElementById('barfill').style.width=Math.max(0,Math.min(100,frac*100))+'%';}"
-"if(!document.getElementById('c_host').value&&s.pool){"
-"var p=s.pool.split(':');document.getElementById('c_host').value=p[0]||'';"
-"document.getElementById('c_port').value=p[1]||'';}"
-"}).catch(()=>{});"
-"fetch('/sysinfo.json').then(r=>r.json()).then(i=>{"
-"document.getElementById('ip').textContent=i.ip||'-';"
-"document.getElementById('host').textContent=i.ip?('http://'+i.ip):'';"
-"document.getElementById('load').textContent=i.load1!==undefined?i.load1.toFixed(2):'-';"
-"document.getElementById('mem').textContent=i.mem_free_mb!==undefined?i.mem_free_mb+' MB':'-';"
-"document.getElementById('sysup').textContent=fmtDur(i.sys_uptime||0);"
-"}).catch(()=>{});"
-"fetch('/wifi.json').then(r=>r.json()).then(w=>{"
-"document.getElementById('w_if').textContent=w.present?'wlan0':'not detected';"
-"document.getElementById('w_ssid').textContent=w.ssid||'not connected';"
-"document.getElementById('w_ip').textContent=w.ip||'-';"
-"}).catch(()=>{});}"
-"function scanWifi(){var b=document.getElementById('scanbtn');"
-"b.disabled=true;b.textContent='Scanning...';"
-"fetch('/wifiscan.json').then(r=>r.json()).then(j=>{"
-"var d=document.getElementById('ssids');d.innerHTML='';"
-"(j.ssids||[]).forEach(s=>{var o=document.createElement('option');o.value=s;d.appendChild(o);});"
-"b.textContent=(j.ssids&&j.ssids.length)?'Scan again ('+j.ssids.length+' found)':'Scan networks';"
-"b.disabled=false;}).catch(()=>{b.textContent='Scan failed';b.disabled=false;});}"
-"tick();setInterval(tick,3000);"
-"</script></body></html>";
+    "<!DOCTYPE html><html><head><meta charset='utf-8'><title>ODO MINER</title></head>"
+    "<body style='background:#100F0B;color:#F2EFE6;font-family:monospace;padding:2em'>"
+    "<p>Install /etc/odo-web/index.html on the board to enable the dashboard.</p>"
+    "</body></html>";
+
 
 /* ------------------------------------------------------------------ */
 /* HTTP plumbing                                                       */
@@ -253,6 +127,42 @@ static void serve_sysinfo(int fd)
     int n = snprintf(body, sizeof(body),
         "{\"ip\":\"%s\",\"load1\":%.2f,\"mem_free_mb\":%ld,\"sys_uptime\":%ld}",
         ip, load1, mem_free_mb, sys_up);
+    send_response(fd, "200 OK", "application/json", body, (size_t)n);
+}
+
+/* ------------------------------------------------------------------ */
+/* Config read-back                                                    */
+/* ------------------------------------------------------------------ */
+static void serve_config(int fd)
+{
+    char host[128]="", port[16]="", worker[160]="", pass[64]="";
+    char testnet[8]="0";
+
+    FILE *f = fopen(CONF_PATH, "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            line[strcspn(line, "\n")] = 0;
+            char *eq = strchr(line, '=');
+            if (!eq || line[0] == '#') continue;
+            *eq = 0;
+            const char *key = line, *val = eq + 1;
+            if      (strcmp(key, "ODOD_POOL_HOST") == 0) snprintf(host,    sizeof(host),    "%s", val);
+            else if (strcmp(key, "ODOD_POOL_PORT") == 0) snprintf(port,    sizeof(port),    "%s", val);
+            else if (strcmp(key, "ODOD_WORKER")    == 0) snprintf(worker,  sizeof(worker),  "%s", val);
+            else if (strcmp(key, "ODOD_PASSWORD")  == 0) snprintf(pass,    sizeof(pass),    "%s", val);
+            else if (strcmp(key, "ODO_TESTNET")    == 0) snprintf(testnet, sizeof(testnet), "%s", val);
+        }
+        fclose(f);
+    }
+
+    /* All values were written through value_safe() so contain no '"' or '\' */
+    char body[512];
+    int n = snprintf(body, sizeof(body),
+        "{\"host\":\"%s\",\"port\":\"%s\",\"worker\":\"%s\","
+        "\"pass\":\"%s\",\"testnet\":%s}",
+        host, port, worker, pass,
+        testnet[0] == '1' ? "true" : "false");
     send_response(fd, "200 OK", "application/json", body, (size_t)n);
 }
 
@@ -548,10 +458,13 @@ int main(int argc, char **argv)
         if (n <= 0) { close(fd); continue; }
         req[n] = 0;
 
-        /* For POSTs, make sure we have the whole body (Content-Length) */
+        /* For POSTs, make sure we have the whole body (Content-Length).
+         * Accept both CRLF (RFC) and LF-only (Busybox wget, some clients). */
         char *body = strstr(req, "\r\n\r\n");
+        int body_skip = 4;
+        if (!body) { body = strstr(req, "\n\n"); body_skip = 2; }
         if (body) {
-            body += 4;
+            body += body_skip;
             const char *cl = strstr(req, "Content-Length:");
             if (cl) {
                 long want = strtol(cl + 15, NULL, 10);
@@ -579,6 +492,8 @@ int main(int argc, char **argv)
             } else {
                 send_response(fd, "200 OK", "text/html", PAGE, sizeof(PAGE) - 1);
             }
+        } else if (strncmp(req, "GET /config.json", 16) == 0) {
+            serve_config(fd);
         } else if (strncmp(req, "GET /status.json", 16) == 0) {
             serve_file(fd, STATUS_PATH, "application/json");
         } else if (strncmp(req, "GET /sysinfo.json", 17) == 0) {

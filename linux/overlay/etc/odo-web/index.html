@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>ODO MINER</title>
+<style>
+body{margin:0;background:#100F0B;color:#F2EFE6;font-family:system-ui,sans-serif;}
+*{box-sizing:border-box;}
+.page{padding:24px;max-width:1180px;margin:0 auto;}
+.brand{display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
+.mark{width:56px;height:56px;display:grid;place-items:center;border:1px solid #2E2A1F;border-radius:18px;}
+.mark svg{width:34px;height:34px;}
+.eyebrow{font-family:IBM Plex Mono,monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#F0B23C;font-weight:700;}
+.hero-title{margin:0;font-size:clamp(30px,4vw,48px);line-height:1.02;}
+.hero-copy{max-width:720px;font-size:16px;line-height:1.75;color:#C7C2B4;margin-top:14px;}
+.tabs{display:flex;gap:8px;background:#1A1812;border:1px solid #2E2A1F;border-radius:14px;overflow:hidden;margin-top:24px;}
+.tab{flex:1;padding:14px 18px;background:transparent;color:#C7C2B4;border:none;cursor:pointer;font-family:IBM Plex Mono,monospace;font-size:13px;}
+.tab.active{background:#F0B23C;color:#100F0B;font-weight:700;}
+.panel{margin-top:24px;display:grid;gap:16px;}
+.card{background:#1A1812;border:1px solid #2E2A1F;border-radius:18px;padding:20px;position:relative;}
+.card.head:before{content:'';position:absolute;right:-28px;top:-28px;width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,rgba(240,178,60,.16),transparent 70%);}
+.card h2{margin:0;font-size:14px;color:#7E7868;font-family:IBM Plex Mono,monospace;letter-spacing:.18em;text-transform:uppercase;}
+.stat-big{font-size:56px;font-weight:700;line-height:1;color:#F2EFE6;margin-top:10px;}
+.stat-unit{font-size:20px;color:#F0B23C;font-weight:700;margin-top:8px;}
+.card-row{display:flex;align-items:center;gap:8px;margin-top:16px;color:#C7C2B4;font-family:IBM Plex Mono,monospace;font-size:12px;}
+.card-row .chip{margin-left:auto;padding:5px 10px;border-radius:999px;font-size:11px;}
+.chip.ok{background:#56C878;color:#100F0B;}
+.chip.warn{background:#E07B3A;color:#100F0B;}
+.chip.bad{background:#E5564A;color:#100F0B;}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+.tile{background:rgba(255,255,255,.02);border:1px solid #2E2A1F;border-radius:14px;padding:16px;}
+.tile-label{font-family:IBM Plex Mono,monospace;font-size:10px;letter-spacing:.16em;color:#7E7868;text-transform:uppercase;margin-bottom:10px;}
+.tile-value{font-family:IBM Plex Mono,monospace;font-size:18px;color:#F2EFE6;font-variant-numeric:tabular-nums;}
+.form-group{display:flex;flex-direction:column;gap:8px;}
+.form-label{font-family:IBM Plex Mono,monospace;font-size:11px;color:#9A9483;}
+.form-input{width:100%;background:#100F0B;color:#F2EFE6;border:1px solid #2E2A1F;border-radius:12px;padding:12px;font-size:14px;}
+.button{border:none;border-radius:12px;padding:14px 18px;font-size:14px;font-weight:700;cursor:pointer;}
+.button.primary{background:#F0B23C;color:#100F0B;}
+.button.secondary{background:transparent;border:1px solid #2E2A1F;color:#F2EFE6;}
+.button.danger{background:transparent;border:1px solid #E5564A;color:#E5564A;}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);min-width:320px;background:#21261C;border:1px solid #56C878;border-radius:14px;padding:14px 18px;display:flex;align-items:center;gap:12px;box-shadow:0 24px 60px rgba(0,0,0,.3);opacity:0;pointer-events:none;transition:opacity .2s ease-in-out;}
+.toast.visible{opacity:1;pointer-events:auto;}
+.toast-dot{width:18px;height:18px;border-radius:50%;background:#56C878;display:grid;place-items:center;color:#100F0B;font-size:12px;font-weight:800;}
+</style>
+</head>
+<body>
+<div class='page'>
+  <div class='brand'>
+    <div class='mark'><svg viewBox='0 0 100 100'><polygon points='96,50 73,89.83 27,89.83 4,50 27,10.17 73,10.17' fill='none' stroke='#F0B23C' stroke-width='5'/><polygon points='50,28 30.95,39 30.95,61 50,72 69.05,61 69.05,39' fill='#F0B23C'/></svg></div>
+    <div>
+      <div class='eyebrow'>OdoCrypt FPGA miner · Cyclone V SoC</div>
+      <h1 class='hero-title'>ODO <span style='color:#F0B23C;'>MINER</span></h1>
+      <div class='hero-copy'>Autonomous OdoCrypt FPGA miner running on a Cyclone V SoC. Monitor live hashrate and shapechange status, or configure pool and WiFi settings.</div>
+    </div>
+  </div>
+  <div class='tabs'><button class='tab active' id='tabMonitor' type='button' onclick='showTab("monitor")'>Monitor</button><button class='tab' id='tabSettings' type='button' onclick='showTab("settings")'>Settings</button></div>
+  <div class='panel'>
+    <div class='card head' id='monitorPanel'>
+      <h2>Live status</h2>
+      <div class='stat-big' id='rate'>-</div>
+      <div class='card-row'><span id='pool'>-</span><span id='conn' class='chip warn'>OFFLINE</span></div>
+      <div class='card-row'><span id='shareAge'>-</span></div>
+      <div class='card-row'><span id='wifi-display' style='font-family:IBM Plex Mono,monospace;font-size:11px;color:#7E7868;'>WiFi: -</span></div>
+    </div>
+    <div class='grid2' id='monitorTiles'>
+      <div class='tile'><div class='tile-label'>Shapechange</div><div class='tile-value' id='roll'>-</div></div>
+      <div class='tile'><div class='tile-label'>Epoch key</div><div class='tile-value' id='epoch'>-</div></div>
+      <div class='tile'><div class='tile-label'>Board IP</div><div class='tile-value' id='ip'>-</div></div>
+      <div class='tile'><div class='tile-label'>CPU · mem</div><div class='tile-value' id='sysinfo'>-</div></div>
+      <div class='tile'><div class='tile-label'>Best diff (session)</div><div class='tile-value' id='bdiff_s' style='color:#F0B23C'>-</div></div>
+      <div class='tile'><div class='tile-label'>Best diff (all time)</div><div class='tile-value' id='bdiff_a' style='color:#F0B23C'>-</div></div>
+    </div>
+    <div class='card' id='settingsPanel' style='display:none;'>
+      <div class='form-group'><label class='form-label' for='c_host'>Pool host</label><input class='form-input' id='c_host' name='host' type='text'></div>
+      <div class='form-group'><label class='form-label' for='c_port'>Port</label><input class='form-input' id='c_port' name='port' type='text'></div>
+      <div class='form-group'><label class='form-label' for='c_worker'>Worker / payout address</label><input class='form-input' id='c_worker' name='worker' type='text'></div>
+      <div class='form-group'><label class='form-label' for='c_pass'>Password</label><input class='form-input' id='c_pass' name='pass' type='password' value='x'></div>
+      <div class='form-group'><label class='form-label' for='w_ssid'>WiFi SSID</label><input class='form-input' id='w_ssid' name='ssid' type='text'></div>
+      <div class='form-group'><label class='form-label' for='w_psk'>WiFi password</label><input class='form-input' id='w_psk' name='psk' type='password'></div>
+      <div class='form-group' style='flex-direction:row;align-items:center;gap:10px;margin-top:4px;'><input type='checkbox' id='c_testnet' name='testnet' style='width:16px;height:16px;accent-color:#F0B23C;'><label class='form-label' for='c_testnet' style='margin:0;'>Testnet mode (epoch interval 86400 s)</label></div>
+      <div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;'><button class='button primary' type='button' onclick='saveConfig()'>Save & restart miner</button><button class='button secondary' type='button' onclick='saveWifi()'>Save WiFi</button><button class='button danger' type='button' onclick='rebootBoard()'>Reboot board</button></div>
+    </div>
+  </div>
+</div>
+<div class='toast' id='toast'><div class='toast-dot'>&#10003;</div><div id='toastText'>Saved — restarting…</div></div>
+<script>
+function showTab(tab){document.getElementById('tabMonitor').className='tab'+(tab==='monitor'?' active':'');document.getElementById('tabSettings').className='tab'+(tab==='settings'?' active':'');document.getElementById('monitorPanel').style.display=tab==='monitor'?'block':'none';document.getElementById('monitorTiles').style.display=tab==='monitor'?'grid':'none';document.getElementById('settingsPanel').style.display=tab==='settings'?'block':'none';if(tab==='settings')loadConfig();}
+function loadConfig(){fetch('/config.json').then(function(r){return r.json();}).then(function(c){document.getElementById('c_host').value=c.host||'';document.getElementById('c_port').value=c.port||'';document.getElementById('c_worker').value=c.worker||'';document.getElementById('c_pass').value=c.pass||'';document.getElementById('c_testnet').checked=!!c.testnet;}).catch(function(){});}
+function fmtRate(h){if(h>=1e6)return (h/1e6).toFixed(2)+' MH/s';if(h>=1e3)return (h/1e3).toFixed(1)+' kH/s';return h.toFixed(0)+' H/s';}
+function fmtDiff(d){if(!d||d<=0)return '-';if(d>=1e9)return (d/1e9).toFixed(2)+'G';if(d>=1e6)return (d/1e6).toFixed(2)+'M';if(d>=1e3)return (d/1e3).toFixed(2)+'K';if(d>=1)return d.toFixed(3);return d.toFixed(5);}
+function fmtDur(s){if(s<0)return '-';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'d ':'')+(h?h+'h ':'')+m+'m';}
+function showToast(msg){var t=document.getElementById('toast');document.getElementById('toastText').textContent=msg;t.className='toast visible';setTimeout(function(){t.className='toast';},2600);}
+function xhrPost(path, body, successMsg, errorMsg){fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(){showToast(successMsg);}).catch(function(){showToast(errorMsg);});}
+function saveConfig(){var tn=document.getElementById('c_testnet').checked?'1':'0';var body='host='+encodeURIComponent(document.getElementById('c_host').value)+'&port='+encodeURIComponent(document.getElementById('c_port').value)+'&worker='+encodeURIComponent(document.getElementById('c_worker').value)+'&pass='+encodeURIComponent(document.getElementById('c_pass').value)+'&testnet='+tn;xhrPost('/config',body,'Saved — miner restarting…','Save failed');}
+function saveWifi(){var body='ssid='+encodeURIComponent(document.getElementById('w_ssid').value)+'&psk='+encodeURIComponent(document.getElementById('w_psk').value);xhrPost('/wifi',body,'WiFi saved — reconnecting…','WiFi save failed');}
+function rebootBoard(){if(confirm('Reboot the whole board?'))xhrPost('/action','action=reboot','Reboot requested','Reboot failed');}
+function tick(){fetch('/status.json').then(function(r){return r.json();}).then(function(s){var now=Math.floor(Date.now()/1000);document.getElementById('rate').textContent=fmtRate(s.hashrate||0);document.getElementById('pool').textContent=s.pool||'-';document.getElementById('epoch').textContent=s.epoch||'-';var left=s.epoch_next-now;document.getElementById('roll').textContent=(s.epoch&&s.epoch_interval&&s.epoch_next)?(left<=0?'rolling now':fmtDur(left)+' from now'):'-';document.getElementById('shareAge').textContent=s.last_share?('share '+fmtDur(now-s.last_share)+' ago'):'never';var c=document.getElementById('conn');var stale=!s.updated||now-s.updated>120;c.textContent=stale?'MINER DOWN':(s.connected?'CONNECTED':'OFFLINE');c.className='chip '+(stale?'bad':(s.connected?'ok':'warn'));document.getElementById('bdiff_s').textContent=fmtDiff(s.best_diff_session||0);document.getElementById('bdiff_a').textContent=fmtDiff(s.best_diff_alltime||0);}).catch(function(){});fetch('/sysinfo.json').then(function(r){return r.json();}).then(function(i){document.getElementById('ip').textContent=i.ip||'-';document.getElementById('sysinfo').textContent=(i.load1!==undefined?i.load1.toFixed(2):'-')+' · '+(i.mem_free_mb!==undefined?i.mem_free_mb+' MB':'-');}).catch(function(){});fetch('/wifi.json').then(function(r){return r.json();}).then(function(w){document.getElementById('wifi-display').textContent='WiFi: '+(w.ssid||'not connected');if(!document.getElementById('w_ssid').value&&w.ssid)document.getElementById('w_ssid').value=w.ssid;}).catch(function(){});}
+showTab('monitor');tick();setInterval(tick,3000);
+</script>
+</body>
+</html>
