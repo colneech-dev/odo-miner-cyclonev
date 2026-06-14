@@ -58,7 +58,7 @@ _last_share_t = [time.time()]
 # miner gets regular result:true feedback even on testnet/mainnet.
 # Convention matches hps/job.c: diff-1 = 0xFFFF * 2^208 expected hashes.
 # _SHARE_DIFF_INV is the reciprocal (integer); change it to tune share rate.
-# At ~26 KH/s: 10_000 → ~1 accepted share every 16 s.
+# At ~52 KH/s dual-core: 10_000 → ~1 accepted share every 8 s.
 _SHARE_DIFF_INV = 10_000
 SHARE_DIFF   = 1.0 / _SHARE_DIFF_INV   # float sent in mining.set_difficulty
 DIFF1_TARGET = 0xFFFF << 208            # diff-1 reference target (256-bit int)
@@ -141,6 +141,7 @@ def notify(conn, job):
 def handle(conn, addr):
     print(f"[+] miner {addr}")
     job = None
+    prev_job = None   # previous job kept for stale-share validation
     buf = b""
     try:
         while True:
@@ -171,25 +172,43 @@ def handle(conn, addr):
 
                 elif m == "mining.submit":
                     # [worker, job_id, extranonce2, ntime_hex, nonce_hex]
+                    submitted_job_id = msg["params"][1]
                     en2 = bytes.fromhex(msg["params"][2]) if msg["params"][2] else b""
                     nonce = int(msg["params"][4], 16)
-                    merkle = job["cb"]["txid"](en2)
-                    header = serialize_header(job["tmpl"], merkle, nonce)
+                    # Resolve which job to validate against.  The miner may
+                    # submit a nonce from the previous job if the job-change
+                    # notify hasn't been processed yet (classic stale-share
+                    # race).  Validate against the matching job instead of
+                    # rejecting as high-hash, which would be misleading.
+                    if submitted_job_id == job["id"]:
+                        vjob = job
+                    elif prev_job and submitted_job_id == prev_job["id"]:
+                        vjob = prev_job
+                        print(f"[*] stale-but-valid job_id={submitted_job_id} "
+                              f"(prev job, validating against it)")
+                    else:
+                        print(f"[*] unknown job_id={submitted_job_id}; rejecting")
+                        record_share("rejected")
+                        send(conn, {"id": mid, "result": False,
+                                    "error": [21, "unknown-job", None]})
+                        continue
+                    merkle = vjob["cb"]["txid"](en2)
+                    header = serialize_header(vjob["tmpl"], merkle, nonce)
                     # Local OdoCrypt check: validates the share and avoids
                     # a submitblock RPC for hashes that only meet share diff.
                     # Falls back to submitblock if the lib is unavailable.
                     try:
-                        h = odocrypt_hash(header, job["odokey"])
+                        h = odocrypt_hash(header, vjob["odokey"])
                         h_val = int.from_bytes(h, "little")
                         if h_val > SHARE_TARGET:
                             # Doesn't meet even the easy share target.
                             print(f"[D] high-hash: nonce={nonce:#010x} "
-                                  f"key={job['odokey']}", flush=True)
+                                  f"key={vjob['odokey']}", flush=True)
                             record_share("rejected")
                             send(conn, {"id": mid, "result": False,
                                         "error": [23, "high-hash", None]})
                             continue
-                        if h_val > job["target"]:
+                        if h_val > vjob["target"]:
                             # Meets share difficulty but not network difficulty.
                             record_share("share")
                             print(f"[*] share accepted nonce={nonce:#010x}")
@@ -201,7 +220,7 @@ def handle(conn, addr):
                             print(f"[!] local OdoCrypt lib unavailable ({e}); "
                                   f"relying on node submitblock for validation")
                             globals()["_warned_nolib"] = True
-                    block = assemble_block(header, job["cb"]["witness_block"](en2))
+                    block = assemble_block(header, vjob["cb"]["witness_block"](en2))
                     try:
                         res = rpc("submitblock", [block])
                     except Exception as e:
@@ -211,6 +230,7 @@ def handle(conn, addr):
                         send(conn, {"id": mid, "result": False,
                                     "error": [25, "submitblock-rpc-failure", err_text]})
                         try:
+                            prev_job = job
                             job = make_job()
                             record_job(job)
                             notify(conn, job)
@@ -226,6 +246,7 @@ def handle(conn, addr):
                         send(conn, {"id": mid, "result": False,
                                     "error": [24, "submitblock-rejected", str(res)]})
                         try:
+                            prev_job = job
                             job = make_job()
                             record_job(job)
                             notify(conn, job)
@@ -237,6 +258,7 @@ def handle(conn, addr):
                     record_share("block")
                     print(f"[*] share nonce={nonce} en2={en2.hex() or '-'} -> BLOCK ACCEPTED")
                     send(conn, {"id": mid, "result": True, "error": None})
+                    prev_job = job
                     job = make_job()
                     record_job(job)
                     notify(conn, job)
