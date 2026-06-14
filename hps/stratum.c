@@ -152,34 +152,6 @@ static void bytes_to_hex(const uint8_t *src, size_t src_len, char *dst, size_t d
     dst[src_len * 2] = '\0';
 }
 
-static size_t collect_quoted_strings(const char *json,
-                                    char out[][128],
-                                    size_t max_tokens)
-{
-    size_t count = 0;
-    const char *p = json;
-
-    while (*p && count < max_tokens) {
-        if (*p == '"') {
-            p++;
-            char *dst = out[count];
-            size_t written = 0;
-            while (*p && *p != '"' && written + 1 < sizeof(out[count])) {
-                if (*p == '\\' && p[1])
-                    p++;
-                dst[written++] = *p++;
-            }
-            dst[written] = '\0';
-            if (*p == '"')
-                p++;
-            count++;
-            continue;
-        }
-        p++;
-    }
-    return count;
-}
-
 static const char *find_json_key(const char *json, const char *key)
 {
     char search[128];
@@ -211,27 +183,59 @@ static bool parse_json_bool(const char *json, const char *key, bool *out)
 
 static int handle_subscribe_result(stratum_ctx_t *ctx, const char *body)
 {
-    char tokens[16][128];
-    size_t token_count = collect_quoted_strings(body, tokens, 16);
-    if (token_count < 3)
+    /*
+     * The result field looks like:
+     *   "result": [[["mining.notify","<sub_id>"]], "EN1_HEX", EN2_SIZE]
+     *
+     * We locate the result value with find_json_key() and skip past the
+     * nested subscription-details array to find EN1 and EN2_SIZE.
+     * (collect_quoted_strings() is wrong here because it also picks up JSON
+     * key strings like "id", "error", "result" before the actual values.)
+     */
+    const char *p = find_json_key(body, "result");
+    if (!p || *p != '[')
         return -1;
+    p++; /* skip outer '[' */
 
-    size_t extranonce1_len = hex_to_bytes(tokens[2], ctx->extranonce1, sizeof(ctx->extranonce1));
+    /* Skip the subscription-details array [[...]] */
+    if (*p == '[') {
+        int depth = 1;
+        p++;
+        while (*p && depth > 0) {
+            if (*p == '[') depth++;
+            else if (*p == ']') depth--;
+            p++;
+        }
+    }
+
+    /* Skip comma and whitespace between the inner array and EN1 */
+    while (*p && (*p == ',' || *p == ' ' || *p == '\t')) p++;
+
+    /* Next quoted string is the extranonce1 hex */
+    if (*p != '"')
+        return -1;
+    p++;
+    char en1_hex[65] = {0};
+    size_t hlen = 0;
+    while (*p && *p != '"' && hlen + 1 < sizeof(en1_hex))
+        en1_hex[hlen++] = *p++;
+    en1_hex[hlen] = '\0';
+    if (*p == '"') p++;
+
+    size_t extranonce1_len = hex_to_bytes(en1_hex, ctx->extranonce1, sizeof(ctx->extranonce1));
     if (extranonce1_len == 0)
         return -1;
     ctx->extranonce1_len = extranonce1_len;
 
-    const char *p = strstr(body, tokens[2]);
-    if (!p)
-        return -1;
-    p += strlen(tokens[2]);
-    while (*p && (*p == ' ' || *p == ',' || *p == '\t' || *p == '\r' || *p == '\n' || *p == ']'))
-        p++;
+    /* Skip comma and whitespace, then parse EN2_SIZE integer */
+    while (*p && (*p == ',' || *p == ' ' || *p == '\t')) p++;
     ctx->extranonce2_size = (int)strtol(p, NULL, 10);
     if (ctx->extranonce2_size < 0 || ctx->extranonce2_size > (int)sizeof(ctx->extranonce1))
         ctx->extranonce2_size = 0;
 
     ctx->subscribed = true;
+    fprintf(stderr, "[stratum] subscribe: EN1=%s (%zu B) EN2_SIZE=%d\n",
+            en1_hex, extranonce1_len, ctx->extranonce2_size);
     return 0;
 }
 
@@ -419,7 +423,9 @@ static void handle_set_difficulty(stratum_ctx_t *ctx, const char *params)
 
 static void handle_result(stratum_ctx_t *ctx, const char *line)
 {
-    if (strstr(line, "\"result\":[") != NULL) {
+    /* find_json_key skips whitespace after ':', handling "result": [[...]] */
+    const char *rp = find_json_key(line, "result");
+    if (rp && *rp == '[') {
         if (handle_subscribe_result(ctx, line) == 0)
             return;
     }

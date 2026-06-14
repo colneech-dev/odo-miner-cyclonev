@@ -1,7 +1,8 @@
 CC       ?= gcc
 CXX      ?= g++
 CPPFLAGS ?= -I.
-CFLAGS   ?= -std=c11   -O2 -Wall -Wextra -pedantic -pthread $(CPPFLAGS)
+CFLAGS   ?= -std=c11   -O2 -Wall -Wextra -pedantic -pthread $(CPPFLAGS) \
+             -I$(UPSTREAM_CRYPTO)
 CXXFLAGS ?= -std=c++14 -O2 -Wall -Wextra -pthread $(CPPFLAGS)
 LDFLAGS  ?= -lpthread
 
@@ -17,9 +18,11 @@ DAEMON_SRCS = miner_daemon.c stratum.c job.c odocrypt_header.c \
 DAEMON_OBJS = $(DAEMON_SRCS:.c=.o)
 
 # 2. odo-miner — new integrated miner (miner.c + epoch_watcher)
+# Add -DODO_VALIDATE_HASH and $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c to
+# CFLAGS/MINER_SRCS to enable per-nonce software cross-check (debug builds only).
 MINER_SRCS = miner.c epoch_watcher.c stratum.c job.c odocrypt_header.c \
              odocrypt_state.c miner_io.c
-MINER_OBJS = $(MINER_SRCS:.c=.o)
+MINER_OBJS = $(patsubst %.c,%.o,$(MINER_SRCS))
 
 # 3. odo-miner-watcher — miner with integrated epoch watcher thread
 WATCHER_SRCS = miner_with_watcher.c epoch_watcher.c stratum.c job.c \

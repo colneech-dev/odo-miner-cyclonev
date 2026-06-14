@@ -34,12 +34,13 @@ echo "=== Building testbench ==="
     "$SRC/odocrypt/odocrypt_epoch_tables.v" \
     "$SRC/keccak/keccak800.v"
 
-# (epoch_key, nonce) pairs: a tiny key, a random-looking key, and a realistic
-# mainnet odokey (multiple of 864000 seconds).
+# (epoch_key, nonce) pairs: a tiny key, a random-looking key, a realistic
+# mainnet odokey, and the testnet key that exposed share rejections.
 VECTORS=(
     "0x00000001 0x00000000"
     "0x12345678 0xCAFEBABE"
     "1748736000 0x0001E240"
+    "1781308800 0x00000000"
 )
 
 fail=0

@@ -282,6 +282,10 @@ def main():
 
     os.makedirs(datadir, exist_ok=True)
     conf_path = os.path.join(datadir, "digibyte.conf")
+    log_path = os.path.join(datadir, "run_testbed.log")
+    log_file = open(log_path, "a", encoding="utf-8", buffering=1)
+    log_file.write(f"\n=== run_testbed start {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+    print(f"[*] logging output to: {log_path}")
     print(f"[*] writing config: {conf_path}")
     write_merged_config(conf_path, net, user, pw, rpcport)
     print(f"[*] using config: {conf_path}")
@@ -310,11 +314,15 @@ def main():
             node_args.append("-testnet")
         else:
             node_args.append("-regtest")
-        node_proc = subprocess.Popen(node_args,
-                                     creationflags=flags) if os.name == "nt" \
-            else subprocess.Popen(node_args,
-                                  stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.DEVNULL)
+        if os.name == "nt":
+            node_proc = subprocess.Popen(node_args,
+                                         creationflags=flags,
+                                         stdout=log_file,
+                                         stderr=log_file)
+        else:
+            node_proc = subprocess.Popen(node_args,
+                                         stdout=log_file,
+                                         stderr=log_file)
         for _ in range(60):
             try:
                 rpc("getblockcount")
@@ -409,7 +417,9 @@ def main():
     print("[*] starting solo Stratum bridge on 127.0.0.1:3333 ...")
     bridge = subprocess.Popen(
         [sys.executable, "-u", os.path.join(HERE, "stratum", "solo_stratum.py"), net],
-        env=os.environ.copy())
+        env=os.environ.copy(),
+        stdout=log_file,
+        stderr=log_file)
     time.sleep(2)
 
     # --- start the web status view (stdlib-only; replaces the old Flask web.py) ---
@@ -417,7 +427,9 @@ def main():
     if not a.no_web:
         web = subprocess.Popen(
             [sys.executable, "-u", os.path.join(HERE, "webview.py"), str(a.web_port)],
-            env=os.environ.copy())
+            env=os.environ.copy(),
+            stdout=log_file,
+            stderr=log_file)
 
     if a.demo:
         interval = 864000 if net in ("regtest", "mainnet") else 86400
