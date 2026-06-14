@@ -102,6 +102,14 @@ the signal balls in the table are fixed by the FPGA pin assignment.
    constants live in `touch_open()` in `odo_ui.c`; tweak `min/max/swap/inv`
    if taps land in the wrong place (panel orientation varies by module).
 
+   **Confirmed calibration values (2026-06-11, KMRTM28028-SPI, rotate=270):**
+   `swap_xy=1, inv_y=1` — verified on hardware; taps land correctly with
+   these settings. The T_IRQ line (GPIO_0 D11 / header pin 14) is wired but
+   SPI interrupts **do not reach the ARM GIC** on this board. The ads7846
+   driver must run in **polling mode** (no `interrupts` property in DTS, or
+   `pendown-gpio` left unset). Interrupt mode will cause the touch driver to
+   silently stop delivering events.
+
 ## LEDs and buttons
 
 - `KEY0`/`KEY1` (AH17/AH16) arrive as `gpio-keys` (KEY_UP/KEY_DOWN).

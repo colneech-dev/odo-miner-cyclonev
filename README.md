@@ -2,7 +2,7 @@
 
 This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoCrypt FPGA miner, built on top of the vendored upstream source in `upstream/odo-miner/`.
 
-The project targets an autonomous appliance and may optionally include an external ESP32-based WiFi/display module (Liligo-like) for local status/management and output.
+The project targets an autonomous appliance that boots from SD card and mines DigiByte's OdoCrypt algorithm fully autonomously — no host PC required.
 
 ## Key documentation
 

@@ -180,7 +180,7 @@ static void bg_load(fb_t *fb)
     g_bg_cache = malloc(npix * sizeof(uint16_t));
     if (!g_bg_cache) return;
     /* Temporarily draw into the live framebuffer then snapshot it. */
-    if (gfx_background((gfx_fb *)fb, BG_PATH, 90) == 0) {
+    if (gfx_background((gfx_fb *)fb, BG_PATH, 10) == 0) {
         memcpy(g_bg_cache, fb->pix, npix * sizeof(uint16_t));
         g_bg_ready = 1;
     } else {
