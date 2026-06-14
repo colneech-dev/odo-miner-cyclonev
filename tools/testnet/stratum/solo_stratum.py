@@ -54,6 +54,16 @@ _stats = {"shares": 0, "blocks": 0, "hashrate": [], "recent": [], "job": {}}
 _stats_lock = _th.Lock()
 _last_share_t = [time.time()]
 
+# Share difficulty — decouples share acceptance from network difficulty so the
+# miner gets regular result:true feedback even on testnet/mainnet.
+# Convention matches hps/job.c: diff-1 = 0xFFFF * 2^208 expected hashes.
+# _SHARE_DIFF_INV is the reciprocal (integer); change it to tune share rate.
+# At ~26 KH/s: 10_000 → ~1 accepted share every 16 s.
+_SHARE_DIFF_INV = 10_000
+SHARE_DIFF   = 1.0 / _SHARE_DIFF_INV   # float sent in mining.set_difficulty
+DIFF1_TARGET = 0xFFFF << 208            # diff-1 reference target (256-bit int)
+SHARE_TARGET = DIFF1_TARGET * _SHARE_DIFF_INV  # exact integer; share_target = diff1 / SHARE_DIFF
+
 
 def _write_stats():
     try:
@@ -88,13 +98,14 @@ def record_share(result):
             elapsed = now - _last_share_t[0]
             _last_share_t[0] = now
             if elapsed > 0:
-                _stats["hashrate"].append(round((2 ** 32) / elapsed))
+                _stats["hashrate"].append(round(SHARE_DIFF * (2 ** 32) / elapsed))
                 _stats["hashrate"] = _stats["hashrate"][-60:]
         if result == "block":
             _stats["blocks"] += 1
+        diff_label = "net" if result == "block" else "share" if result == "share" else "rej"
         _stats["recent"].append({
             "time": time.strftime("%H:%M:%S"),
-            "diff": "net", "result": result})
+            "diff": diff_label, "result": result})
         _stats["recent"] = _stats["recent"][-50:]
         _write_stats()
 
@@ -150,6 +161,8 @@ def handle(conn, addr):
 
                 elif m == "mining.authorize":
                     send(conn, {"id": mid, "result": True, "error": None})
+                    send(conn, {"id": None, "method": "mining.set_difficulty",
+                                "params": [SHARE_DIFF]})
                     job = make_job()
                     record_job(job)
                     notify(conn, job)
@@ -160,20 +173,29 @@ def handle(conn, addr):
                     # [worker, job_id, extranonce2, ntime_hex, nonce_hex]
                     en2 = bytes.fromhex(msg["params"][2]) if msg["params"][2] else b""
                     nonce = int(msg["params"][4], 16)
-                    # rebuild the EXACT coinbase the miner hashed (coinb1+en1+en2+coinb2)
                     merkle = job["cb"]["txid"](en2)
                     header = serialize_header(job["tmpl"], merkle, nonce)
-                    # Local OdoCrypt pre-check is best-effort: it needs the
-                    # odocrypt.dll/.so on THIS host. If the lib can't load (e.g.
-                    # Windows without a built odocrypt.dll), skip the pre-check —
-                    # digibyted's submitblock is the authoritative PoW validator.
+                    # Local OdoCrypt check: validates the share and avoids
+                    # a submitblock RPC for hashes that only meet share diff.
+                    # Falls back to submitblock if the lib is unavailable.
                     try:
                         h = odocrypt_hash(header, job["odokey"])
-                        if int.from_bytes(h, "little") > job["target"]:
+                        h_val = int.from_bytes(h, "little")
+                        if h_val > SHARE_TARGET:
+                            # Doesn't meet even the easy share target.
+                            print(f"[D] high-hash: nonce={nonce:#010x} "
+                                  f"key={job['odokey']}", flush=True)
                             record_share("rejected")
                             send(conn, {"id": mid, "result": False,
                                         "error": [23, "high-hash", None]})
                             continue
+                        if h_val > job["target"]:
+                            # Meets share difficulty but not network difficulty.
+                            record_share("share")
+                            print(f"[*] share accepted nonce={nonce:#010x}")
+                            send(conn, {"id": mid, "result": True, "error": None})
+                            continue
+                        # Meets both — fall through to submitblock.
                     except Exception as e:
                         if not globals().get("_warned_nolib"):
                             print(f"[!] local OdoCrypt lib unavailable ({e}); "
