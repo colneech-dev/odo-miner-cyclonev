@@ -126,7 +126,7 @@ those pads will be claimed before the GPIO driver can use them.  Disable
 | 5 | `hps/thermal.h/.c` | Add `RESET_BTN_GPIO_NUM 464`; export as input with poll on falling edge |
 | 6 | `sw/odo-ui/odo_ui.c` | Poll GPIO 464; short press → restart miner, long press (≥ 3 s) → reboot |
 | 7 | `hps/Makefile` | Remove `thermal.c http_status.c` from `MINER_SRCS` until `miner.c` actually calls them |
-| 8 | `services/S90odod` | Add `mkdir -p /run/odod` before starting miner (tmpfs wiped on reboot) |
+| 8 | `services/S90odod` | ~~Add `mkdir -p /run/odod` before starting miner~~ — **DONE** (already present in S90odod line 23) |
 | 9 | `sw/odo-webd/odo_webd.c` | Expose tach RPM and reset button state in `/status.json` |
 
 ---

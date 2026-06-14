@@ -1,13 +1,13 @@
 # Project TODO — odo-miner-cyclonev
 
-**Last updated:** 2026-06-10
+**Last updated:** 2026-06-14
 **Owner:** colneech-dev / Claude
 **Device:** `5CSXFC6C6U23I7` — Cyclone V SX, 41,910 ALMs, 553 M10K, QMTECH KFB
 dual-SDRAM board (DE10-Nano-compatible ball-out, MiSTer-style).
 
 ---
 
-## State of the world (2026-06-10 session)
+## State of the world (2026-06-14)
 
 ### DONE — algorithm proven correct in RTL ✅
 
@@ -85,61 +85,62 @@ What was fixed/rebuilt to get there:
 
 ## OPEN ITEMS (priority order)
 
-### 1. Quartus fit/timing closure — DONE ✅ (2026-06-10 21:44)
-Final result: **18,132 / 41,910 ALMs (43%)**, 15,535 registers, 80 RAM
-blocks (440 Kbit — all S-boxes in BRAM), **timing met with margin**
-(clk_50 setup slack +1.707 ns, zero violations in any domain).
-Bitstream: `hdl/quartus/output_files/odo_miner.rbf` (2.8 MB).
+### 1. Quartus fit/timing closure — DONE ✅ (2026-06-10)
+**Single-core baseline:** 18,046 / 41,910 ALMs (43%), 80 RAM blocks (14%),
+clk_50 Fmax = 55.6 MHz (+2.016 ns slack at 50 MHz). Bitstream: 2.8 MB.
 
 It took six fitter rounds; the killers, for posterity:
 1. 12x-unrolled Keccak (~25K ALMs) → single iterated round (THROUGHPUT=12).
 2. 60 parallel barrel rotators in the rotation mix → serialized to 10.
 3. FF copy-commit of the pbox/rk tables (~10K ALMs) → single-copy FFs.
-4. Small S-boxes silently became ~31K registers. Root cause (found by
-   standalone bisection, NOT reported by any Quartus warning): the
-   write-port bank bit was the combinational complement of the read-port
-   bank bit (`load_bank = ~active_bank`) — that alone blocks RAM
-   inference. Fix: independent registers swapped on commit. Also needed:
-   read in a separate always block, ramstyle hint. build-fpga.sh now has
-   a >=60-RAM-blocks tripwire against regression.
+4. Small S-boxes silently became ~31K registers. Root cause: write-port bank
+   bit was combinational complement of read-port bank bit (`load_bank =
+   ~active_bank`) — blocks RAM inference. Fix: independent registers swapped
+   on commit + separate read always block + ramstyle hint.
 
-### 2. Hardware gate checks (unchanged sequence)
-1. Load rbf via U-Boot boot.scr (it does `fpga load` + `bridge enable`),
-   run `fpga_smoke_test` — registers must read back (NOT 0xFFFFFFFF, and the
-   CPU must not hang; a hang means the bridge is enabled but the design
-   isn't answering).
-2. Stream an epoch (odo-miner does this automatically), check
-   STATUS.TABLES_VALID and EPOCH_WR_ADDR==5964.
-3. Known-nonce test on hardware: `hdl/tb/gen_vectors` prints the expected
-   hash for any (key, nonce); program the same header/target and compare
-   NONCE_FOUND/HASH registers.
-4. Display: dmesg shows fb_ili9341 + ads7846; odo-ui dashboard appears.
-5. Stratum round-trip on **testnet** first (1-day epochs), then pool soak.
+**Dual-core (`perf/dual-core` branch):** 34,072 / 41,910 ALMs (81%), 160 RAM
+blocks (29%), Fmax = **55.6 MHz** (unchanged — no new critical paths between
+cores). Bitstream: 3.3 MB, deployed to board 2026-06-14. ✅
 
-### 3. Performance (after it works)
-- ~26 KH/s @ 50 MHz is the correctness-first baseline. Options, in order:
-  fabric PLL to 100–125 MHz (logic is shallow, S-box BRAMs are fast);
-  second core (tables have a second read port free on small sboxes? no —
-  add per-core table RAM copies, plenty of M10K left); overlap premix with
-  Keccak of the previous nonce.
-- Batch sizing in miner.c assumes ~25–250 KH/s; env-tunable
-  (ODOMIN_NONCE_RANGE, ODOMIN_POLL_TIMEOUT_MS).
+### 2. Hardware gate checks — ALL DONE ✅ (2026-06-11 / 2026-06-14)
+1. ✅ fpga_smoke_test passes — registers read back, CPU does not hang.
+2. ✅ Epoch streaming works — STATUS.TABLES_VALID set, EPOCH_WR_ADDR==5964.
+3. ✅ Known-nonce on silicon — FPGA hash matches C oracle.
+4. ✅ Display up — fb_ili9341 + ads7846; odo-ui dashboard live on board.
+5. ✅ Testnet stratum round-trip — ~485 blocks mined 2026-06-11.
+   Board currently mining at **~52 KH/s** dual-core on testnet (2026-06-14).
+
+### 3. Performance — IN PROGRESS
+- ✅ **Dual-core at 52 KH/s** (`perf/dual-core` branch, deployed 2026-06-14).
+- ✅ **Stale-job guard** in `hps/miner.c`: saves `batch_job_id` at dispatch;
+  discards found nonces when job ID has changed, eliminating the root cause
+  of bridge rejections.
+- ⬜ **75 MHz PLL clock bump** (next): add fractional PLL in `hdl/src/soc_top.v`,
+  update `hdl/constraints/miner.sdc` to 13.33 ns. Zero RTL changes to core.
+  Expected yield: ~78 KH/s if timing closes. BUG-7 (cdc_bus ready unsynced)
+  becomes relevant if a separate miner clock domain is introduced.
+- ⬜ **3rd/4th core**: each adds another `odocrypt_epoch_tables` instance
+  (~14% BRAM); ALM constraint means max 2 cores with current sequential FSM.
+  FSM pipelining required to scale further.
+- Batch sizing: `ODOMIN_NONCE_RANGE` / `ODOMIN_POLL_TIMEOUT_MS` env-tunable.
 
 ### 4. Known soft spots / deferred
-- ads7846 touch calibration values in the DTS and odo_ui.c are generic
-  defaults; calibrate on real hardware.
-- GPIO_0 header pin numbering (11/12/29/30 power pins) verified only against
-  DE10-Nano convention — meter-check the QMTECH silkscreen before wiring.
-- `hps/miner_daemon.c` (odod) is the legacy loop and didn't get the new
-  share-target/preemption logic; `odo-miner` (miner.c) is canonical. Either
-  port the fixes or retire odod.
+- ~~ads7846 touch calibration~~ — **DONE (2026-06-11)**: `swap_xy=1, inv_y=1`
+  confirmed on hardware (rotate=270 panel). T_IRQ does not reach GIC; polling
+  mode required. See `docs/DISPLAY_WIRING.md` bring-up checklist §5.
+- `hps/miner_daemon.c` (odod) is the legacy daemon loop; `odo-miner`
+  (miner.c) is canonical. Either port fixes or retire miner_daemon.c.
 - stratum.c JSON parsing is hand-rolled (fine for pool basics; fragile for
-  exotic pools). Reconnect/resubscribe storm behaviour untested.
-- Buildroot image rebuild needed (new defconfig: display fragment, custom
-  DTS, rootfs overlay). U-Boot env assumes boot.scr flow from
-  scripts/build-sdcard.sh.
-- Quartus Lite has no licensed Questa; sim runs on Icarus via WSL
-  (`~/oss-cad-suite/bin`). hdl/tb/run_tb.sh handles everything.
+  exotic pools). Pool failover (`ODOD_POOL_HOST2/PORT2` in S90odod) not yet
+  wired into miner.c reconnect loop.
+- Fan/thermal/reset button software (DS18B20 tach RPM, `thermal_fan_state()`,
+  GPIO 464 reset poll) pending — see `docs/FAN_SENSOR_WIRING.md` tasks 3–6.
+- `claude/18b20-fan-gpio-setup-r4bm1f` branch ready to merge after fixing
+  DTS comment (pin 27→29, pin 31→12) and Makefile dead-code.
+- Quartus Lite has no licensed Questa; sim runs on Icarus via WSL.
+  Note: Qsys caches RTL in `soc_system/synthesis/submodules/` — copy updated
+  `odocrypt_top.v` there manually after edits; do NOT rely on qsys-generate
+  to pick up src changes automatically.
 
 ---
 

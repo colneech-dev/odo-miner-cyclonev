@@ -41,7 +41,8 @@ This plan removes the host PC entirely. We exploit the fact that the target boar
 | HPS DDR3 | On core board, dedicated to HPS | Used by Linux, *not* by hashing cores |
 | HPS↔FPGA bridges | **HPS-to-FPGA (H2F)**, **Lightweight HPS-to-FPGA (LWH2F)**, **FPGA-to-HPS (F2H)** | Memory-mapped bridges = our control transport |
 | Ethernet | Gigabit PHY (often wired to HPS EMAC) | Pool connectivity; confirm it's on HPS EMAC not FPGA |
-| WiFi / display | Optional external ESP32-based module (e.g. Liligo with screen) | Provides local status output, remote management, and a secondary wireless interface if Ethernet is unavailable |
+| WiFi | USB WiFi adapter (RTL8192EU or similar; confirmed working) | Optional wireless connectivity; configured via web dashboard (`odo-webd`) or `wpa_supplicant` — see `docs/ESP32_WIRELESS.md` |
+| Display | 2.8″ ILI9341 SPI touch TFT on GPIO_0 | Local status dashboard (`odo-ui`) with touch restart/reboot — see `docs/DISPLAY_WIRING.md` |
 | Storage | micro-SD | Boot media: preloader, U-Boot, kernel, rootfs, bitstreams |
 | FPGA SDRAM | Optional SDRAM on FPGA side of QMTECH board | Only needed if hashing core requires external buffer (odo-miner core is largely self-contained) |
 | Config | FPGA configured by HPS at boot (FPGA-after-HPS flow) | No external JTAG blaster needed at runtime |
