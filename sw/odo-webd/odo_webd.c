@@ -386,7 +386,7 @@ static void handle_wifi(int fd, const char *body)
     }
     fprintf(f,
         "# written by odo-webd\n"
-        "ctrl_interface=/var/run/wpa_supplicant\n"
+        "ctrl_interface=/tmp/wpa_supplicant\n"
         "update_config=0\n"
         "network={\n"
         "    ssid=\"%s\"\n", ssid);
