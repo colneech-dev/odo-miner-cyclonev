@@ -16,8 +16,13 @@ CONF=/etc/wpa_supplicant.conf
 IFACE=wlan0
 PIDFILE=/tmp/wpa_supplicant.$IFACE.pid
 DHCPPID=/tmp/udhcpc.$IFACE.pid
-# Drivers to try (harmless if a module is absent).
-WIFI_MODULES="rtl8xxxu rtl8192cu mt7601u rtl8188eu"
+# ctrl_interface path must match what's in wpa_supplicant.conf.
+CTRL_IFACE=/tmp/wpa_supplicant
+# 8188eu out-of-tree path (lwfinger driver, installed by the odo-miner build).
+# modprobe can't find it without depmod; use insmod with a full path instead.
+RTL8188EU_KO=/lib/modules/$(uname -r)/kernel/drivers/staging/r8188eu/8188eu.ko
+# Fallback in-kernel drivers tried if 8188eu doesn't load.
+WIFI_MODULES_FALLBACK="rtl8xxxu rtl8192cu mt7601u"
 
 start() {
     printf "Starting WiFi: "
@@ -26,8 +31,24 @@ start() {
         return 0
     fi
     [ -e /dev/fb0 ] && /usr/bin/odo-ui splash "Connecting WiFi..." 2>/dev/null
-    for m in $WIFI_MODULES; do
-        modprobe "$m" 2>/dev/null
+    if [ -f "$RTL8188EU_KO" ]; then
+        # Load 8188eu first; it handles RTL8188EU power management correctly.
+        # Then unload rtl8xxxu so the USB device is re-probed by 8188eu.
+        insmod "$RTL8188EU_KO" 2>/dev/null
+        rmmod rtl8xxxu 2>/dev/null || true
+        # USB device was already enumerated before this script ran; write to
+        # new_id to force r8188eu to probe the already-enumerated adapter.
+        echo "0bda 818b" > /sys/bus/usb/drivers/r8188eu/new_id 2>/dev/null || true
+        sleep 2
+    else
+        for m in $WIFI_MODULES_FALLBACK; do
+            modprobe "$m" 2>/dev/null
+        done
+    fi
+    # Disable USB autosuspend globally — rtl8xxxu sends DEAUTH before the
+    # USB device sleeps, causing periodic disconnects every ~25 s.
+    for _ctl in /sys/bus/usb/devices/*/power/control; do
+        echo on > "$_ctl" 2>/dev/null
     done
     # USB adapter may enumerate slightly after init; wait briefly
     n=0
@@ -39,8 +60,15 @@ start() {
         echo "SKIPPED (no $IFACE adapter)"
         return 0
     fi
-    ip link set "$IFACE" up
-    wpa_supplicant -B -i "$IFACE" -c "$CONF" -P "$PIDFILE"
+    ip link set "$IFACE" up || { echo "FAILED (cannot bring $IFACE up; driver may need reload)"; return 0; }
+    iw dev "$IFACE" set power_save off 2>/dev/null || true
+    # r8188eu (lwfinger out-of-tree) only supports WEXT, not nl80211.
+    if lsmod | grep -q '^8188eu'; then
+        WPA_DRIVER="-D wext"
+    else
+        WPA_DRIVER=""
+    fi
+    wpa_supplicant -B $WPA_DRIVER -i "$IFACE" -c "$CONF" -P "$PIDFILE"
     # Wait for association, then lease an IP via udhcpc (-b daemonizes).
     n=0
     while [ $n -lt 15 ]; do
@@ -50,6 +78,7 @@ start() {
         n=$((n + 1))
     done
     udhcpc -i "$IFACE" -b -p "$DHCPPID" >/dev/null 2>&1
+    wpa_cli -p "$CTRL_IFACE" -i "$IFACE" set bgscan "" >/dev/null 2>&1 || true
     echo "OK"
 }
 

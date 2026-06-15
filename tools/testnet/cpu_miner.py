@@ -34,6 +34,9 @@ INTERVAL = int(sys.argv[3]) if len(sys.argv) > 3 else 864000
 # How many blocks to mine before exiting. 0 = keep going forever.
 BLOCKS = int(sys.argv[4]) if len(sys.argv) > 4 else 1
 
+# Difficulty-1 reference target for OdoCrypt (same constant as solo_stratum.py).
+_DIFF1 = 0xFFFF << 208
+
 
 def main():
     s = socket.create_connection((HOST, PORT))
@@ -47,6 +50,7 @@ def main():
     send({"id": 2, "method": "mining.authorize", "params": ["worker", "x"]})
 
     extranonce1 = b""
+    share_target = _DIFF1   # updated by mining.set_difficulty
     mined = 0
     while True:
         line = f.readline()
@@ -58,6 +62,12 @@ def main():
         if msg.get("id") == 1 and msg.get("result"):
             # [[..]], extranonce1_hex, en2_size
             extranonce1 = bytes.fromhex(msg["result"][1]) if msg["result"][1] else b""
+
+        if msg.get("method") == "mining.set_difficulty":
+            diff = float(msg["params"][0])
+            if diff > 0:
+                share_target = int(_DIFF1 / diff)
+            print(f"[miner] share difficulty={diff}")
 
         if msg.get("method") == "mining.notify":
             (job_id, prevhash_be, coinb1, coinb2, branches,
@@ -76,21 +86,18 @@ def main():
             odokey = ntime - ntime % INTERVAL
             prev_internal = bytes.fromhex(prevhash_be)[::-1]
 
-            # Decode the PoW target from compact nbits (same as the FPGA).
-            exp = nbits >> 24
-            mant = nbits & 0xffffff
-            target = mant << (8 * (exp - 3)) if exp > 3 else mant >> (8 * (3 - exp))
-
             def header(nonce):
                 return (struct.pack("<I", version) + prev_internal + merkle
                         + struct.pack("<III", ntime, nbits, nonce))
 
-            # Sweep nonces, hashing with OdoCrypt, until one beats the target —
-            # this is exactly the loop the FPGA runs in hardware.
+            # Sweep nonces until one meets the pool's share target.
+            # Using share_target (from mining.set_difficulty) rather than the
+            # network target avoids false winners in regtest where nbits is
+            # trivially easy but the bridge's share diff is harder.
             nonce = 0
             while nonce < (1 << 32):
                 h = odocrypt_hash(header(nonce), odokey)
-                if int.from_bytes(h, "little") <= target:
+                if int.from_bytes(h, "little") <= share_target:
                     break
                 nonce += 1
             print(f"[miner] job {job_id} odokey={odokey}: winner nonce={nonce} "

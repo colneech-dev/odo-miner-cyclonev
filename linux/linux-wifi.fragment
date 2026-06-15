@@ -23,3 +23,9 @@ CONFIG_RTW88_8822BU=m
 CONFIG_RTW88_8822CU=m
 CONFIG_RTW88_8821CU=m
 CONFIG_RTW88_8723DU=m
+
+# Wireless Extensions (WEXT) — required by lwfinger/rtl8188eu out-of-tree driver.
+# CONFIG_WIRELESS_EXT enables net_device::wireless_handlers (guarded by that macro).
+# CONFIG_CFG80211_WEXT + CONFIG_WEXT_CORE enable iwe_stream_add_* kernel APIs.
+CONFIG_WIRELESS_EXT=y
+CONFIG_CFG80211_WEXT=y
