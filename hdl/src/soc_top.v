@@ -12,6 +12,11 @@
 // the onboard MiSTer-style SDRAM chips; both SDRAM chip selects are driven
 // high here so the chips stay quiet while the header is used as GPIO.
 
+// ---- 50 → 75 MHz PLL ----------------------------------------------------------
+// Ratio 3/2: VCO = 50 × 12 = 600 MHz (Cyclone V min), C0 = /8 → 75 MHz output.
+// derive_pll_clocks in miner.sdc picks up this output automatically.
+// fabric_reset_n is held low until both POR and PLL lock are asserted.
+
 module soc_top (
     // ---- Board clock & reset ----
     input  wire        CLOCK_50,   // 50 MHz oscillator
@@ -103,6 +108,36 @@ module soc_top (
     assign SDRAM_CS0_n = 1'b1;
     assign SDRAM_CS1_n = 1'b1;
 
+    // ---- PLL: 50 MHz → 75 MHz ---------------------------------------------
+    wire        clk_75;
+    wire        pll_locked;
+    wire [5:0]  pll_clk_bus;
+    assign clk_75 = pll_clk_bus[0];
+
+    altpll u_pll75 (
+        .inclk ({1'b0, CLOCK_50}),
+        .clk   (pll_clk_bus),
+        .locked(pll_locked)
+    );
+    defparam u_pll75.intended_device_family  = "Cyclone V";
+    defparam u_pll75.lpm_type                = "altpll";
+    defparam u_pll75.operation_mode          = "NORMAL";
+    defparam u_pll75.compensate_clock        = "CLK0";
+    defparam u_pll75.inclk0_input_frequency  = 20000;   // 50 MHz = 20 000 ps
+    defparam u_pll75.clk0_multiply_by        = 3;
+    defparam u_pll75.clk0_divide_by          = 2;
+    defparam u_pll75.clk0_duty_cycle         = 50;
+    defparam u_pll75.clk0_phase_shift        = "0";
+    defparam u_pll75.port_inclk1             = "PORT_UNUSED";
+    defparam u_pll75.port_clk0               = "PORT_USED";
+    defparam u_pll75.port_clk1               = "PORT_UNUSED";
+    defparam u_pll75.port_clk2               = "PORT_UNUSED";
+    defparam u_pll75.port_clk3               = "PORT_UNUSED";
+    defparam u_pll75.port_clk4               = "PORT_UNUSED";
+    defparam u_pll75.port_clk5               = "PORT_UNUSED";
+    defparam u_pll75.port_locked             = "PORT_USED";
+    defparam u_pll75.width_clock             = 6;
+
     // ---- Fabric power-on reset --------------------------------------------
     // The external RESET_n pin (AE25) is a DE10-Nano-convention guess that is
     // NOT verified against the QMTECH silkscreen. On first silicon the fabric
@@ -126,7 +161,8 @@ module soc_top (
             por_rst_n <= 1'b1;
         end
     end
-    wire fabric_reset_n = por_rst_n;   // RESET_n (AE25) intentionally ignored
+    // Hold fabric in reset until both the POR timer and PLL lock are satisfied.
+    wire fabric_reset_n = por_rst_n & pll_locked;
 
     // ---- LCD control PIO bit mapping (bit0=D/C, bit1=RESET_n, bit2=BL) ----
     wire [2:0] pio_lcd_export;
@@ -136,8 +172,8 @@ module soc_top (
 
     // ---- Platform Designer system (HPS + DDR3 + miner + display SPI) ----
     soc_system u_soc (
-        // Clock & reset
-        .clk_clk                               (CLOCK_50),
+        // Clock & reset — fabric runs at 75 MHz from u_pll75
+        .clk_clk                               (clk_75),
         .reset_reset_n                         (fabric_reset_n),
 
         // SPI display

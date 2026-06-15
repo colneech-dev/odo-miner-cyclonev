@@ -1,6 +1,9 @@
 # miner.sdc — Timing constraints for odo-miner Cyclone V SoC
 #
-# Single 50 MHz fabric domain: LWH2F bridge, miner core, SPI/PIO peripherals.
+# Fabric domain: LWH2F bridge, miner core, SPI/PIO peripherals.
+# clk_50 (50 MHz board oscillator) drives u_pll75 in soc_top.v.
+# u_pll75 outputs clk_75 (75 MHz, 3/2 ratio) which clocks soc_system.
+# derive_pll_clocks picks up clk_75 automatically — no manual create_clock needed.
 
 # 50 MHz base clock from board oscillator
 create_clock -name clk_50 -period 20.000 [get_ports {CLOCK_50}]
