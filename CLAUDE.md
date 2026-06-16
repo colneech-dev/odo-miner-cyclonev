@@ -38,8 +38,9 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
   for multiple (epoch, header, nonce) vectors. The C oracle in
   `hps/odocrypt_state.c` matches upstream `odocrypt.cpp` (`make check`).
 - **Mining on hardware, proven**: board mined ~485 blocks on the testnet
-  (2026-06-11). Currently running dual-core at **~52 KH/s** on the testnet
-  pool (2026-06-15). WiFi stable (0 DEAUTH events, USB autosuspend disabled).
+  (2026-06-11). Running dual-core + shared tables at **~57 KH/s** @ 55 MHz on
+  the testnet pool (2026-06-16; was ~52 KH/s @ 50 MHz). WiFi stable (0 DEAUTH
+  events, USB autosuspend disabled).
 - **Dual-core FPGA** (`perf/dual-core` branch): two independent
   `odocrypt_core` + `odocrypt_epoch_tables` pairs in `hdl/src/odocrypt_top.v`;
   epoch write stream fanned out to both; nonce range split at midpoint; first
@@ -51,6 +52,19 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
   synthesizes correctly (1 PLL), but fitter fails `Can't fit design in device`
   — aggressive register retiming at 81% ALM pushes past 100% capacity. Fabric
   critical path is ~19 ns vs 13.33 ns required; not achievable on this device.
+- **Shared epoch tables + 55 MHz** (`perf/quad-core` branch, 2026-06-16):
+  the pmask/prot/rot/rk FF tables are identical for both cores, so the second
+  full `odocrypt_epoch_tables` (~3.8k ALMs) was pure waste. Split the S-box
+  BRAMs into `hdl/src/odocrypt/odocrypt_sbox_bank.v` (one per core, ~0 ALM,
+  pure M10K) and broadcast ONE shared FF table + write strobes. Drops the
+  design **81% → 71% ALM** and lifts Fmax **52.42 → 55.9 MHz** (less routing
+  congestion). 75 MHz still fails (−3.8 ns); 56.25 MHz fails the 100C corner
+  (−0.111 ns); **55 MHz (11/10 PLL) signs off clean** (clk_fab setup +0.291 ns
+  @ Slow/100C, all hold positive). **Deployed to SD card boot partition
+  2026-06-16; verified 57,224 H/s on hardware (+10% over 52,033), 0 DEAUTH.**
+  Rollback: `fpga_50mhz.rbf` on the board's FAT boot partition. Regression
+  `run_tb.sh` bit-exact. Branch name is a misnomer — quad-core is infeasible
+  (each core ~11.7k ALM; 3 cores > 100%).
 - `hdl/src/odocrypt/odocrypt_core.v` is a multi-cycle FSM (~22 cycles/round,
   ~26 KH/s per core @ 50 MHz); S-boxes live in BRAM in
   `hdl/src/odocrypt/odocrypt_epoch_tables.v` (ping-pong banks, streamed from
