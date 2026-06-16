@@ -31,7 +31,7 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 - `scripts/` — build and deployment helpers
 - `services/` — init/service unit files
 
-## Current status (2026-06-14)
+## Current status (2026-06-16)
 
 - **Algorithm correct in RTL, proven**: `hdl/tb/run_tb.sh` drives the full
   register interface and reproduces upstream OdoCrypt+Keccak hashes bit-exact
@@ -39,13 +39,18 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
   `hps/odocrypt_state.c` matches upstream `odocrypt.cpp` (`make check`).
 - **Mining on hardware, proven**: board mined ~485 blocks on the testnet
   (2026-06-11). Currently running dual-core at **~52 KH/s** on the testnet
-  pool (2026-06-14).
+  pool (2026-06-15). WiFi stable (0 DEAUTH events, USB autosuspend disabled).
 - **Dual-core FPGA** (`perf/dual-core` branch): two independent
   `odocrypt_core` + `odocrypt_epoch_tables` pairs in `hdl/src/odocrypt_top.v`;
   epoch write stream fanned out to both; nonce range split at midpoint; first
   found nonce latched (core 0 wins ties). Fit: **81% ALM, 29% BRAM**,
-  Fmax = 55.6 MHz (unchanged). Bitstream: `hdl/quartus/output_files/odo_miner.rbf`
+  Fmax = **52.42 MHz** (slower than single-core 55.6 MHz due to routing at
+  81% utilization). Bitstream: `hdl/quartus/output_files/odo_miner.rbf`
   (3.3 MB, deployed to SD card 2026-06-14).
+- **75 MHz PLL attempted** (`perf/pll-75mhz` branch, 2026-06-15): `altpll`
+  synthesizes correctly (1 PLL), but fitter fails `Can't fit design in device`
+  — aggressive register retiming at 81% ALM pushes past 100% capacity. Fabric
+  critical path is ~19 ns vs 13.33 ns required; not achievable on this device.
 - `hdl/src/odocrypt/odocrypt_core.v` is a multi-cycle FSM (~22 cycles/round,
   ~26 KH/s per core @ 50 MHz); S-boxes live in BRAM in
   `hdl/src/odocrypt/odocrypt_epoch_tables.v` (ping-pong banks, streamed from
@@ -80,8 +85,9 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 
 ## Next steps
 
-1. PLL clock bump to 75 MHz (`hdl/src/soc_top.v` + `hdl/constraints/miner.sdc`) —
-   free hashrate to ~78 KH/s if timing closes; zero RTL changes to the core.
+1. Add 3rd/4th parallel core (`odocrypt_top.v`) — each adds ~14% BRAM, ~38% ALM;
+   BRAM is the binding constraint (7 blocks/core × 29 M10K each, 204 total).
+   At 4 cores + 50 MHz: ~104 KH/s theoretical.
 2. Fan/thermal/reset button software (pending tasks 3–6 in `docs/FAN_SENSOR_WIRING.md`).
 3. Merge `claude/18b20-fan-gpio-setup-r4bm1f` → `Fabel` after fixing DTS comments
    and Makefile dead-code identified in that branch's review.
