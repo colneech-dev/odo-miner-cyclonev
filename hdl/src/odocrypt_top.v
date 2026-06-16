@@ -26,7 +26,6 @@ module odocrypt_top (
     reg [639:0] header_reg;  // 20 x 32-bit words packed as 640 bits
 
     reg        found_latched;
-    reg [1:0]  found_core_id;  // which core won (0/1/2), reported on ADDR_CORE_FOUND
     reg [31:0] found_nonce_reg;
     reg [255:0] hash_reg;  // 8 x 32-bit packed
 
@@ -94,27 +93,16 @@ module odocrypt_top (
     wire [255:0] core1_hash;
     wire        core1_hash_valid;
 
-    wire        core2_busy;
-    wire        core2_found;
-    reg         core2_found_d;
-    wire [31:0] core2_found_nonce;
-    wire [255:0] core2_hash;
-    wire        core2_hash_valid;
+    // Shared Keccak handshake (one unit serves both cores — see arbiter below).
+    wire         c0_kec_req,  c1_kec_req;
+    wire [639:0] c0_kec_in,   c1_kec_in;
+    wire         c0_kec_rvalid, c1_kec_rvalid;
+    wire [255:0] kec_result;            // shared 256-bit hash bus to both cores
 
-    // Shared Keccak handshake (one unit serves all three cores — arbiter below).
-    wire         c0_kec_req,  c1_kec_req,  c2_kec_req;
-    wire [639:0] c0_kec_in,   c1_kec_in,   c2_kec_in;
-    wire         c0_kec_rvalid, c1_kec_rvalid, c2_kec_rvalid;
-    wire [255:0] kec_result;            // shared 256-bit hash bus to all cores
-
-    // Nonce range split into thirds: core0 [start, +t], core1 [+t, +2t],
-    // core2 [+2t, end]. 1-nonce overlaps at the boundaries are harmless (the
-    // found-latch picks the lowest-index core on ties).
-    wire [31:0] nonce_third    = (nonce_end_reg - nonce_start_reg) / 3;
-    wire [31:0] core0_nonce_end   = nonce_start_reg + nonce_third;
-    wire [31:0] core1_nonce_start = core0_nonce_end;
-    wire [31:0] core1_nonce_end   = nonce_start_reg + (nonce_third << 1);
-    wire [31:0] core2_nonce_start = core1_nonce_end;
+    wire [31:0] core0_nonce_end;
+    wire [31:0] core1_nonce_start;
+    assign core0_nonce_end   = nonce_start_reg + ((nonce_end_reg - nonce_start_reg) >> 1);
+    assign core1_nonce_start = core0_nonce_end;
 
     // Shared FF tables (pmask/prot/rot/rk) broadcast from the single
     // odocrypt_epoch_tables instance to BOTH cores — they are identical for a
@@ -142,8 +130,6 @@ module odocrypt_top (
     wire [99:0]   et_sb2_addr_a, et_sb2_addr_b, et_sb2_q_a, et_sb2_q_b;
     wire [239:0]  et1_sb1_addr, et1_sb1_q;      // core 1 bank
     wire [99:0]   et1_sb2_addr_a, et1_sb2_addr_b, et1_sb2_q_a, et1_sb2_q_b;
-    wire [239:0]  et2_sb1_addr, et2_sb1_q;      // core 2 bank
-    wire [99:0]   et2_sb2_addr_a, et2_sb2_addr_b, et2_sb2_q_a, et2_sb2_q_b;
 
     // Epoch table write strobes (combinatorial from Avalon write decode)
     reg  et_wr_en;
@@ -168,11 +154,11 @@ module odocrypt_top (
         else if (avs_write && (avs_address == ADDR_CONTROL) &&
                  avs_writedata[0] && avs_writedata[2])
             start_latch <= 1'b1;
-        else if (core_busy || core1_busy || core2_busy)
+        else if (core_busy || core1_busy)
             start_latch <= 1'b0;
     end
 
-    assign core_start_pulse = start_latch && !(core_busy || core1_busy || core2_busy);
+    assign core_start_pulse = start_latch && !(core_busy || core1_busy);
 
     // -------------------------------------------------------------------------
     // Epoch table storage
@@ -250,28 +236,8 @@ module odocrypt_top (
         .sb2_q_b      (et1_sb2_q_b)
     );
 
-    odocrypt_sbox_bank sbox_bank2 (
-        .clk          (clk),
-        .active_bank  (bank_active_bank),
-        .load_bank    (bank_load_bank),
-        .sb1_we       (bank_sb1_we),
-        .sb1_wsel     (bank_sb1_wsel),
-        .sb1_wentry   (bank_sb1_wentry),
-        .sb1_wdata    (bank_sb1_wdata),
-        .sb2_we       (bank_sb2_we),
-        .sb2_wsel     (bank_sb2_wsel),
-        .sb2_wentry   (bank_sb2_wentry),
-        .sb2_wdata    (bank_sb2_wdata),
-        .sb1_addr     (et2_sb1_addr),
-        .sb1_q        (et2_sb1_q),
-        .sb2_addr_a   (et2_sb2_addr_a),
-        .sb2_addr_b   (et2_sb2_addr_b),
-        .sb2_q_a      (et2_sb2_q_a),
-        .sb2_q_b      (et2_sb2_q_b)
-    );
-
     // -------------------------------------------------------------------------
-    // Core 0 — lower third of nonce range
+    // Core 0 — lower half of nonce range
     // -------------------------------------------------------------------------
     odocrypt_core core_inst (
         .clk          (clk),
@@ -304,13 +270,13 @@ module odocrypt_top (
         .hash_valid   (core_hash_valid)
     );
 
-    // Core 1 — middle third of nonce range
+    // Core 1 — upper half of nonce range, independent epoch table instance
     odocrypt_core core_inst1 (
         .clk          (clk),
         .reset_n      (core_reset_n),
         .start        (core_start_pulse),
         .nonce_start  (core1_nonce_start),
-        .nonce_end    (core1_nonce_end),
+        .nonce_end    (nonce_end_reg),
         .header_words (header_reg),
         .target       (target_256),
         .epoch        (epoch_value),
@@ -336,51 +302,19 @@ module odocrypt_top (
         .hash_valid   (core1_hash_valid)
     );
 
-    // Core 2 — upper third of nonce range
-    odocrypt_core core_inst2 (
-        .clk          (clk),
-        .reset_n      (core_reset_n),
-        .start        (core_start_pulse),
-        .nonce_start  (core2_nonce_start),
-        .nonce_end    (nonce_end_reg),
-        .header_words (header_reg),
-        .target       (target_256),
-        .epoch        (epoch_value),
-        .sb1_addr     (et2_sb1_addr),
-        .sb1_q        (et2_sb1_q),
-        .sb2_addr_a   (et2_sb2_addr_a),
-        .sb2_addr_b   (et2_sb2_addr_b),
-        .sb2_q_a      (et2_sb2_q_a),
-        .sb2_q_b      (et2_sb2_q_b),
-        .pmask_flat   (et_pmask),
-        .prot_flat    (et_prot),
-        .rot_flat     (et_rot),
-        .rk_flat      (et_rk),
-        .tables_valid (et_tables_valid),
-        .kec_req          (c2_kec_req),
-        .kec_in           (c2_kec_in),
-        .kec_result       (kec_result),
-        .kec_result_valid (c2_kec_rvalid),
-        .busy         (core2_busy),
-        .found        (core2_found),
-        .found_nonce  (core2_found_nonce),
-        .hash_out     (core2_hash),
-        .hash_valid   (core2_hash_valid)
-    );
-
     // -------------------------------------------------------------------------
     // Shared Keccak-800 unit + arbiter.
     // Keccak occupies ~58 cycles of each core's ~1910-cycle hash (<1% duty per
-    // core), so one unit comfortably serves all three (~9% combined demand). A
-    // lowest-index-priority grant serializes the rare collisions (losers stall a
-    // handful of cycles); because the cores run a data-independent, fixed-length
-    // FSM they start in lockstep and self-skew by one Keccak latency after the
-    // first collision, so the steady-state throughput penalty is negligible.
-    // Saves the ~1.8k ALM duplicate Keccak each extra core would otherwise carry.
+    // core), so one unit comfortably serves both. A lowest-index-priority grant
+    // serializes the rare collisions (the loser stalls a handful of cycles);
+    // because both cores run a data-independent, fixed-length FSM they start in
+    // lockstep and self-skew by one Keccak latency after the first collision,
+    // so the steady-state throughput penalty is negligible. Saves the ~1.8k ALM
+    // duplicate Keccak that each core used to carry.
     // -------------------------------------------------------------------------
     localparam KEC_IDLE = 1'b0, KEC_BUSY = 1'b1;
     reg          kec_state;
-    reg  [1:0]   kec_owner;        // 0/1/2 = which core owns the in-flight op
+    reg          kec_owner;        // 0 = core0, 1 = core1 owns the in-flight op
     reg          kec_read;
     reg  [639:0] kec_in_mux;
     wire [255:0] kec_out;
@@ -396,34 +330,28 @@ module odocrypt_top (
 
     // Result bus is common; only the current owner sees a valid strobe.
     assign kec_result    = kec_out;
-    assign c0_kec_rvalid = kec_write && (kec_state == KEC_BUSY) && (kec_owner == 2'd0);
-    assign c1_kec_rvalid = kec_write && (kec_state == KEC_BUSY) && (kec_owner == 2'd1);
-    assign c2_kec_rvalid = kec_write && (kec_state == KEC_BUSY) && (kec_owner == 2'd2);
+    assign c0_kec_rvalid = kec_write && (kec_state == KEC_BUSY) && (kec_owner == 1'b0);
+    assign c1_kec_rvalid = kec_write && (kec_state == KEC_BUSY) && (kec_owner == 1'b1);
 
     always @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             kec_state  <= KEC_IDLE;
-            kec_owner  <= 2'd0;
+            kec_owner  <= 1'b0;
             kec_read   <= 1'b0;
             kec_in_mux <= 640'd0;
         end else begin
             kec_read <= 1'b0;     // read is a single-cycle strobe
             case (kec_state)
                 KEC_IDLE: begin
-                    // Lowest-index priority if more than one requests at once.
+                    // Grant core 0 first if both request the same cycle.
                     if (c0_kec_req) begin
-                        kec_owner  <= 2'd0;
+                        kec_owner  <= 1'b0;
                         kec_in_mux <= c0_kec_in;
                         kec_read   <= 1'b1;
                         kec_state  <= KEC_BUSY;
                     end else if (c1_kec_req) begin
-                        kec_owner  <= 2'd1;
+                        kec_owner  <= 1'b1;
                         kec_in_mux <= c1_kec_in;
-                        kec_read   <= 1'b1;
-                        kec_state  <= KEC_BUSY;
-                    end else if (c2_kec_req) begin
-                        kec_owner  <= 2'd2;
-                        kec_in_mux <= c2_kec_in;
                         kec_read   <= 1'b1;
                         kec_state  <= KEC_BUSY;
                     end
@@ -459,8 +387,6 @@ module odocrypt_top (
             found_latched    <= 1'b0;
             core_found_d     <= 1'b0;
             core1_found_d    <= 1'b0;
-            core2_found_d    <= 1'b0;
-            found_core_id    <= 2'd0;
             found_nonce_reg  <= 32'h0000_0000;
             perf_hashes_lo   <= 32'h0000_0000;
             perf_hashes_hi   <= 32'h0000_0000;
@@ -534,45 +460,31 @@ module odocrypt_top (
             end else if (core1_hash_valid) begin
                 for (i = 0; i < 8; i = i + 1)
                     hash_reg[32*i +: 32] <= core1_hash[32*i +: 32];
-            end else if (core2_hash_valid) begin
-                for (i = 0; i < 8; i = i + 1)
-                    hash_reg[32*i +: 32] <= core2_hash[32*i +: 32];
             end
 
-            // Count completed hash evaluations from all three cores
-            if (core_hash_valid || core1_hash_valid || core2_hash_valid) begin
+            // Count completed hash evaluations from both cores
+            if (core_hash_valid || core1_hash_valid) begin
                 {perf_hashes_hi, perf_hashes_lo} <=
                     {perf_hashes_hi, perf_hashes_lo}
                     + {{63{1'b0}}, core_hash_valid}
-                    + {{63{1'b0}}, core1_hash_valid}
-                    + {{63{1'b0}}, core2_hash_valid};
+                    + {{63{1'b0}}, core1_hash_valid};
             end
 
-            // Latch on the rising edge of any core's found signal.
-            // Lowest-index core wins if more than one asserts the same cycle.
+            // Latch on the rising edge of either core's found signal.
+            // Core 0 wins if both assert in the same cycle.
             core_found_d  <= core_found;
             core1_found_d <= core1_found;
-            core2_found_d <= core2_found;
             if (core_found && !core_found_d && !found_latched) begin
                 found_latched   <= 1'b1;
-                found_core_id   <= 2'd0;
                 found_nonce_reg <= core_found_nonce;
                 for (i = 0; i < 8; i = i + 1)
                     hash_reg[32*i +: 32] <= core_hash[32*i +: 32];
                 perf_shares     <= perf_shares + 1;
             end else if (core1_found && !core1_found_d && !found_latched) begin
                 found_latched   <= 1'b1;
-                found_core_id   <= 2'd1;
                 found_nonce_reg <= core1_found_nonce;
                 for (i = 0; i < 8; i = i + 1)
                     hash_reg[32*i +: 32] <= core1_hash[32*i +: 32];
-                perf_shares     <= perf_shares + 1;
-            end else if (core2_found && !core2_found_d && !found_latched) begin
-                found_latched   <= 1'b1;
-                found_core_id   <= 2'd2;
-                found_nonce_reg <= core2_found_nonce;
-                for (i = 0; i < 8; i = i + 1)
-                    hash_reg[32*i +: 32] <= core2_hash[32*i +: 32];
                 perf_shares     <= perf_shares + 1;
             end
         end
@@ -585,13 +497,13 @@ module odocrypt_top (
         avs_readdata = 32'h0000_0000;
         case (avs_address)
             ADDR_CONTROL:       avs_readdata = control_reg;
-            ADDR_STATUS:        avs_readdata = {27'h0, et_tables_valid, 1'b1 /*EPOCH_LOCK*/, 1'b1 /*CORE_READY*/, found_latched, (core_busy || core1_busy || core2_busy)};
+            ADDR_STATUS:        avs_readdata = {27'h0, et_tables_valid, 1'b1 /*EPOCH_LOCK*/, 1'b1 /*CORE_READY*/, found_latched, (core_busy || core1_busy)};
             ADDR_VERSION:       avs_readdata = version_reg;
             ADDR_EPOCH:         avs_readdata = epoch_reg;
             ADDR_NONCE_START:   avs_readdata = nonce_start_reg;
             ADDR_NONCE_END:     avs_readdata = nonce_end_reg;
             ADDR_NONCE_FOUND:   avs_readdata = found_nonce_reg;
-            ADDR_CORE_FOUND:    avs_readdata = {30'h0, found_core_id};
+            ADDR_CORE_FOUND:    avs_readdata = {31'h0, core1_found_d & ~core_found_d};
             ADDR_TARGET_BASE,
             ADDR_TARGET_BASE + 8'h04,
             ADDR_TARGET_BASE + 8'h08,
