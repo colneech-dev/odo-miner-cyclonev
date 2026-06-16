@@ -67,7 +67,7 @@ cd "$PROJECT_ROOT/hdl/qsys"
 PATH="$QSYS_BIN:$PATH" qsys-generate soc_system.qsys --synthesis=VERILOG \
     --output-directory=soc_system --search-path="$(pwd),\$" > /tmp/qsys-gen.log 2>&1 \
     || die "qsys-generate failed (see /tmp/qsys-gen.log)"
-for f in odocrypt_top odocrypt_core odocrypt_epoch_tables keccak800; do
+for f in odocrypt_top odocrypt_core odocrypt_epoch_tables odocrypt_sbox_bank keccak800; do
     src_md5=$(md5sum "../src/"*"/$f.v" "../src/$f.v" 2>/dev/null | head -1 | cut -d' ' -f1)
     gen_md5=$(md5sum "soc_system/synthesis/submodules/$f.v" 2>/dev/null | cut -d' ' -f1)
     [ "$src_md5" = "$gen_md5" ] || die "stale submodule copy: $f.v (qsys did not refresh it)"

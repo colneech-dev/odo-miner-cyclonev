@@ -39,6 +39,7 @@ set_fileset_property QUARTUS_SYNTH ENABLE_FILE_OVERWRITE_MODE false
 add_fileset_file odocrypt_top.v          VERILOG PATH ../src/odocrypt_top.v TOP_LEVEL_FILE
 add_fileset_file odocrypt_core.v         VERILOG PATH ../src/odocrypt/odocrypt_core.v
 add_fileset_file odocrypt_epoch_tables.v VERILOG PATH ../src/odocrypt/odocrypt_epoch_tables.v
+add_fileset_file odocrypt_sbox_bank.v    VERILOG PATH ../src/odocrypt/odocrypt_sbox_bank.v
 add_fileset_file keccak800.v             VERILOG PATH ../src/keccak/keccak800.v
 
 #

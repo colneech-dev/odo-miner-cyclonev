@@ -34,6 +34,15 @@
 //   rot_out  [6*r +: 6]               = rotations[r]
 //   rk_out   [10*r +: 10]             = round_key[r]
 
+// This module is the single, shared owner of the epoch write stream and of
+// the FF tables (pmask/prot/rot/rk).  The S-box block RAMs themselves live in
+// one or more odocrypt_sbox_bank instances (one per core) — see that file for
+// why: the FF tables are identical across cores and cost ~3.8k ALMs, so they
+// are broadcast from here; the S-box RAMs are cheap M10K but need independent
+// read ports per core, so they are duplicated externally.  This module drives
+// the S-box write strobes (sb1_we, ...) and bank-select (active/load_bank) out
+// to every odocrypt_sbox_bank so they all load the identical stream in lockstep
+// with the single write pointer owned here.
 module odocrypt_epoch_tables (
     input  wire        clk,
     input  wire        reset_n,
@@ -45,15 +54,17 @@ module odocrypt_epoch_tables (
     input  wire        commit,    // pulse: flip loading bank -> active
     output wire        wr_busy,   // unpacking previous word; stall new writes
 
-    // Small S-box read ports (40 × 6-bit)
-    input  wire [239:0] sb1_addr,
-    output wire [239:0] sb1_q,
-
-    // Large S-box read ports (10 × 10-bit, two ports)
-    input  wire [99:0]  sb2_addr_a,
-    input  wire [99:0]  sb2_addr_b,
-    output wire [99:0]  sb2_q_a,
-    output wire [99:0]  sb2_q_b,
+    // S-box write fan-out to odocrypt_sbox_bank instances (one per core).
+    output wire        bank_active_bank,
+    output wire        bank_load_bank,
+    output wire        bank_sb1_we,
+    output wire [5:0]  bank_sb1_wsel,
+    output wire [6:0]  bank_sb1_wentry,
+    output wire [5:0]  bank_sb1_wdata,
+    output wire        bank_sb2_we,
+    output wire [3:0]  bank_sb2_wsel,
+    output wire [10:0] bank_sb2_wentry,
+    output wire [9:0]  bank_sb2_wdata,
 
     // FF tables (active copy)
     output wire [38399:0] pmask_out,
@@ -169,58 +180,20 @@ module odocrypt_epoch_tables (
     wire [9:0]  sb2_wdata  = sb2_wword[16*step_large +: 10];
 
     // -------------------------------------------------------------------------
-    // Small S-box RAMs: 40 × (2 banks × 64 entries × 6 bit)
-    // Simple dual port: 1 write (loader), 1 read (core). Inferred MLAB/M10K.
+    // S-box write fan-out: the actual S-box RAMs live in odocrypt_sbox_bank
+    // (one per core). Broadcast the loader strobes and bank-select so every
+    // bank loads the identical stream in lockstep with this write pointer.
     // -------------------------------------------------------------------------
-    genvar gi;
-    generate
-        for (gi = 0; gi < 40; gi = gi + 1) begin : sb1_ram
-            // The write and the read MUST live in separate always blocks:
-            // an unconditional read in the write block implies strict
-            // old-data read-during-write ordering, which the RAM hardware
-            // cannot honor — Quartus then silently implements the array as
-            // ~770 registers + a 128:1 read mux (≈510 ALMs) per S-box.
-            // Cross-port RDW never actually occurs here (the core is held
-            // in reset during table loads), so no_rw_check is safe.
-            (* ramstyle = "M10K, no_rw_check" *) reg [5:0] mem [0:127];
-            reg [5:0] q;
-            wire we = sb1_we && (sb1_wsel == gi);
-            always @(posedge clk) begin
-                if (we)
-                    mem[{load_bank, sb1_wentry[5:0]}] <= sb1_wdata;
-            end
-            always @(posedge clk) begin
-                q <= mem[{active_bank, sb1_addr[6*gi +: 6]}];
-            end
-            assign sb1_q[6*gi +: 6] = q;
-        end
-    endgenerate
-
-    // -------------------------------------------------------------------------
-    // Large S-box RAMs: 10 × (2 banks × 1024 entries × 10 bit)
-    // True dual port: port A = loader write / core read a, port B = core read b.
-    // While loading, the core is held in reset, so port A never collides.
-    // -------------------------------------------------------------------------
-    generate
-        for (gi = 0; gi < 10; gi = gi + 1) begin : sb2_ram
-            reg [9:0] mem [0:2047];
-            reg [9:0] q_a, q_b;
-            wire we = sb2_we && (sb2_wsel == gi);
-            wire [10:0] addr_a = we ? {load_bank, sb2_wentry[9:0]}
-                                    : {active_bank, sb2_addr_a[10*gi +: 10]};
-            always @(posedge clk) begin
-                if (we)
-                    mem[addr_a] <= sb2_wdata;
-                else
-                    q_a <= mem[addr_a];
-            end
-            always @(posedge clk) begin
-                q_b <= mem[{active_bank, sb2_addr_b[10*gi +: 10]}];
-            end
-            assign sb2_q_a[10*gi +: 10] = q_a;
-            assign sb2_q_b[10*gi +: 10] = q_b;
-        end
-    endgenerate
+    assign bank_active_bank = active_bank;
+    assign bank_load_bank   = load_bank;
+    assign bank_sb1_we      = sb1_we;
+    assign bank_sb1_wsel    = sb1_wsel;
+    assign bank_sb1_wentry  = sb1_wentry;
+    assign bank_sb1_wdata   = sb1_wdata;
+    assign bank_sb2_we      = sb2_we;
+    assign bank_sb2_wsel    = sb2_wsel;
+    assign bank_sb2_wentry  = sb2_wentry;
+    assign bank_sb2_wdata   = sb2_wdata;
 
     // -------------------------------------------------------------------------
     // P-box masks/rotations, global rotations, round keys.
