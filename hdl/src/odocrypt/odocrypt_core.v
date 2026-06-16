@@ -4,7 +4,9 @@
 //   1. Unpack 80-byte header into 10 × 64-bit words (little-endian), inject nonce
 //   2. PreMix: XOR all words, fold, XOR back
 //   3. 84 rounds: Pbox0 → Sbox → Pbox1 → Rotations → RoundKey
-//   4. Keccak-800 (12 rounds, 25-cycle latency) → 256-bit PoW hash
+//   4. Keccak-800 (12 rounds) → 256-bit PoW hash. The Keccak unit is SHARED:
+//      it lives in odocrypt_top and is arbitrated between cores (each core
+//      needs it <1% of the time), reached via the kec_req/kec_result handshake.
 //   5. Compare hash ≤ target (both little-endian uint256)
 //
 // The S-boxes live in block RAM inside odocrypt_epoch_tables and are read
@@ -49,6 +51,15 @@ module odocrypt_core (
     input  wire [839:0]   rk_flat,
     input  wire           tables_valid,
 
+    // Shared Keccak interface. The Keccak-800 unit lives in odocrypt_top and is
+    // arbitrated between cores (it runs <1% of the time per core). This core
+    // presents its final odo_encrypt state and raises kec_req; the arbiter
+    // returns the 256-bit PoW hash on kec_result with kec_result_valid pulsed.
+    output wire         kec_req,         // request the shared Keccak (held until result)
+    output wire [639:0] kec_in,          // = final odo_encrypt state to hash
+    input  wire [255:0] kec_result,      // 256-bit hash from shared Keccak
+    input  wire         kec_result_valid,// pulsed for this core when its hash is ready
+
     output wire         busy,
     output reg          found,
     output reg  [31:0]  found_nonce,
@@ -67,8 +78,8 @@ module odocrypt_core (
     localparam ST_SB_CAP2  = 4'd5;
     localparam ST_MIX_INIT = 4'd6;
     localparam ST_MIX      = 4'd7;
-    localparam ST_KEC_FEED = 4'd8;
-    localparam ST_KEC_WAIT = 4'd9;
+    localparam ST_KEC_REQ  = 4'd8;   // raise kec_req to the shared Keccak arbiter
+    localparam ST_KEC_WAIT = 4'd9;   // wait for kec_result_valid from the arbiter
 
     reg [3:0]   state;
     reg [31:0]  nonce_cur;
@@ -83,21 +94,15 @@ module odocrypt_core (
     assign busy = (state != ST_IDLE);
 
     // -------------------------------------------------------------------------
-    // Keccak-800 instance. THROUGHPUT=12 instantiates a single round and
-    // iterates it (we only need one hash every ~2k cycles); the core waits
-    // for the write strobe instead of counting a fixed latency.
+    // Shared Keccak handshake. The Keccak-800 unit no longer lives here — one
+    // shared instance in odocrypt_top serves both cores (it is busy <1% of the
+    // time per core, so the duplicate ~1.8k-ALM units were pure waste). We
+    // present the final state on kec_in and hold kec_req until the arbiter
+    // returns the hash on kec_result with kec_result_valid pulsed.
     // -------------------------------------------------------------------------
-    reg          kec_read;
-    wire [255:0] keccak_hash;
-    wire         keccak_write;
-
-    keccak_hasher #(.WIDTH(640), .THROUGHPUT(12)) keccak_inst (
-        .clk   (clk),
-        .in    (hash_state),
-        .read  (kec_read),
-        .out   (keccak_hash),
-        .write (keccak_write)
-    );
+    reg          kec_req_r;
+    assign kec_req = kec_req_r;
+    assign kec_in  = hash_state;
 
     // -------------------------------------------------------------------------
     // S-box address generation (combinational from hash_state)
@@ -321,13 +326,12 @@ module odocrypt_core (
             pb_sel      <= 1'b0;
             pb_sub      <= 3'd0;
             mix_cnt     <= 3'd0;
-            kec_read    <= 1'b0;
+            kec_req_r   <= 1'b0;
             found       <= 1'b0;
             found_nonce <= 32'd0;
             hash_out    <= 256'd0;
             hash_valid  <= 1'b0;
         end else begin
-            kec_read   <= 1'b0;
             hash_valid <= 1'b0;
 
             case (state)
@@ -397,7 +401,7 @@ module odocrypt_core (
                         pb_sel <= 1'b0;
                         pb_sub <= 3'd0;
                         if (round_idx == 7'd83) begin
-                            state <= ST_KEC_FEED;
+                            state <= ST_KEC_REQ;
                         end else begin
                             round_idx <= round_idx + 7'd1;
                             state     <= ST_PBOX;
@@ -408,19 +412,22 @@ module odocrypt_core (
                     end
                 end
 
-                ST_KEC_FEED: begin
-                    kec_read <= 1'b1;          // feed odo_encrypt output to Keccak
-                    state    <= ST_KEC_WAIT;
+                ST_KEC_REQ: begin
+                    // Raise the request; hold it until the arbiter answers.
+                    // hash_state holds the final odo_encrypt output (kec_in).
+                    kec_req_r <= 1'b1;
+                    state     <= ST_KEC_WAIT;
                 end
 
                 ST_KEC_WAIT: begin
-                    // 'out' is only guaranteed valid while 'write' is high
-                    // (the iterated permutation keeps running afterwards), so
-                    // capture and compare in this very cycle.
-                    if (keccak_write) begin
-                        hash_out   <= keccak_hash;
+                    // The arbiter pulses kec_result_valid for exactly one cycle
+                    // with kec_result valid; capture and compare in that cycle,
+                    // then drop the request.
+                    if (kec_result_valid) begin
+                        kec_req_r  <= 1'b0;
+                        hash_out   <= kec_result;
                         hash_valid <= 1'b1;
-                        if (!found && (keccak_hash <= target)) begin
+                        if (!found && (kec_result <= target)) begin
                             found       <= 1'b1;
                             found_nonce <= nonce_cur;
                             state       <= ST_IDLE;   // stop on first find

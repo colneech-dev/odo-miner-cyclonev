@@ -93,6 +93,12 @@ module odocrypt_top (
     wire [255:0] core1_hash;
     wire        core1_hash_valid;
 
+    // Shared Keccak handshake (one unit serves both cores — see arbiter below).
+    wire         c0_kec_req,  c1_kec_req;
+    wire [639:0] c0_kec_in,   c1_kec_in;
+    wire         c0_kec_rvalid, c1_kec_rvalid;
+    wire [255:0] kec_result;            // shared 256-bit hash bus to both cores
+
     wire [31:0] core0_nonce_end;
     wire [31:0] core1_nonce_start;
     assign core0_nonce_end   = nonce_start_reg + ((nonce_end_reg - nonce_start_reg) >> 1);
@@ -253,6 +259,10 @@ module odocrypt_top (
         .rot_flat     (et_rot),
         .rk_flat      (et_rk),
         .tables_valid (et_tables_valid),
+        .kec_req          (c0_kec_req),
+        .kec_in           (c0_kec_in),
+        .kec_result       (kec_result),
+        .kec_result_valid (c0_kec_rvalid),
         .busy         (core_busy),
         .found        (core_found),
         .found_nonce  (core_found_nonce),
@@ -281,12 +291,79 @@ module odocrypt_top (
         .rot_flat     (et_rot),
         .rk_flat      (et_rk),
         .tables_valid (et_tables_valid),
+        .kec_req          (c1_kec_req),
+        .kec_in           (c1_kec_in),
+        .kec_result       (kec_result),
+        .kec_result_valid (c1_kec_rvalid),
         .busy         (core1_busy),
         .found        (core1_found),
         .found_nonce  (core1_found_nonce),
         .hash_out     (core1_hash),
         .hash_valid   (core1_hash_valid)
     );
+
+    // -------------------------------------------------------------------------
+    // Shared Keccak-800 unit + arbiter.
+    // Keccak occupies ~58 cycles of each core's ~1910-cycle hash (<1% duty per
+    // core), so one unit comfortably serves both. A lowest-index-priority grant
+    // serializes the rare collisions (the loser stalls a handful of cycles);
+    // because both cores run a data-independent, fixed-length FSM they start in
+    // lockstep and self-skew by one Keccak latency after the first collision,
+    // so the steady-state throughput penalty is negligible. Saves the ~1.8k ALM
+    // duplicate Keccak that each core used to carry.
+    // -------------------------------------------------------------------------
+    localparam KEC_IDLE = 1'b0, KEC_BUSY = 1'b1;
+    reg          kec_state;
+    reg          kec_owner;        // 0 = core0, 1 = core1 owns the in-flight op
+    reg          kec_read;
+    reg  [639:0] kec_in_mux;
+    wire [255:0] kec_out;
+    wire         kec_write;
+
+    keccak_hasher #(.WIDTH(640), .THROUGHPUT(12)) keccak_shared (
+        .clk   (clk),
+        .in    (kec_in_mux),
+        .read  (kec_read),
+        .out   (kec_out),
+        .write (kec_write)
+    );
+
+    // Result bus is common; only the current owner sees a valid strobe.
+    assign kec_result    = kec_out;
+    assign c0_kec_rvalid = kec_write && (kec_state == KEC_BUSY) && (kec_owner == 1'b0);
+    assign c1_kec_rvalid = kec_write && (kec_state == KEC_BUSY) && (kec_owner == 1'b1);
+
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            kec_state  <= KEC_IDLE;
+            kec_owner  <= 1'b0;
+            kec_read   <= 1'b0;
+            kec_in_mux <= 640'd0;
+        end else begin
+            kec_read <= 1'b0;     // read is a single-cycle strobe
+            case (kec_state)
+                KEC_IDLE: begin
+                    // Grant core 0 first if both request the same cycle.
+                    if (c0_kec_req) begin
+                        kec_owner  <= 1'b0;
+                        kec_in_mux <= c0_kec_in;
+                        kec_read   <= 1'b1;
+                        kec_state  <= KEC_BUSY;
+                    end else if (c1_kec_req) begin
+                        kec_owner  <= 1'b1;
+                        kec_in_mux <= c1_kec_in;
+                        kec_read   <= 1'b1;
+                        kec_state  <= KEC_BUSY;
+                    end
+                end
+                KEC_BUSY: begin
+                    // One read in flight; release on its single write pulse.
+                    if (kec_write)
+                        kec_state <= KEC_IDLE;
+                end
+            endcase
+        end
+    end
 
     // -------------------------------------------------------------------------
     // Epoch write strobes: combinatorial decode from Avalon write
