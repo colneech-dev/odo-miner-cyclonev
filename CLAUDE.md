@@ -65,6 +65,19 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
   Rollback: `fpga_50mhz.rbf` on the board's FAT boot partition. Regression
   `run_tb.sh` bit-exact. Branch name is a misnomer — quad-core is infeasible
   (each core ~11.7k ALM; 3 cores > 100%).
+- **Shared Keccak** (`perf/shared-keccak` branch, 2026-06-16): each
+  `odocrypt_core` carried its own `keccak_hasher` (~1.8k ALM, measured), but
+  Keccak runs only ~58 of every ~1910 cycles per hash (<1% duty/core). Pulled
+  the unit out of the core into `odocrypt_top.v` as ONE `keccak_shared` +
+  a 2-state lowest-index-priority arbiter (`kec_req`/`kec_result` handshake).
+  Collisions self-skew (both cores run a fixed, data-independent FSM), so the
+  throughput cost is a one-time ~58-cycle hit. **81%→** no: drops **71% → 67%
+  ALM** (28,242/41,910; freed 1,333 net after the arbiter/mux). `run_tb.sh`
+  bit-exact 4/4. CAVEAT: the central shared unit's routing dropped clk_fab
+  Fmax **55.9 → 55.15 MHz @ Slow/100C** (only +0.05 ns at 55 MHz) — fine as an
+  intermediate (NOT deployed; same ~57 KH/s as the board), but register the
+  Keccak interface to reclaim margin when building the real next step. This is
+  the ALM-freeing ENABLER for adding throughput — see Next steps.
 - `hdl/src/odocrypt/odocrypt_core.v` is a multi-cycle FSM (~22 cycles/round,
   ~26 KH/s per core @ 50 MHz); S-boxes live in BRAM in
   `hdl/src/odocrypt/odocrypt_epoch_tables.v` (ping-pong banks, streamed from
@@ -99,10 +112,27 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 
 ## Next steps
 
-1. Add 3rd/4th parallel core (`odocrypt_top.v`) — each adds ~14% BRAM, ~38% ALM;
-   BRAM is the binding constraint (7 blocks/core × 29 M10K each, 204 total).
-   At 4 cores + 50 MHz: ~104 KH/s theoretical.
-2. Fan/thermal/reset button software (pending tasks 3–6 in `docs/FAN_SENSOR_WIRING.md`).
-3. Merge `claude/18b20-fan-gpio-setup-r4bm1f` → `Fabel` after fixing DTS comments
+Performance roadmap from the shared-Keccak baseline (67% ALM, clk_fab maxes
+~55 MHz — the limiter is the Pbox barrel-rotator combinational path ~17 ns, NOT
+ALM or core count). ALM is the binding constraint, not BRAM. Pick ONE of A/B:
+
+- **Path A — 3rd core** (`odocrypt_top.v`, +1 core sharing the Keccak/tables):
+  ~9.5k ALM → **~90% ALM**. Highest ceiling (**~78 KH/s @ ~50 MHz**, ~86 if 55
+  holds) but high risk: at 67% the fabric margin is already only +0.05 ns;
+  90% likely drops Fmax toward ~50 MHz or fails to route. Register the Keccak
+  interface first to recover margin.
+- **Path B — widen Mix** (`odocrypt_core.v`, 2 rotations/cycle): Mix 7→4 cyc,
+  round 22→19 → **~66 KH/s**, stays ~70% ALM and holds 55 MHz (width-not-depth,
+  low Fmax risk). The safe, bankable win.
+- A and B together do NOT fit (3rd core + widening all cores ≈ 103% ALM).
+- **75 MHz is infeasible**: it needs the Pbox rotator pipelined (split the ~17 ns
+  path), which adds ~6 cyc/round, netting only ~+7%. Not worth the surgery.
+- Cheap add-ons that compose with either: Keccak-wait overlap (~+3%, start the
+  next nonce during the 58-cyc Keccak wait). Full 2-nonce interleave (C-slow)
+  is ~1.3–1.4×/core but ~5–6k ALM/core — only worth it once cores won't fit.
+
+Non-performance backlog:
+1. Fan/thermal/reset button software (pending tasks 3–6 in `docs/FAN_SENSOR_WIRING.md`).
+2. Merge `claude/18b20-fan-gpio-setup-r4bm1f` → `Fabel` after fixing DTS comments
    and Makefile dead-code identified in that branch's review.
-4. Pool failover: wire `ODOD_POOL_HOST2/PORT2` into `hps/miner.c` reconnect loop.
+3. Pool failover: wire `ODOD_POOL_HOST2/PORT2` into `hps/miner.c` reconnect loop.
