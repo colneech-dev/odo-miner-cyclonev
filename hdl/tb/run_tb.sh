@@ -32,6 +32,7 @@ echo "=== Building testbench ==="
     "$SRC/odocrypt_top.v" \
     "$SRC/odocrypt/odocrypt_core.v" \
     "$SRC/odocrypt/odocrypt_epoch_tables.v" \
+    "$SRC/odocrypt/odocrypt_sbox_bank.v" \
     "$SRC/keccak/keccak800.v"
 
 # (epoch_key, nonce) pairs: a tiny key, a random-looking key, a realistic

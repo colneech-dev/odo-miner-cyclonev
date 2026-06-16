@@ -98,9 +98,9 @@ module odocrypt_top (
     assign core0_nonce_end   = nonce_start_reg + ((nonce_end_reg - nonce_start_reg) >> 1);
     assign core1_nonce_start = core0_nonce_end;
 
-    // Epoch table wires from odocrypt_epoch_tables — core 0
-    wire [239:0]  et_sb1_addr, et_sb1_q;
-    wire [99:0]   et_sb2_addr_a, et_sb2_addr_b, et_sb2_q_a, et_sb2_q_b;
+    // Shared FF tables (pmask/prot/rot/rk) broadcast from the single
+    // odocrypt_epoch_tables instance to BOTH cores — they are identical for a
+    // given epoch, so one copy saves ~3.8k ALMs versus the old two-table design.
     wire [38399:0] et_pmask;
     wire [299:0]   et_prot;
     wire [35:0]    et_rot;
@@ -108,15 +108,22 @@ module odocrypt_top (
     wire           et_tables_valid;
     wire           et_wr_busy;
 
-    // Epoch table wires for core 1 (second independent instance)
-    wire [239:0]  et1_sb1_addr, et1_sb1_q;
+    // S-box write fan-out from the shared epoch_tables to each sbox_bank.
+    wire           bank_active_bank, bank_load_bank;
+    wire           bank_sb1_we;
+    wire [5:0]     bank_sb1_wsel;
+    wire [6:0]     bank_sb1_wentry;
+    wire [5:0]     bank_sb1_wdata;
+    wire           bank_sb2_we;
+    wire [3:0]     bank_sb2_wsel;
+    wire [10:0]    bank_sb2_wentry;
+    wire [9:0]     bank_sb2_wdata;
+
+    // Per-core S-box read ports (each core drives its own bank).
+    wire [239:0]  et_sb1_addr, et_sb1_q;       // core 0 bank
+    wire [99:0]   et_sb2_addr_a, et_sb2_addr_b, et_sb2_q_a, et_sb2_q_b;
+    wire [239:0]  et1_sb1_addr, et1_sb1_q;      // core 1 bank
     wire [99:0]   et1_sb2_addr_a, et1_sb2_addr_b, et1_sb2_q_a, et1_sb2_q_b;
-    wire [38399:0] et1_pmask;
-    wire [299:0]   et1_prot;
-    wire [35:0]    et1_rot;
-    wire [839:0]   et1_rk;
-    wire           et1_tables_valid;
-    wire           et1_wr_busy;
 
     // Epoch table write strobes (combinatorial from Avalon write decode)
     reg  et_wr_en;
@@ -126,7 +133,7 @@ module odocrypt_top (
     // Stall stream writes while the table loader is unpacking the previous
     // word (multi-entry S-box words take up to 4 cycles to store).
     assign avs_waitrequest = avs_write && (avs_address == ADDR_EPOCH_WR_DATA)
-                                       && (et_wr_busy || et1_wr_busy);
+                                       && et_wr_busy;
     assign core_reset_n = reset_n & ~control_reg[1];
     assign epoch_value = epoch_reg;
     assign version_reg = 32'h0001_0000;  // Version 1.0
@@ -152,49 +159,75 @@ module odocrypt_top (
     // -------------------------------------------------------------------------
     wire [12:0] et_wr_addr_out;
 
+    // Single shared owner of the write stream + FF tables. Drives the S-box
+    // write strobes out to both sbox_bank instances below.
     odocrypt_epoch_tables epoch_tables_inst (
+        .clk              (clk),
+        .reset_n          (reset_n),
+        .wr_en            (et_wr_en),
+        .wr_data          (avs_writedata),
+        .wr_reset         (et_wr_reset),
+        .commit           (et_commit),
+        .wr_busy          (et_wr_busy),
+        .bank_active_bank (bank_active_bank),
+        .bank_load_bank   (bank_load_bank),
+        .bank_sb1_we      (bank_sb1_we),
+        .bank_sb1_wsel    (bank_sb1_wsel),
+        .bank_sb1_wentry  (bank_sb1_wentry),
+        .bank_sb1_wdata   (bank_sb1_wdata),
+        .bank_sb2_we      (bank_sb2_we),
+        .bank_sb2_wsel    (bank_sb2_wsel),
+        .bank_sb2_wentry  (bank_sb2_wentry),
+        .bank_sb2_wdata   (bank_sb2_wdata),
+        .pmask_out        (et_pmask),
+        .prot_out         (et_prot),
+        .rot_out          (et_rot),
+        .rk_out           (et_rk),
+        .tables_valid     (et_tables_valid),
+        .wr_addr_out      (et_wr_addr_out)
+    );
+
+    // Per-core S-box block-RAM banks. Both receive the identical write stream
+    // (lockstep with the shared write pointer) so they hold identical S-boxes;
+    // each serves its own core's read ports. ~0 ALMs each (pure M10K).
+    odocrypt_sbox_bank sbox_bank0 (
         .clk          (clk),
-        .reset_n      (reset_n),
-        .wr_en        (et_wr_en),
-        .wr_data      (avs_writedata),
-        .wr_reset     (et_wr_reset),
-        .commit       (et_commit),
-        .wr_busy      (et_wr_busy),
+        .active_bank  (bank_active_bank),
+        .load_bank    (bank_load_bank),
+        .sb1_we       (bank_sb1_we),
+        .sb1_wsel     (bank_sb1_wsel),
+        .sb1_wentry   (bank_sb1_wentry),
+        .sb1_wdata    (bank_sb1_wdata),
+        .sb2_we       (bank_sb2_we),
+        .sb2_wsel     (bank_sb2_wsel),
+        .sb2_wentry   (bank_sb2_wentry),
+        .sb2_wdata    (bank_sb2_wdata),
         .sb1_addr     (et_sb1_addr),
         .sb1_q        (et_sb1_q),
         .sb2_addr_a   (et_sb2_addr_a),
         .sb2_addr_b   (et_sb2_addr_b),
         .sb2_q_a      (et_sb2_q_a),
-        .sb2_q_b      (et_sb2_q_b),
-        .pmask_out    (et_pmask),
-        .prot_out     (et_prot),
-        .rot_out      (et_rot),
-        .rk_out       (et_rk),
-        .tables_valid (et_tables_valid),
-        .wr_addr_out  (et_wr_addr_out)
+        .sb2_q_b      (et_sb2_q_b)
     );
 
-    // Second epoch table instance — receives identical write stream as inst 0
-    odocrypt_epoch_tables epoch_tables_inst1 (
+    odocrypt_sbox_bank sbox_bank1 (
         .clk          (clk),
-        .reset_n      (reset_n),
-        .wr_en        (et_wr_en),
-        .wr_data      (avs_writedata),
-        .wr_reset     (et_wr_reset),
-        .commit       (et_commit),
-        .wr_busy      (et1_wr_busy),
+        .active_bank  (bank_active_bank),
+        .load_bank    (bank_load_bank),
+        .sb1_we       (bank_sb1_we),
+        .sb1_wsel     (bank_sb1_wsel),
+        .sb1_wentry   (bank_sb1_wentry),
+        .sb1_wdata    (bank_sb1_wdata),
+        .sb2_we       (bank_sb2_we),
+        .sb2_wsel     (bank_sb2_wsel),
+        .sb2_wentry   (bank_sb2_wentry),
+        .sb2_wdata    (bank_sb2_wdata),
         .sb1_addr     (et1_sb1_addr),
         .sb1_q        (et1_sb1_q),
         .sb2_addr_a   (et1_sb2_addr_a),
         .sb2_addr_b   (et1_sb2_addr_b),
         .sb2_q_a      (et1_sb2_q_a),
-        .sb2_q_b      (et1_sb2_q_b),
-        .pmask_out    (et1_pmask),
-        .prot_out     (et1_prot),
-        .rot_out      (et1_rot),
-        .rk_out       (et1_rk),
-        .tables_valid (et1_tables_valid),
-        .wr_addr_out  ()
+        .sb2_q_b      (et1_sb2_q_b)
     );
 
     // -------------------------------------------------------------------------
@@ -243,11 +276,11 @@ module odocrypt_top (
         .sb2_addr_b   (et1_sb2_addr_b),
         .sb2_q_a      (et1_sb2_q_a),
         .sb2_q_b      (et1_sb2_q_b),
-        .pmask_flat   (et1_pmask),
-        .prot_flat    (et1_prot),
-        .rot_flat     (et1_rot),
-        .rk_flat      (et1_rk),
-        .tables_valid (et1_tables_valid),
+        .pmask_flat   (et_pmask),
+        .prot_flat    (et_prot),
+        .rot_flat     (et_rot),
+        .rk_flat      (et_rk),
+        .tables_valid (et_tables_valid),
         .busy         (core1_busy),
         .found        (core1_found),
         .found_nonce  (core1_found_nonce),
