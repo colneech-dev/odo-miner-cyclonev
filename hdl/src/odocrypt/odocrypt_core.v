@@ -19,11 +19,12 @@
 //   Pbox0: 6 (one subround per cycle)
 //   Sbox : 3 (address, capture 0/1 + address 2/3, capture 2/3)
 //   Pbox1: 6
-//   Mix  : 7 (rotate-copy init, then one global rotation per cycle ×6;
-//             round key applied on the last cycle). Serialised so only 10
-//             64-bit barrel rotators exist instead of 60.
-//   = 22 cycles/round; one hash ≈ 1 + 84*22 + ~60 (keccak, THROUGHPUT=12)
-//   ≈ 1910 cycles ≈ 26 KH/s at 50 MHz. Raise the clock or add cores for more.
+//   Mix  : 4 (rotate-copy init, then TWO global rotations per cycle ×3;
+//             round key applied on the last cycle). Two banks of 10 barrel
+//             rotators — the 6 mix rotations are independent, so doubling the
+//             lanes halves the step count (was one bank ×6 cycles).
+//   = 19 cycles/round; one hash ≈ 1 + 84*19 + ~58 (keccak, THROUGHPUT=12)
+//   ≈ 1655 cycles ≈ 33 KH/s/core at 55 MHz. Raise the clock for more.
 //
 // State encoding: 640 bits = word[9]..word[0], word[i] = state[64*i +: 64]
 
@@ -89,7 +90,7 @@ module odocrypt_core (
     reg [6:0]   round_idx;
     reg         pb_sel;       // 0 = pbox0, 1 = pbox1
     reg [2:0]   pb_sub;       // pbox subround 0..5
-    reg [2:0]   mix_cnt;      // global rotation index 0..5
+    reg [2:0]   mix_cnt;      // global rotation index, steps 0 -> 2 -> 4 (two/cycle)
 
     assign busy = (state != ST_IDLE);
 
@@ -245,10 +246,13 @@ module odocrypt_core (
     endfunction
 
     // -------------------------------------------------------------------------
-    // Rotation-mix helpers (serialised: one global rotation per cycle so only
-    // 10 barrel rotators exist instead of 60).
+    // Rotation-mix helpers. The 6 mix rotations all read the SAME post-pbox
+    // state and XOR into the accumulator, so they are independent and parallel.
+    // We do TWO per cycle (two banks of 10 barrel rotators, was one bank ×6
+    // cycles): 6 steps → 3 cycles. Width-not-depth (one extra XOR level), so
+    // Fmax is unaffected; the cost is the second rotator bank.
     //   init : acc = state array rotated left by one position
-    //   step : acc[w] ^= rot64(state[w], rotation[mix_cnt])  for all w
+    //   step : acc[w] ^= rot64(state[w], rot[mix_cnt]) ^ rot64(state[w], rot[mix_cnt+1])
     // -------------------------------------------------------------------------
     function [639:0] mix_init;
         input [639:0] s;
@@ -260,14 +264,17 @@ module odocrypt_core (
         end
     endfunction
 
-    function [639:0] mix_step;
+    function [639:0] mix_step2;
         input [639:0] acc;
         input [639:0] s;
-        input [5:0]   r;
+        input [5:0]   r_a;
+        input [5:0]   r_b;
         integer fw;
         begin
             for (fw = 0; fw < 10; fw = fw + 1)
-                mix_step[64*fw +: 64] = acc[64*fw +: 64] ^ rot64(s[64*fw +: 64], r);
+                mix_step2[64*fw +: 64] = acc[64*fw +: 64]
+                                       ^ rot64(s[64*fw +: 64], r_a)
+                                       ^ rot64(s[64*fw +: 64], r_b);
         end
     endfunction
 
@@ -306,8 +313,9 @@ module odocrypt_core (
     // Shared datapaths (continuous, so each exists exactly once regardless of
     // how many FSM branches consume them)
     // -------------------------------------------------------------------------
-    wire [639:0] mix_stepped = mix_step(mix_acc, hash_state,
-                                        rot_flat[6*mix_cnt +: 6]);
+    wire [639:0] mix_stepped = mix_step2(mix_acc, hash_state,
+                                         rot_flat[6*mix_cnt        +: 6],
+                                         rot_flat[6*(mix_cnt+3'd1) +: 6]);
     wire [639:0] pbox_next   = pbox_subround(hash_state, pb_sel, pb_sub);
 
     // -------------------------------------------------------------------------
@@ -394,8 +402,9 @@ module odocrypt_core (
                 end
 
                 ST_MIX: begin
-                    if (mix_cnt == 3'd5) begin
-                        // last rotation + round key, commit the round
+                    // Two rotations per cycle: mix_cnt steps 0 -> 2 -> 4.
+                    if (mix_cnt == 3'd4) begin
+                        // last rotation pair (4,5) + round key, commit the round
                         hash_state <= apply_round_key(mix_stepped,
                                                       rk_flat[10*round_idx +: 10]);
                         pb_sel <= 1'b0;
@@ -408,7 +417,7 @@ module odocrypt_core (
                         end
                     end else begin
                         mix_acc <= mix_stepped;
-                        mix_cnt <= mix_cnt + 3'd1;
+                        mix_cnt <= mix_cnt + 3'd2;
                     end
                 end
 
