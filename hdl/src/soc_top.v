@@ -12,6 +12,15 @@
 // the onboard MiSTer-style SDRAM chips; both SDRAM chip selects are driven
 // high here so the chips stay quiet while the header is used as GPIO.
 
+// ---- 50 → 55 MHz fabric PLL ---------------------------------------------------
+// Ratio 11/10 → 55 MHz. The dual-core engine with shared epoch FF tables
+// (odocrypt_sbox_bank split) fits at 70% ALM; netlist Fmax ≈ 55.9 MHz, so
+// 55 MHz leaves ~+0.3 ns setup margin at the Slow/100C signoff corner.
+// 56.25 MHz failed that corner by -0.111 ns; 75 MHz is infeasible on this
+// device — the pbox barrel-rotator critical path is ~17.9 ns vs 13.33 ns @75.
+// derive_pll_clocks in miner.sdc picks up this output automatically.
+// fabric_reset_n is held low until both POR and PLL lock are asserted.
+
 module soc_top (
     // ---- Board clock & reset ----
     input  wire        CLOCK_50,   // 50 MHz oscillator
@@ -103,6 +112,36 @@ module soc_top (
     assign SDRAM_CS0_n = 1'b1;
     assign SDRAM_CS1_n = 1'b1;
 
+    // ---- PLL: 50 MHz → 55 MHz fabric clock --------------------------------
+    wire        clk_fab;
+    wire        pll_locked;
+    wire [5:0]  pll_clk_bus;
+    assign clk_fab = pll_clk_bus[0];
+
+    altpll u_pll_fab (
+        .inclk ({1'b0, CLOCK_50}),
+        .clk   (pll_clk_bus),
+        .locked(pll_locked)
+    );
+    defparam u_pll_fab.intended_device_family  = "Cyclone V";
+    defparam u_pll_fab.lpm_type                = "altpll";
+    defparam u_pll_fab.operation_mode          = "NORMAL";
+    defparam u_pll_fab.compensate_clock        = "CLK0";
+    defparam u_pll_fab.inclk0_input_frequency  = 20000;   // 50 MHz = 20 000 ps
+    defparam u_pll_fab.clk0_multiply_by        = 11;      // 50 × 11/10 = 55 MHz
+    defparam u_pll_fab.clk0_divide_by          = 10;
+    defparam u_pll_fab.clk0_duty_cycle         = 50;
+    defparam u_pll_fab.clk0_phase_shift        = "0";
+    defparam u_pll_fab.port_inclk1             = "PORT_UNUSED";
+    defparam u_pll_fab.port_clk0               = "PORT_USED";
+    defparam u_pll_fab.port_clk1               = "PORT_UNUSED";
+    defparam u_pll_fab.port_clk2               = "PORT_UNUSED";
+    defparam u_pll_fab.port_clk3               = "PORT_UNUSED";
+    defparam u_pll_fab.port_clk4               = "PORT_UNUSED";
+    defparam u_pll_fab.port_clk5               = "PORT_UNUSED";
+    defparam u_pll_fab.port_locked             = "PORT_USED";
+    defparam u_pll_fab.width_clock             = 6;
+
     // ---- Fabric power-on reset --------------------------------------------
     // The external RESET_n pin (AE25) is a DE10-Nano-convention guess that is
     // NOT verified against the QMTECH silkscreen. On first silicon the fabric
@@ -126,7 +165,8 @@ module soc_top (
             por_rst_n <= 1'b1;
         end
     end
-    wire fabric_reset_n = por_rst_n;   // RESET_n (AE25) intentionally ignored
+    // Hold fabric in reset until both the POR timer and PLL lock are satisfied.
+    wire fabric_reset_n = por_rst_n & pll_locked;
 
     // ---- LCD control PIO bit mapping (bit0=D/C, bit1=RESET_n, bit2=BL) ----
     wire [2:0] pio_lcd_export;
@@ -136,8 +176,8 @@ module soc_top (
 
     // ---- Platform Designer system (HPS + DDR3 + miner + display SPI) ----
     soc_system u_soc (
-        // Clock & reset
-        .clk_clk                               (CLOCK_50),
+        // Clock & reset — fabric runs at 55 MHz from u_pll_fab
+        .clk_clk                               (clk_fab),
         .reset_reset_n                         (fabric_reset_n),
 
         // SPI display
