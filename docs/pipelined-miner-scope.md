@@ -110,6 +110,24 @@ always-on compile host it already has network access to reach.
 unknown (fit/timing/hashrate on our part with the toolchain) for a few days'
 cost, and is a clean go/no-go gate before committing to the integration.
 
+### Phase 0 RESULT — 2026-06-16: **PASS (GO)**
+
+Compiled the upstream pipeline (epoch SEED 1748736000, THROUGHPUT=4) standalone
+for our `5CSXFC6C6U23I7` via the Windows Quartus 25.1 install. Project at
+`upstream/odo-miner/src/projects/qmtech_5csxfc6/` (untracked scratch).
+
+- **Full compile clean** (A&S / Fit / Asm / STA all 0 errors).
+- **Fit: 65% ALM** (27,366 / 41,910) — ~35% headroom for HPS bridges + peripherals.
+- **Pipeline clock Fmax = 162.1 MHz @ Slow/85C** (+0.498 ns slack at the 150 MHz
+  target) → meets 150 MHz. (`altera_reserved_tck` 59 MHz is the JTAG TAP, ignore.)
+- **Throughput = 150/4 ≈ 37.5 MH/s** on our exact silicon — ~650× the FSM.
+- Caveat: signed off at the upstream's **85C** corner (its qsf sets
+  MAX_CORE_JUNCTION_TEMP 85); re-verify at our standard **100C** in Phase 1.
+  +0.498 ns @ 85C should mostly hold; lower THROUGHPUT/clock is the fallback.
+
+**Implication:** the headroom strongly suggests Phase 1 (Avalon wrapper + Qsys
+co-fit with display/touch/PIO) is feasible, possibly even keeping THROUGHPUT=4.
+
 ## Chosen infrastructure (2026-06-16)
 
 - **Compile/precompile host = the Miningcore PC, `192.168.1.100`.** Always-on
