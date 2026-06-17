@@ -72,3 +72,21 @@ clk) attaches. HPS + bridges + display + touch + PIO stay in `soc_system.qsys`.
 - Co-fit may force THROUGHPUT 6/8 or lower clock (still MH/s) — measured at P1.4.
 - Exporting the LW bridge master is a delicate Qsys edit (see feedback-qsys-sync).
 - Found-FIFO depth vs share rate; CDC correctness — gated by P1.2 TB + soak.
+
+## Progress
+
+- **P1.1 ✅** Avalon wrapper (`pipelined_miner_top.v`) — elaborates, register map
+  `hps_regs_pipe.h`.
+- **P1.2 ✅** Testbench — RTL hash **bit-exact vs oracle** (free-running semantics
+  handled via wrapper settle-gating; the daemon must mirror this on job switch).
+- **P1.3 ✅** Dedicated 50→150 MHz `u_pll_miner` in `soc_top.v`.
+- **P1.4 ✅ CO-FIT PASS (2026-06-17):** `pipelined_miner_top` swapped into
+  `soc_system` (drop-in `s0` + exported `miner_clk`), co-fit **WITH** HPS +
+  display + touch + PIO. **Fit 75% ALM (31,403/41,910), 76% RAM; clk_miner
+  153.6 MHz @ Slow/100C → 150 MHz signs off at +0.154 ns; no congestion.**
+  → **~37.5 MH/s on the fully integrated SoC** (~650× the FSM). `.rbf` built
+  (chose the named-generate fix + `set_clock_groups -asynchronous` for the
+  two PLL domains). Did NOT need lower THROUGHPUT/clock.
+- **P1.5 ◐** `miner_io_pipe.[ch]` (dispatch/poll/seed) + `fpga_smoke_pipe.c`
+  bring-up tool done; stratum daemon-loop integration remains.
+- **P1.6 ⬜** Deploy `.rbf` + run `smoke_pipe`, then verify MH/s on the pool.
