@@ -83,16 +83,30 @@ module pipelined_miner_top (
     // ----------------------------------- Config CDC: Avalon -> miner (150 MHz)
     // Sync the commit toggle; on its edge the header/target buses have been
     // stable for many cycles, so sampling them is a safe data-stable crossing.
+    // After a commit the pipeline still holds in-flight nonces hashed with the
+    // PREVIOUS header; those drain over the pipeline latency and can spuriously
+    // qualify against the new target. Suppress found-reporting for SETTLE cycles
+    // after each commit so only nonces fully processed with the new header are
+    // reported (the upstream host filters the same staleness via re-check).
+    localparam [12:0] SETTLE = 13'd4096;
     reg cmt_s1, cmt_s2, cmt_s3;
+    reg [12:0]  settle_cnt;
     reg [607:0] header_m;
     reg [255:0] target_m;
+    initial begin
+        cmt_s1 = 0; cmt_s2 = 0; cmt_s3 = 0;
+        header_m = 0; target_m = 0; settle_cnt = 0;
+    end
     always @(posedge miner_clk) begin
         cmt_s1 <= commit_tgl;
         cmt_s2 <= cmt_s1;
         cmt_s3 <= cmt_s2;
         if (cmt_s2 ^ cmt_s3) begin
-            header_m <= header_flat;
-            target_m <= target_flat;
+            header_m   <= header_flat;
+            target_m   <= target_flat;
+            settle_cnt <= SETTLE;
+        end else if (settle_cnt != 0) begin
+            settle_cnt <= settle_cnt - 1'b1;
         end
     end
 
@@ -111,13 +125,18 @@ module pipelined_miner_top (
     reg        ack_tgl_a;
     reg [31:0] fnonce_a;
     wire       found_valid = (reqa_s2 != ack_tgl_a);
+    initial begin
+        prev_nonce_m = 0; fnonce_hold_m = 0; req_tgl_m = 0;
+        ackm_s1 = 0; ackm_s2 = 0;
+    end
 
     always @(posedge miner_clk) begin
         ackm_s1 <= ack_tgl_a;
         ackm_s2 <= ackm_s1;
         prev_nonce_m <= found_nonce_m;
-        // new find (nonce changed) and handshake idle (req == ack)
-        if ((found_nonce_m != prev_nonce_m) && (req_tgl_m == ackm_s2)) begin
+        // new find (nonce changed), handshake idle, and past the settle window
+        if ((found_nonce_m != prev_nonce_m) && (req_tgl_m == ackm_s2)
+            && (settle_cnt == 0)) begin
             fnonce_hold_m <= found_nonce_m;
             req_tgl_m     <= ~req_tgl_m;
         end
