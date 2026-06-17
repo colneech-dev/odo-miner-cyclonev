@@ -36,6 +36,10 @@ SMOKE_TARGET = fpga_smoke_test
 SMOKE_PIPE_SRCS = fpga_smoke_pipe.c miner_io_pipe.c odocrypt_state.c \
                   $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
 
+# 4c. Pipelined mining daemon (stratum loop, free-running pipelined core)
+PIPE_MINER_SRCS = miner_pipe.c miner_io_pipe.c stratum.c job.c odocrypt_header.c \
+                  odocrypt_state.c $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
+
 # 5. miner_io_test — hardware bring-up test for miner_io layer
 MINER_IO_TEST_SRCS = minor_io_test.c miner_io.c odocrypt_state.c
 
@@ -55,7 +59,7 @@ all: odod odo-miner odo-miner-watcher $(SMOKE_TARGET)
 # -----------------------------------------------------------------------
 # Binaries
 # -----------------------------------------------------------------------
-.PHONY: odod odo-miner odo-miner-watcher smoke_test miner_io_test smoke_pipe
+.PHONY: odod odo-miner odo-miner-watcher smoke_test miner_io_test smoke_pipe odo-miner-pipe
 
 odod: $(DAEMON_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -74,6 +78,9 @@ miner_io_test: $(MINER_IO_TEST_SRCS)
 
 smoke_pipe: $(SMOKE_PIPE_SRCS)
 	$(CC) $(CFLAGS) -o $@ $^
+
+odo-miner-pipe: $(PIPE_MINER_SRCS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 # -----------------------------------------------------------------------
 # Algorithm tests
