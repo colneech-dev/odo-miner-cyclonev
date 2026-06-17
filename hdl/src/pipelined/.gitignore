@@ -1,0 +1,5 @@
+# Generated per-epoch pipeline RTL (regenerate via odo_gen, see README.md)
+odo_[0-9]*.v
+# iverilog/elaboration artifacts
+*.elab
+*.vvp
