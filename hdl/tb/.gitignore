@@ -1,0 +1,4 @@
+# pipelined TB build artifacts
+gen_vectors_pipe
+tb_pipe.vvp
+vecpipe_*/
