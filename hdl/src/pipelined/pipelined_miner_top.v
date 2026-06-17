@@ -55,10 +55,12 @@ module pipelined_miner_top (
     wire [255:0] target_flat;
     genvar gi;
     generate
-        for (gi = 0; gi < 19; gi = gi + 1)
+        for (gi = 0; gi < 19; gi = gi + 1) begin : hdr_flat
             assign header_flat[32*gi +: 32] = header_reg[gi];
-        for (gi = 0; gi < 8; gi = gi + 1)
+        end
+        for (gi = 0; gi < 8; gi = gi + 1) begin : tgt_flat
             assign target_flat[32*gi +: 32] = target_reg[gi];
+        end
     endgenerate
 
     integer i;
