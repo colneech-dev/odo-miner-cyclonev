@@ -32,6 +32,10 @@ WATCHER_OBJS = $(WATCHER_SRCS:.c=.o)
 # 4. Smoke test — FPGA MMIO register validation
 SMOKE_TARGET = fpga_smoke_test
 
+# 4b. Pipelined miner smoke test — on-board bring-up for the pipelined core
+SMOKE_PIPE_SRCS = fpga_smoke_pipe.c miner_io_pipe.c odocrypt_state.c \
+                  $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
+
 # 5. miner_io_test — hardware bring-up test for miner_io layer
 MINER_IO_TEST_SRCS = minor_io_test.c miner_io.c odocrypt_state.c
 
@@ -51,7 +55,7 @@ all: odod odo-miner odo-miner-watcher $(SMOKE_TARGET)
 # -----------------------------------------------------------------------
 # Binaries
 # -----------------------------------------------------------------------
-.PHONY: odod odo-miner odo-miner-watcher smoke_test miner_io_test
+.PHONY: odod odo-miner odo-miner-watcher smoke_test miner_io_test smoke_pipe
 
 odod: $(DAEMON_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -66,6 +70,9 @@ smoke_test $(SMOKE_TARGET): fpga_smoke_test.c
 	$(CC) $(CFLAGS) -o $(SMOKE_TARGET) $<
 
 miner_io_test: $(MINER_IO_TEST_SRCS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+smoke_pipe: $(SMOKE_PIPE_SRCS)
 	$(CC) $(CFLAGS) -o $@ $^
 
 # -----------------------------------------------------------------------
