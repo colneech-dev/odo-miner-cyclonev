@@ -142,11 +142,14 @@ module soc_top (
     defparam u_pll_fab.port_locked             = "PORT_USED";
     defparam u_pll_fab.width_clock             = 6;
 
-    // ---- PLL: 50 MHz → 150 MHz pipelined-miner clock ----------------------
-    // Dedicated PLL for the pipelined OdoCrypt core (THROUGHPUT=4 → ~37.5 MH/s).
-    // Separate from u_pll_fab so the 150 MHz and 55 MHz domains don't share a
+    // ---- PLL: 50 MHz → 125 MHz pipelined-miner clock ----------------------
+    // Dedicated PLL for the pipelined OdoCrypt core (THROUGHPUT=4 → ~31.25 MH/s).
+    // Separate from u_pll_fab so the 125 MHz and 55 MHz domains don't share a
     // VCO solution. Exported into soc_system as miner_clk_clk; the wrapper's
-    // internal CDC bridges 55<->150 MHz. Phase 0 proved 150 MHz signs off.
+    // internal CDC bridges 55<->125 MHz.
+    // NOTE: 150 MHz fit + signed off, but on-board it destabilized the HPS
+    // under sustained load (large DRAM transfers corrupted) = power/integrity,
+    // not logic. 125 MHz is the next attempt down (~17% less dynamic power).
     wire        clk_miner;
     wire        miner_pll_locked;
     wire [5:0]  miner_clk_bus;
@@ -162,8 +165,8 @@ module soc_top (
     defparam u_pll_miner.operation_mode         = "NORMAL";
     defparam u_pll_miner.compensate_clock       = "CLK0";
     defparam u_pll_miner.inclk0_input_frequency  = 20000;  // 50 MHz = 20 000 ps
-    defparam u_pll_miner.clk0_multiply_by        = 3;      // 50 × 3 = 150 MHz
-    defparam u_pll_miner.clk0_divide_by          = 1;
+    defparam u_pll_miner.clk0_multiply_by        = 5;      // 50 × 5/2 = 125 MHz
+    defparam u_pll_miner.clk0_divide_by          = 2;
     defparam u_pll_miner.clk0_duty_cycle         = 50;
     defparam u_pll_miner.clk0_phase_shift        = "0";
     defparam u_pll_miner.port_inclk1             = "PORT_UNUSED";
