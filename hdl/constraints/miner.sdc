@@ -11,6 +11,15 @@ create_clock -name clk_50 -period 20.000 [get_ports {CLOCK_50}]
 derive_pll_clocks
 derive_clock_uncertainty
 
+# The pipelined miner runs in its own 150 MHz domain (u_pll_miner). The only
+# crossings to the 55 MHz fabric (u_pll_fab) are the wrapper's async handshakes
+# (commit toggle, found 2-phase, data-stable header/target/nonce snapshots), so
+# treat the two PLL domains as asynchronous — they must not be timed as
+# single-cycle paths. (Only present in the pipelined-miner build.)
+set_clock_groups -asynchronous \
+    -group [get_clocks {*u_pll_fab*}] \
+    -group [get_clocks {*u_pll_miner*}]
+
 # Asynchronous board inputs
 set_false_path -from [get_ports {RESET_n KEY0 KEY1 TP_IRQ_n}]
 

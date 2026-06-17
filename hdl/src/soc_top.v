@@ -142,6 +142,40 @@ module soc_top (
     defparam u_pll_fab.port_locked             = "PORT_USED";
     defparam u_pll_fab.width_clock             = 6;
 
+    // ---- PLL: 50 MHz → 150 MHz pipelined-miner clock ----------------------
+    // Dedicated PLL for the pipelined OdoCrypt core (THROUGHPUT=4 → ~37.5 MH/s).
+    // Separate from u_pll_fab so the 150 MHz and 55 MHz domains don't share a
+    // VCO solution. Exported into soc_system as miner_clk_clk; the wrapper's
+    // internal CDC bridges 55<->150 MHz. Phase 0 proved 150 MHz signs off.
+    wire        clk_miner;
+    wire        miner_pll_locked;
+    wire [5:0]  miner_clk_bus;
+    assign clk_miner = miner_clk_bus[0];
+
+    altpll u_pll_miner (
+        .inclk ({1'b0, CLOCK_50}),
+        .clk   (miner_clk_bus),
+        .locked(miner_pll_locked)
+    );
+    defparam u_pll_miner.intended_device_family = "Cyclone V";
+    defparam u_pll_miner.lpm_type               = "altpll";
+    defparam u_pll_miner.operation_mode         = "NORMAL";
+    defparam u_pll_miner.compensate_clock       = "CLK0";
+    defparam u_pll_miner.inclk0_input_frequency  = 20000;  // 50 MHz = 20 000 ps
+    defparam u_pll_miner.clk0_multiply_by        = 3;      // 50 × 3 = 150 MHz
+    defparam u_pll_miner.clk0_divide_by          = 1;
+    defparam u_pll_miner.clk0_duty_cycle         = 50;
+    defparam u_pll_miner.clk0_phase_shift        = "0";
+    defparam u_pll_miner.port_inclk1             = "PORT_UNUSED";
+    defparam u_pll_miner.port_clk0               = "PORT_USED";
+    defparam u_pll_miner.port_clk1               = "PORT_UNUSED";
+    defparam u_pll_miner.port_clk2               = "PORT_UNUSED";
+    defparam u_pll_miner.port_clk3               = "PORT_UNUSED";
+    defparam u_pll_miner.port_clk4               = "PORT_UNUSED";
+    defparam u_pll_miner.port_clk5               = "PORT_UNUSED";
+    defparam u_pll_miner.port_locked             = "PORT_USED";
+    defparam u_pll_miner.width_clock             = 6;
+
     // ---- Fabric power-on reset --------------------------------------------
     // The external RESET_n pin (AE25) is a DE10-Nano-convention guess that is
     // NOT verified against the QMTECH silkscreen. On first silicon the fabric
@@ -179,6 +213,9 @@ module soc_top (
         // Clock & reset — fabric runs at 55 MHz from u_pll_fab
         .clk_clk                               (clk_fab),
         .reset_reset_n                         (fabric_reset_n),
+
+        // 150 MHz pipelined-miner clock (exported by the pipelined component)
+        .miner_clk_clk                         (clk_miner),
 
         // SPI display
         .spi_lcd_SCLK                          (LCD_SCLK),
