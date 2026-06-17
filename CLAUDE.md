@@ -112,24 +112,27 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 
 ## Next steps
 
-Performance roadmap from the shared-Keccak baseline (67% ALM, clk_fab maxes
-~55 MHz — the limiter is the Pbox barrel-rotator combinational path ~17 ns, NOT
-ALM or core count). ALM is the binding constraint, not BRAM. Pick ONE of A/B:
+**Sequential-FSM hashrate is maxed at ~57 KH/s on this board** (hardware-proven
+2026-06-16). Both ways to add throughput were built and FAILED to fit/route:
+- **3rd core** (`perf/shared-keccak`, commit f9c430d, reverted): Quartus
+  Error 11802 *Can't fit* at 93% requested ALM — logic capacity wall.
+- **Widen Mix** 2 rot/cyc (commit 939c984, reverted): correct RTL (run_tb.sh
+  bit-exact) but the twin 10-rotator bank is *routing*-bound — "router
+  terminated due to congestion" at 82% ALM under HIGH PERFORMANCE EFFORT, and
+  with BALANCED + aggressive-routability it routes at 78% but clk_fab Fmax
+  craters to **26.4 MHz** (~31 KH/s). Can't get both route and timing.
+- **75 MHz** infeasible (Pbox rotator path ~17 ns; pipelining it nets only ~+7%).
+- The clean win that stuck: **shared Keccak** (71→67% ALM, frees logic but no
+  standalone hashrate gain) — an enabler, not a deploy target.
 
-- **Path A — 3rd core** (`odocrypt_top.v`, +1 core sharing the Keccak/tables):
-  ~9.5k ALM → **~90% ALM**. Highest ceiling (**~78 KH/s @ ~50 MHz**, ~86 if 55
-  holds) but high risk: at 67% the fabric margin is already only +0.05 ns;
-  90% likely drops Fmax toward ~50 MHz or fails to route. Register the Keccak
-  interface first to recover margin.
-- **Path B — widen Mix** (`odocrypt_core.v`, 2 rotations/cycle): Mix 7→4 cyc,
-  round 22→19 → **~66 KH/s**, stays ~70% ALM and holds 55 MHz (width-not-depth,
-  low Fmax risk). The safe, bankable win.
-- A and B together do NOT fit (3rd core + widening all cores ≈ 103% ALM).
-- **75 MHz is infeasible**: it needs the Pbox rotator pipelined (split the ~17 ns
-  path), which adds ~6 cyc/round, netting only ~+7%. Not worth the surgery.
-- Cheap add-ons that compose with either: Keccak-wait overlap (~+3%, start the
-  next nonce during the 58-cyc Keccak wait). Full 2-nonce interleave (C-slow)
-  is ~1.3–1.4×/core but ~5–6k ALM/core — only worth it once cores won't fit.
+**The real performance path is architectural**, scoped in
+`docs/pipelined-miner-scope.md`: the upstream pipelined `odo_encrypt` does
+~**37 MH/s** on the same Cyclone V class (150 MHz, THROUGHPUT=4) by baking the
+epoch into LUTs — ~650× the FSM. Keep autonomy by **pre-compiling each epoch's
+bitstream off-board** (an x86 host runs the upstream `autocompile.sh`) and
+**hot-reconfiguring the fabric** on the HPS (kernel already has
+`CONFIG_FPGA_MGR_SOCFPGA` + bridges + region). Phase 0 spike = compile the
+pipelined core for our `5CSXFC6C6` and measure fit/Fmax/MH/s (go/no-go gate).
 
 Non-performance backlog:
 1. Fan/thermal/reset button software (pending tasks 3–6 in `docs/FAN_SENSOR_WIRING.md`).
