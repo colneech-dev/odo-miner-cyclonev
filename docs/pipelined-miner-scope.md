@@ -110,10 +110,24 @@ always-on compile host it already has network access to reach.
 unknown (fit/timing/hashrate on our part with the toolchain) for a few days'
 cost, and is a clean go/no-go gate before committing to the integration.
 
+## Chosen infrastructure (2026-06-16)
+
+- **Compile/precompile host = the Miningcore PC, `192.168.1.100`.** Always-on
+  x86 already running the pool, on the same LAN the board fetches from — serves
+  the per-epoch `.rbf` from a static dir. Resolves §6.1.
+- **Board** `192.168.1.35` fetches `miner_<epoch>.rbf` from `.100`.
+- **Pool stratum** is `192.168.1.19:3333` (confirm whether that's the same box
+  as `.100` or separate; the daemon already knows the pool host).
+- **Open spec to confirm:** `.100` needs **≥16 GB RAM** (compiles peak ~9.5 GB on
+  top of Miningcore + Postgres) and Quartus Lite installed (Linux per the linked
+  25.1 download, or reuse the Windows 25.1 install if `.100` is this dev machine).
+  Throttle the build (fewer cores, low priority) — it has ~10 days lead, so it
+  never must run at a busy moment.
+
 ## 6. Decisions needed before starting
 
-1. **Compile host:** where does it live (your PC / a VM / cloud), and is an
-   always-on x86 with Quartus Lite acceptable?
+1. ~~**Compile host**~~ — decided: `192.168.1.100` (Miningcore PC). Pending only
+   the RAM/OS confirmation noted above.
 2. **Reconfig style for v1:** is ~30 s reboot downtime per epoch fine (simple,
    robust), with live reconfig as a later nice-to-have?
 3. **Throughput target if 150 MHz/T=4 won't co-fit** with peripherals — accept a
