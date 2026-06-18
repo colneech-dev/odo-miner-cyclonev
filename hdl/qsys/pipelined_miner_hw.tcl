@@ -35,7 +35,7 @@ set_fileset_property QUARTUS_SYNTH ENABLE_FILE_OVERWRITE_MODE false
 add_fileset_file pipelined_miner_top.v VERILOG PATH ../src/pipelined/pipelined_miner_top.v TOP_LEVEL_FILE
 add_fileset_file odo_miner_core.v      VERILOG PATH ../src/pipelined/odo_miner_core.v
 add_fileset_file keccak800.v           VERILOG PATH ../src/pipelined/keccak800.v
-add_fileset_file odo_1748736000.v      VERILOG PATH ../src/pipelined/odo_1748736000.v
+add_fileset_file odo_1781740800.v      VERILOG PATH ../src/pipelined/odo_1781740800.v
 
 #
 # clk: Avalon / soc_system fabric clock (~55 MHz)
