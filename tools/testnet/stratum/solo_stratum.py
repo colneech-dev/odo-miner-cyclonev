@@ -58,8 +58,13 @@ _last_share_t = [time.time()]
 # miner gets regular result:true feedback even on testnet/mainnet.
 # Convention matches hps/job.c: diff-1 = 0xFFFF * 2^208 expected hashes.
 # _SHARE_DIFF_INV is the reciprocal (integer); change it to tune share rate.
-# At ~52 KH/s dual-core: 10_000 → ~1 accepted share every 8 s.
-_SHARE_DIFF_INV = 10_000
+# Expected hashes/share = SHARE_DIFF * 2^32 = (1/_SHARE_DIFF_INV) * 2^32, so a
+# LARGER _SHARE_DIFF_INV = easier share = higher share rate. Tune it to ~1 share
+# every several seconds for the miner's hashrate; too-easy floods the bridge with
+# submits that go stale during post-block job churn and show up as "rejected".
+#   ~52 KH/s dual-core FSM : 10_000 → ~8 s/share
+#   ~12.5 MH/s pipelined   : 40     → ~8 s/share   (240x faster -> /240)
+_SHARE_DIFF_INV = 40
 SHARE_DIFF   = 1.0 / _SHARE_DIFF_INV   # float sent in mining.set_difficulty
 DIFF1_TARGET = 0xFFFF << 208            # diff-1 reference target (256-bit int)
 SHARE_TARGET = DIFF1_TARGET * _SHARE_DIFF_INV  # exact integer; share_target = diff1 / SHARE_DIFF
