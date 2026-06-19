@@ -4,3 +4,6 @@ __pycache__/
 *.dll
 current_job.json
 stats.json
+# SSH private key for board access — never commit. The public half lives in
+# linux/overlay/root/.ssh/authorized_keys.
+/odo-miner
