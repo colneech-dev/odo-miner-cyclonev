@@ -178,12 +178,19 @@ int main(int argc, char **argv)
            seed, seed, ver);
     odo_epoch_generate(&g_epoch, seed);   /* validation uses the baked-in epoch */
 
+    /* Optional backup pool: tried alternately after each failed connect. */
+    const char *hosts[2] = { host, getenv("ODOD_POOL_HOST2") };
+    const char *ports[2] = { port, getenv("ODOD_POOL_PORT2") };
+    int n_pools  = (hosts[1] && hosts[1][0] && ports[1] && ports[1][0]) ? 2 : 1;
+    int pool_idx = 0;
+    if (n_pools > 1)
+        printf("[pipe] backup pool configured: %s:%s\n", hosts[1], ports[1]);
+
     /* Seed the status struct: pool string, epoch params, start time. */
     snprintf(g_st.pool, sizeof(g_st.pool), "%s:%s", host, port);
-    g_st.epoch          = seed;
-    g_st.epoch_interval = 86400;          /* testnet OdoCrypt epoch length */
-    g_st.started        = time(NULL);
-    g_mono_start        = mono_s();       /* clock-step-safe uptime baseline */
+    g_st.epoch   = seed;
+    g_st.started = time(NULL);
+    g_mono_start = mono_s();       /* clock-step-safe uptime baseline */
     status_write();
 
     stratum_ctx_t st;
@@ -192,6 +199,7 @@ int main(int argc, char **argv)
         miner_io_pipe_shutdown();
         return 1;
     }
+    g_st.epoch_interval = st.odo_interval;   /* from ODO_TESTNET/ODO_EPOCH_INTERVAL */
 
     job_t cur; job_init(&cur);
     int have_cur = 0;
@@ -200,13 +208,23 @@ int main(int argc, char **argv)
 
     while (!g_term) {
         if (stratum_connect(&st) != 0) {
-            fprintf(stderr, "[pipe] connect %s:%s failed; retry in 5 s\n", host, port);
+            fprintf(stderr, "[pipe] connect %s:%s failed; retry in 5 s\n",
+                    hosts[pool_idx], ports[pool_idx]);
             g_st.connected = 0;
             status_write();
+            if (n_pools > 1) {
+                pool_idx = (pool_idx + 1) % n_pools;
+                stratum_init(&st, hosts[pool_idx], ports[pool_idx], worker, pass);
+                g_st.epoch_interval = st.odo_interval;
+                snprintf(g_st.pool, sizeof(g_st.pool), "%s:%s",
+                         hosts[pool_idx], ports[pool_idx]);
+                printf("[pipe] switching to pool %s:%s\n",
+                       hosts[pool_idx], ports[pool_idx]);
+            }
             sleep_ms(5000);
             continue;
         }
-        printf("[pipe] connected to %s:%s\n", host, port);
+        printf("[pipe] connected to %s:%s\n", hosts[pool_idx], ports[pool_idx]);
         have_cur = 0;
         g_st.connected = 1;
         status_write();
