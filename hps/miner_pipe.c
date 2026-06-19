@@ -33,6 +33,7 @@
 #include <inttypes.h>
 #include <signal.h>
 #include <time.h>
+#include <math.h>
 
 static volatile sig_atomic_t g_term = 0;
 static void on_sig(int s) { (void)s; g_term = 1; }
@@ -84,23 +85,22 @@ static struct {
     uint64_t shares;
     time_t   last_share;
     time_t   started;
-    double   hashrate;        /* H/s, estimated from the free-running nonce */
+    double   work_acc;        /* cumulative expected hashes from accepted shares */
+    double   hashrate;        /* H/s = work_acc / uptime (pool-style estimate)   */
 } g_st;
 
-/* Hashrate from the free-running nonce counter: between found events the
- * nonce advances by the number of nonces swept. EMA-smoothed. */
-static void hashrate_sample(uint32_t nonce)
+/* Expected number of hashes represented by one share at this target:
+ * P(hash <= target) = target / 2^256, so each accepted share is ~2^256/target
+ * hashes of work. The free-running core has no hardware hash counter, so this
+ * statistical estimate (summed over accepted shares / uptime) is the only sound
+ * hashrate measure — the found nonces themselves are random, not a sweep count.
+ * target is little-endian (byte[31] = MSB). */
+static double share_work(const uint8_t target[32])
 {
-    static uint32_t prev_nonce;
-    static time_t   prev_time;
-    static int      have_prev;
-    time_t now = time(NULL);
-    if (have_prev && now > prev_time) {
-        uint32_t dn = nonce - prev_nonce;             /* wraps mod 2^32 */
-        double inst = (double)dn / (double)(now - prev_time);
-        g_st.hashrate = g_st.hashrate ? (0.7 * g_st.hashrate + 0.3 * inst) : inst;
-    }
-    prev_nonce = nonce; prev_time = now; have_prev = 1;
+    double tv = 0.0;
+    for (int i = 31; i >= 0; i--) tv = tv * 256.0 + (double)target[i];
+    if (tv <= 0.0) return 0.0;
+    return ldexp(1.0, 256) / tv;          /* 2^256 / target */
 }
 
 static void status_write(void)
@@ -112,6 +112,8 @@ static void status_write(void)
     FILE *f = fopen(tmp, "w");
     if (!f) return;
     time_t now = time(NULL);
+    long up = (long)(now - g_st.started);
+    g_st.hashrate = (up > 0) ? g_st.work_acc / (double)up : 0.0;
     long enext = (g_st.epoch && g_st.epoch_interval)
                ? (long)g_st.epoch + (long)g_st.epoch_interval : 0L;
     fprintf(f,
@@ -231,7 +233,6 @@ int main(int argc, char **argv)
             while (miner_io_pipe_poll(&nonce) == 0) {
                 found++;
                 g_st.found = found;
-                hashrate_sample(nonce);
                 uint8_t h[32];
                 compute_pow(cur.header, nonce, h);
                 if (target_met(h, cur.share_target)) {
@@ -239,6 +240,7 @@ int main(int argc, char **argv)
                         shares++;
                         g_st.shares     = shares;
                         g_st.last_share = time(NULL);
+                        g_st.work_acc  += share_work(cur.share_target);
                         printf("[pipe] SHARE job=%s nonce=0x%08" PRIx32
                                " (found=%" PRIu64 " shares=%" PRIu64 ")\n",
                                cur.job_id, nonce, found, shares);
