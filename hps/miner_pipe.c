@@ -103,6 +103,17 @@ static double share_work(const uint8_t target[32])
     return ldexp(1.0, 256) / tv;          /* 2^256 / target */
 }
 
+/* Monotonic seconds — immune to the wall-clock step when the board's clock
+ * syncs after boot (using time(NULL) for elapsed gave uptime ~= now and
+ * hashrate ~= 0 because g_st.started was captured at ~unix 0). */
+static double g_mono_start;
+static double mono_s(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
 static void status_write(void)
 {
     const char *path = getenv("ODOD_STATUS_FILE");
@@ -112,8 +123,8 @@ static void status_write(void)
     FILE *f = fopen(tmp, "w");
     if (!f) return;
     time_t now = time(NULL);
-    long up = (long)(now - g_st.started);
-    g_st.hashrate = (up > 0) ? g_st.work_acc / (double)up : 0.0;
+    double up = mono_s() - g_mono_start;          /* elapsed, clock-step safe */
+    g_st.hashrate = (up > 0.0) ? g_st.work_acc / up : 0.0;
     long enext = (g_st.epoch && g_st.epoch_interval)
                ? (long)g_st.epoch + (long)g_st.epoch_interval : 0L;
     fprintf(f,
@@ -138,7 +149,7 @@ static void status_write(void)
         g_st.pool, g_st.connected ? "true" : "false", g_st.job_id,
         g_st.epoch, g_st.epoch_interval, enext, g_st.hashrate,
         g_st.found, g_st.shares, (long)g_st.last_share,
-        (long)(now - g_st.started), (long)now);
+        (long)up, (long)now);
     fclose(f);
     rename(tmp, path);
 }
@@ -172,6 +183,7 @@ int main(int argc, char **argv)
     g_st.epoch          = seed;
     g_st.epoch_interval = 86400;          /* testnet OdoCrypt epoch length */
     g_st.started        = time(NULL);
+    g_mono_start        = mono_s();       /* clock-step-safe uptime baseline */
     status_write();
 
     stratum_ctx_t st;
