@@ -52,7 +52,12 @@ STATS_FILE = os.environ.get(
     "ODO_STATS_FILE", os.path.join(tempfile.gettempdir(), "odo_testbed_stats.json"))
 _stats = {"shares": 0, "blocks": 0, "hashrate": [], "recent": [], "job": {}}
 _stats_lock = _th.Lock()
-_last_share_t = [time.time()]
+# Accepted-share timestamps within the trailing window, for a burst-robust
+# hashrate estimate. The miner drains its found-FIFO in batches, so per-share
+# inter-arrival is near-zero inside a burst; dividing work by a fixed window
+# instead of the gap avoids ~10x over-reads.
+_share_times = []
+HASHRATE_WINDOW = 5.0   # seconds
 
 # Share difficulty — decouples share acceptance from network difficulty so the
 # miner gets regular result:true feedback even on testnet/mainnet.
@@ -104,11 +109,14 @@ def record_share(result):
         now = time.time()
         if result != "rejected":
             _stats["shares"] += 1
-            elapsed = now - _last_share_t[0]
-            _last_share_t[0] = now
-            if elapsed > 0:
-                _stats["hashrate"].append(round(SHARE_DIFF * (2 ** 32) / elapsed))
-                _stats["hashrate"] = _stats["hashrate"][-60:]
+            _share_times.append(now)
+            cutoff = now - HASHRATE_WINDOW
+            while _share_times and _share_times[0] < cutoff:
+                _share_times.pop(0)
+            # work over a fixed window: count_in_window * hashes_per_share / window
+            rate = len(_share_times) * SHARE_DIFF * (2 ** 32) / HASHRATE_WINDOW
+            _stats["hashrate"].append(round(rate))
+            _stats["hashrate"] = _stats["hashrate"][-60:]
         if result == "block":
             _stats["blocks"] += 1
         diff_label = "net" if result == "block" else "share" if result == "share" else "rej"
