@@ -1,0 +1,8 @@
+# Build artifacts staged for SD deployment — do not commit (large / generated).
+*.rbf
+*.log
+odo-miner-pipe
+smoke_pipe
+_rootfs.sh
+# Keep the deploy scripts (reusable for per-epoch deploys).
+!*.ps1
