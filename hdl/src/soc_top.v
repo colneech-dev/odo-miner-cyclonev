@@ -142,13 +142,16 @@ module soc_top (
     defparam u_pll_fab.port_locked             = "PORT_USED";
     defparam u_pll_fab.width_clock             = 6;
 
-    // ---- PLL: 50 MHz → 137.5 MHz pipelined-miner clock --------------------
-    // Dedicated PLL for the pipelined OdoCrypt core (THROUGHPUT=8 → ~17.2 MH/s
-    // raw; ~16.5 MH/s effective once the daemon drains the found-FIFO fast
-    // enough — see miner_pipe.c 5ms poll). Separate from u_pll_fab so the
-    // 137.5 MHz and 55 MHz domains don't share a VCO solution. Exported into
-    // soc_system as miner_clk_clk; the wrapper's CDC bridges 55<->137.5 MHz.
-    // 100 MHz and 125 MHz both soaked stable on hardware (no brownout).
+    // ---- PLL: 50 MHz → 150 MHz pipelined-miner clock -----------------------
+    // Dedicated PLL for the pipelined OdoCrypt core (THROUGHPUT=8 → ~18.75 MH/s
+    // raw). Separate from u_pll_fab so the 150 MHz and 55 MHz domains don't
+    // share a VCO solution. Exported into soc_system as miner_clk_clk; the
+    // wrapper's CDC bridges 55<->150 MHz.
+    // NOTE: an EARLIER 150 MHz brownout was at THROUGHPUT=4 (~2x this design's
+    // active logic) — a different power regime. T=8 has now soaked stable on
+    // hardware at 100/125/137.5 MHz with margin to spare (Fmax 158.58 MHz @
+    // Slow/100C at the 137.5 build); 150 MHz is the next data point, not a
+    // repeat of the old failure.
     // POWER NOTE: the brownouts were all at THROUGHPUT=4 (150 and 125 MHz) —
     // T=4 unrolls ~2x the pipeline logic, so those drew ~2.5-3x the T=8 @ 100
     // dynamic power and browned the core rail. KEEPING T=8 (35% ALM) and only
@@ -170,8 +173,8 @@ module soc_top (
     defparam u_pll_miner.operation_mode         = "NORMAL";
     defparam u_pll_miner.compensate_clock       = "CLK0";
     defparam u_pll_miner.inclk0_input_frequency  = 20000;  // 50 MHz = 20 000 ps
-    defparam u_pll_miner.clk0_multiply_by        = 11;     // 50 × 11/4 = 137.5 MHz
-    defparam u_pll_miner.clk0_divide_by          = 4;
+    defparam u_pll_miner.clk0_multiply_by        = 3;      // 50 × 3 = 150 MHz
+    defparam u_pll_miner.clk0_divide_by          = 1;
     defparam u_pll_miner.clk0_duty_cycle         = 50;
     defparam u_pll_miner.clk0_phase_shift        = "0";
     defparam u_pll_miner.port_inclk1             = "PORT_UNUSED";
