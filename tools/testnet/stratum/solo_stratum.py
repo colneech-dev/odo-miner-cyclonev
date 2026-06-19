@@ -58,13 +58,17 @@ _last_share_t = [time.time()]
 # miner gets regular result:true feedback even on testnet/mainnet.
 # Convention matches hps/job.c: diff-1 = 0xFFFF * 2^208 expected hashes.
 # _SHARE_DIFF_INV is the reciprocal (integer); change it to tune share rate.
-# Expected hashes/share = SHARE_DIFF * 2^32 = (1/_SHARE_DIFF_INV) * 2^32, so a
-# LARGER _SHARE_DIFF_INV = easier share = higher share rate. Tune it to ~1 share
-# every several seconds for the miner's hashrate; too-easy floods the bridge with
-# submits that go stale during post-block job churn and show up as "rejected".
-#   ~52 KH/s dual-core FSM : 10_000 → ~8 s/share
-#   ~12.5 MH/s pipelined   : 40     → ~8 s/share   (240x faster -> /240)
-_SHARE_DIFF_INV = 40
+# A LARGER value = easier share = higher share rate. It must stay comfortably
+# ABOVE 1/network_diff so accepted work shows as "share" (easier than the block
+# target) instead of collapsing into "block". On this low-difficulty testnet a
+# fast miner finds shares quickly; the bridge keeps a deep recent-job history
+# (RECENT_JOBS_MAX) so late submits validate instead of being rejected as
+# unknown-job, which is what actually caused the dashboard rejections.
+_SHARE_DIFF_INV = 10_000
+# How many recent jobs to keep for stale-share validation. A 12.5 MH/s miner
+# submits many shares between job updates; with frequent blocks (each spawns a
+# new job) a 2-deep window dropped valid late shares as "unknown-job".
+RECENT_JOBS_MAX = 64
 SHARE_DIFF   = 1.0 / _SHARE_DIFF_INV   # float sent in mining.set_difficulty
 DIFF1_TARGET = 0xFFFF << 208            # diff-1 reference target (256-bit int)
 SHARE_TARGET = DIFF1_TARGET * _SHARE_DIFF_INV  # exact integer; share_target = diff1 / SHARE_DIFF
@@ -146,7 +150,15 @@ def notify(conn, job):
 def handle(conn, addr):
     print(f"[+] miner {addr}")
     job = None
-    prev_job = None   # previous job kept for stale-share validation
+    recent_jobs = {}  # job_id -> job, last RECENT_JOBS_MAX for stale validation
+
+    def register(j):
+        """Make j the current job and remember it for late-share validation."""
+        recent_jobs[j["id"]] = j
+        while len(recent_jobs) > RECENT_JOBS_MAX:
+            recent_jobs.pop(next(iter(recent_jobs)))   # drop oldest (insertion order)
+        return j
+
     buf = b""
     try:
         while True:
@@ -169,7 +181,7 @@ def handle(conn, addr):
                     send(conn, {"id": mid, "result": True, "error": None})
                     send(conn, {"id": None, "method": "mining.set_difficulty",
                                 "params": [SHARE_DIFF]})
-                    job = make_job()
+                    job = register(make_job())
                     record_job(job)
                     notify(conn, job)
                     print(f"[*] job {job['id']} odokey={job['odokey']} "
@@ -185,18 +197,16 @@ def handle(conn, addr):
                     # notify hasn't been processed yet (classic stale-share
                     # race).  Validate against the matching job instead of
                     # rejecting as high-hash, which would be misleading.
-                    if submitted_job_id == job["id"]:
-                        vjob = job
-                    elif prev_job and submitted_job_id == prev_job["id"]:
-                        vjob = prev_job
-                        print(f"[*] stale-but-valid job_id={submitted_job_id} "
-                              f"(prev job, validating against it)")
-                    else:
+                    vjob = recent_jobs.get(submitted_job_id)
+                    if vjob is None:
                         print(f"[*] unknown job_id={submitted_job_id}; rejecting")
                         record_share("rejected")
                         send(conn, {"id": mid, "result": False,
                                     "error": [21, "unknown-job", None]})
                         continue
+                    if vjob is not job:
+                        print(f"[*] stale-but-valid job_id={submitted_job_id} "
+                              f"(in recent history, validating against it)")
                     merkle = vjob["cb"]["txid"](en2)
                     header = serialize_header(vjob["tmpl"], merkle, nonce)
                     # Local OdoCrypt check: validates the share and avoids
@@ -235,8 +245,7 @@ def handle(conn, addr):
                         send(conn, {"id": mid, "result": False,
                                     "error": [25, "submitblock-rpc-failure", err_text]})
                         try:
-                            prev_job = job
-                            job = make_job()
+                            job = register(make_job())
                             record_job(job)
                             notify(conn, job)
                             print(f"[*] new job {job['id']} after RPC failure")
@@ -251,8 +260,7 @@ def handle(conn, addr):
                         send(conn, {"id": mid, "result": False,
                                     "error": [24, "submitblock-rejected", str(res)]})
                         try:
-                            prev_job = job
-                            job = make_job()
+                            job = register(make_job())
                             record_job(job)
                             notify(conn, job)
                             print(f"[*] new job {job['id']} after reject")
@@ -263,8 +271,7 @@ def handle(conn, addr):
                     record_share("block")
                     print(f"[*] share nonce={nonce} en2={en2.hex() or '-'} -> BLOCK ACCEPTED")
                     send(conn, {"id": mid, "result": True, "error": None})
-                    prev_job = job
-                    job = make_job()
+                    job = register(make_job())
                     record_job(job)
                     notify(conn, job)
                 else:
