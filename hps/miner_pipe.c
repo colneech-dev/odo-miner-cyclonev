@@ -212,7 +212,11 @@ int main(int argc, char **argv)
         status_write();
 
         while (!g_term) {
-            if (stratum_poll(&st, 50) < 0) {
+            /* Short timeout: the FPGA's found-latch is 1-deep, so the loop must
+             * drain it far faster than finds arrive (~36/s at 125 MHz/T=8). A
+             * 50 ms poll capped captures at ~20/s and dropped most finds (incl.
+             * potential block hits). 5 ms -> ~200/s drain, plenty of margin. */
+            if (stratum_poll(&st, 5) < 0) {
                 fprintf(stderr, "[pipe] poll error; reconnecting\n");
                 break;
             }
