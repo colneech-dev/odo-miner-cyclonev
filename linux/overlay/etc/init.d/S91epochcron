@@ -1,0 +1,38 @@
+#!/bin/sh
+# S91epochcron — install the root crontab entry for epoch-update.sh.
+# Runs after S90odod (the miner, which writes status.json) and assumes
+# S50crond is already started (lower-numbered init scripts run first).
+#
+# epoch-update.sh polls status.json's epoch_next; once the FPGA's baked
+# epoch is about to expire it swaps in a staged /boot/fpga_next.rbf and
+# reboots (see usr/sbin/epoch-update.sh and docs/pipelined-miner-scope.md
+# WS3 v1). The staged file is placed there by the build host ahead of time
+# (scripts/epoch_build_deploy.ps1) — this just applies it at the right moment.
+
+CRONTAB=/etc/cron/crontabs/root
+LINE="*/5 * * * * /usr/sbin/epoch-update.sh >>/var/log/epoch-update.log 2>&1"
+
+start() {
+    printf "Installing epoch-update crontab: "
+    mkdir -p /etc/cron/crontabs
+    touch "$CRONTAB"
+    if ! grep -qF "epoch-update.sh" "$CRONTAB" 2>/dev/null; then
+        echo "$LINE" >> "$CRONTAB"
+    fi
+    chmod 0600 "$CRONTAB"
+    # crond re-reads crontabs automatically; nudge it if running.
+    pid=$(pidof crond)
+    [ -n "$pid" ] && kill -HUP "$pid" 2>/dev/null
+    echo "OK"
+}
+
+stop() {
+    : # leave the crontab in place; nothing to undo
+}
+
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
