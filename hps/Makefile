@@ -12,11 +12,6 @@ UPSTREAM_CRYPTO = ../upstream/odo-miner/src/crypto
 # Targets
 # -----------------------------------------------------------------------
 
-# 1. odod — legacy miner daemon (miner_daemon.c)
-DAEMON_SRCS = miner_daemon.c stratum.c job.c odocrypt_header.c \
-              odocrypt_state.c miner_io.c
-DAEMON_OBJS = $(DAEMON_SRCS:.c=.o)
-
 # 2. odo-miner — new integrated miner (miner.c + epoch_watcher)
 # Add -DODO_VALIDATE_HASH and $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c to
 # CFLAGS/MINER_SRCS to enable per-nonce software cross-check (debug builds only).
@@ -54,15 +49,12 @@ TEST_UP_SRCS = test_odo_upstream.cpp $(UPSTREAM_CRYPTO)/odocrypt.cpp
 # Default target
 # -----------------------------------------------------------------------
 .PHONY: all
-all: odod odo-miner odo-miner-watcher $(SMOKE_TARGET)
+all: odo-miner odo-miner-watcher $(SMOKE_TARGET)
 
 # -----------------------------------------------------------------------
 # Binaries
 # -----------------------------------------------------------------------
-.PHONY: odod odo-miner odo-miner-watcher smoke_test miner_io_test smoke_pipe odo-miner-pipe
-
-odod: $(DAEMON_OBJS)
-	$(CC) $(LDFLAGS) -o $@ $^
+.PHONY: odo-miner odo-miner-watcher smoke_test miner_io_test smoke_pipe odo-miner-pipe
 
 odo-miner: $(MINER_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -132,8 +124,8 @@ check: test_odo test_odo_upstream
 # -----------------------------------------------------------------------
 .PHONY: clean
 clean:
-	rm -f $(DAEMON_OBJS) $(MINER_OBJS) $(WATCHER_OBJS) \
-	      odod odo-miner odo-miner-watcher \
+	rm -f $(MINER_OBJS) $(WATCHER_OBJS) \
+	      odo-miner odo-miner-watcher \
 	      $(SMOKE_TARGET) miner_io_test \
 	      test_odo test_odo_upstream \
 	      *.o /tmp/keccak800_ref.o
