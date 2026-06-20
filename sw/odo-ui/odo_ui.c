@@ -337,6 +337,8 @@ typedef struct {
     long long shares_found, shares_submitted;
     long   last_share, uptime, updated;
     double best_diff_session, best_diff_alltime;
+    long long blocks_found;
+    long   last_block;
 } status_t;
 
 static long json_long(const char *buf, const char *key, long def)
@@ -389,9 +391,38 @@ static int status_read(const char *path, status_t *s)
     s->last_share         = json_long(buf, "last_share", 0);
     s->best_diff_session  = json_double(buf, "best_diff_session", 0.0);
     s->best_diff_alltime  = json_double(buf, "best_diff_alltime", 0.0);
+    s->blocks_found        = json_long(buf, "blocks_found", 0);
+    s->last_block          = json_long(buf, "last_block", 0);
     s->uptime             = json_long(buf, "uptime", 0);
     s->updated            = json_long(buf, "updated", 0);
     return 0;
+}
+
+/* -----------------------------------------------------------------------
+ * Block-found banner: stays acknowledged across odo-ui restarts (a tap
+ * clears it on screen AND on disk). Defaults to the daemon's current
+ * blocks_found on first-ever run so an upgrade doesn't retroactively
+ * celebrate history -- only NEW finds from here on trigger the banner.
+ * ---------------------------------------------------------------------- */
+#define BLOCK_ACK_PATH "/var/lib/odod/ui_block_ack"
+
+static long long block_ack_load(long long fallback)
+{
+    FILE *f = fopen(BLOCK_ACK_PATH, "r");
+    if (!f) return fallback;
+    long long v = fallback;
+    if (fscanf(f, "%lld", &v) != 1) v = fallback;
+    fclose(f);
+    return v;
+}
+
+static void block_ack_save(long long v)
+{
+    FILE *f = fopen(BLOCK_ACK_PATH ".tmp", "w");
+    if (!f) return;
+    fprintf(f, "%lld\n", v);
+    fclose(f);
+    rename(BLOCK_ACK_PATH ".tmp", BLOCK_ACK_PATH);
 }
 
 /* ------------------------------------------------------------------ */
@@ -854,6 +885,72 @@ static void draw_detail(fb_t *fb, const status_t *st, time_t now,
     fb_text(fb, xLv, y, ds, 1, C_ACCENT);
     fb_text(fb, xR, y, "BEST-A", 1, C_DIM);
     fb_text(fb, xRv, y, da, 1, C_ACCENT);
+    y += 14;
+
+    fb_text(fb, xL, y, "BLOCKS", 1, C_DIM);
+    snprintf(val, sizeof(val), "%lld", st->blocks_found);
+    fb_text(fb, xLv, y, val, 1, st->blocks_found ? C_OK : C_TEXT);
+    if (st->blocks_found) {
+        fb_text(fb, xR, y, "LAST", 1, C_DIM);
+        fmt_age(st->last_block ? now - (time_t)st->last_block : -1L, age, sizeof(age));
+        fb_text(fb, xRv, y, age, 1, C_TEXT);
+    }
+}
+
+/* Full-screen celebratory takeover when a NEW block is found, replacing the
+ * normal dashboard until the user taps to dismiss (see block_ack_* and the
+ * main loop). A real find is rare and worth a hard-to-miss screen, not a
+ * small status-line entry that could be missed scrolling past. */
+static rect_t block_found_dismiss_rect(const fb_t *fb)
+{
+    rect_t r = { 6, fb->h - 42, fb->w - 12, 34 };
+    return r;
+}
+
+static void draw_block_found(fb_t *fb, const status_t *st, time_t now)
+{
+    fb_rect(fb, 0, 0, fb->w, fb->h, C_BG);
+    fb_rect(fb, 0, 0, fb->w, 4, C_ACCENT);
+    fb_logo(fb, fb->w / 2 - 16, 20, 2);
+    const char *title = "BLOCK FOUND!";
+    fb_text(fb, (fb->w - fb_text_w(2, title)) / 2, 64, title, 2, C_ACCENT);
+
+    char line[64];
+    snprintf(line, sizeof(line), "blocks found: %lld", st->blocks_found);
+    fb_text(fb, (fb->w - fb_text_w(1, line)) / 2, 104, line, 1, C_TEXT);
+
+    char age[24], aline[64];
+    fmt_age(st->last_block ? now - (time_t)st->last_block : -1L, age, sizeof(age));
+    snprintf(aline, sizeof(aline), "%s", age);
+    fb_text(fb, (fb->w - fb_text_w(1, aline)) / 2, 122, aline, 1, C_DIM);
+
+    rect_t r = block_found_dismiss_rect(fb);
+    fb_rect(fb, r.x, r.y, r.w, r.h, C_ACCENT);
+    fb_rect(fb, r.x + 1, r.y + 1, r.w - 2, r.h - 2, C_BG);
+    const char *d = "TAP TO CLEAR";
+    fb_text(fb, r.x + (r.w - fb_text_w(1, d)) / 2, r.y + 11, d, 1, C_ACCENT);
+}
+
+/* Blocks until the user taps the dismiss button (or g_stop fires). Boards
+ * with no touch hardware can't clear it manually, so just hold it on screen
+ * briefly rather than locking the dashboard out forever. */
+static void run_block_banner(fb_t *fb, touch_t *tp, int have_touch,
+                              const status_t *st, time_t now)
+{
+    draw_block_found(fb, st, now);
+    if (!have_touch) {
+        struct timespec ts = { 5, 0 };
+        nanosleep(&ts, NULL);
+        return;
+    }
+    rect_t r = block_found_dismiss_rect(fb);
+    while (!g_stop) {
+        int sx, sy;
+        if (touch_poll(tp, fb, &sx, &sy) && hit(&r, sx, sy))
+            return;
+        struct timespec ts = { 0, 100 * 1000000L };
+        nanosleep(&ts, NULL);
+    }
 }
 
 /* Centered splash: shield logo + ODO MINER + a status/loading message. */
@@ -911,6 +1008,7 @@ int main(int argc, char **argv)
     int rebooting = 0;
     time_t confirm_at = 0;
     int ui_screen = 0;          /* 0 = glance, 1 = detail */
+    long long block_ack = -1;   /* -1 = not yet seeded from the first status read */
 
     while (!g_stop) {
         time_t now = time(NULL);
@@ -925,6 +1023,15 @@ int main(int argc, char **argv)
         status_t st;
         memset(&st, 0, sizeof(st));
         status_read(status_path, &st);
+
+        if (block_ack < 0)
+            block_ack = block_ack_load(st.blocks_found);
+        if (st.blocks_found > block_ack) {
+            run_block_banner(&fb, &tp, have_touch, &st, now);
+            block_ack = st.blocks_found;
+            block_ack_save(block_ack);
+            continue;
+        }
 
         char wssid[40]; int wdbm = 0;
         wifi_status(wssid, sizeof wssid, &wdbm);
