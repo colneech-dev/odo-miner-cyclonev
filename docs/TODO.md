@@ -7,31 +7,39 @@ dual-SDRAM board (DE10-Nano-compatible ball-out, MiSTer-style).
 
 ---
 
-## Roadmap — next improvements (added 2026-06-19, branch `feat/pipelined-miner`)
+## Roadmap — next improvements (2026-06-19/20, branch `feat/pipelined-miner`)
 
-The pipelined miner is deployed and mining the testnet at ~12.5 MH/s
-(T=8 @ 100 MHz), shares accepted, dashboard healthy. Next, in priority order:
+**1–4 below are DONE.** Board mines the testnet autonomously at ~16.9 MH/s
+(150 MHz, THROUGHPUT=8), epoch transitions self-apply with zero manual
+intervention, deploys go over SSH.
 
-1. **Restore remote (SSH) access to the board** *(in progress)* — sshd isn't
-   running (port 22 times out), so every deploy is a physical SD-card cycle.
-   Added deterministic SSH setup to `linux/overlay`: `etc/init.d/S50sshd`
-   (host-key gen + strict perms + start sshd), `etc/ssh/sshd_config` (key-only
-   root login), `root/.ssh/authorized_keys` (key `tools/testnet/odo-miner`).
-   Deploy via `deploy-staging/deploy-usbip.ps1` (also lands the hashrate-fix
-   binary); it reports whether `/usr/sbin/sshd` exists — if not, the rootfs
-   predates openssh and needs a full Buildroot rebuild + reflash. Enabler for #2.
-2. **Epoch auto-renewal (autonomy)** — testnet epoch rolls every 86400 s; when
-   it does, shares reject until a new-epoch bitstream is on the board. Build the
-   Phase 2 flow: build PC (`192.168.1.100`) pre-builds the next-epoch `.rbf`
-   (`odo_gen <next_epoch> 8` + Quartus); the board fetches it, writes its own
-   FAT boot partition (`mount /dev/mmcblk0p1`), and reboots at the boundary
-   (runtime FPGA-mgr reconfig is blocked on this kernel). Depends on #1.
-3. **More hashrate (12.5 → up to ~37.5 MH/s)** — T=8/100 was chosen because
-   150 MHz/T=4 browned out the core rail. Probe T=4 at 75–100 MHz (18.75–25
-   MH/s) to bracket the power ceiling, or fix the on-board core regulator.
-4. **Backlog** — board `odo-webd` remote dashboard not running (:8080); pool
-   failover (`ODOD_POOL_HOST2/PORT2` into the reconnect loop); fan/thermal/reset
-   button (`docs/FAN_SENSOR_WIRING.md` tasks 3–6).
+1. ✅ **SSH access restored** — `etc/init.d/S50sshd` (host-key gen, strict
+   perms, start sshd), `etc/ssh/sshd_config` (key-only root login),
+   `root/.ssh/authorized_keys` (key `tools/testnet/odo-miner`). Root cause of
+   the original outage: openssh was already in the rootfs but no host keys
+   had ever been generated, so sshd silently exited at boot.
+2. ✅ **Epoch auto-renewal** — operator-side `scripts/epoch_build_deploy.ps1`
+   builds + stages `/boot/fpga_next.rbf`; board-side
+   `usr/sbin/epoch-update.sh` (cron */5 via `S91epochcron`) swaps it in and
+   reboots once `status.json`'s `epoch` (current job) diverges from
+   `bitstream_epoch` (what's baked) — the authoritative signal, not a
+   wall-clock guess (block time lags wall-clock on a sparse chain). Verified
+   live on a real boundary (1781827200→1781913600): zero manual steps beyond
+   pre-staging, pool confirmed shares accepted post-reboot.
+3. ✅ **More hashrate** — found the daemon's `stratum_poll` 50 ms timeout was
+   capping found-FIFO drains at ~20/s regardless of clock (the real
+   bottleneck, not the FPGA); dropped to 5 ms. Then walked the miner clock
+   100→125→137.5→150 MHz (all T=8, all soak-stable — the old 150 MHz brownout
+   was T=4, ~2x the logic, a different power regime). **150 MHz is the
+   practical T=8 ceiling** (Fmax 157.88 MHz, thin remaining margin): ~16.9
+   MH/s effective, ~2.2x the session start. Further gains need T=4
+   (~25–37 MH/s raw) — same power/regulator constraint as before, deferred.
+4. ✅ **Backlog** — web dashboard was already working (port 80, not 8080 —
+   earlier checks used the wrong port); pool failover ported from `miner.c`
+   (`ODOD_POOL_HOST2/PORT2`, already exported by `S90odod`) and verified live.
+   Fan/thermal/reset-button **deferred** — needs a kernel/DTB rebuild +
+   reflash and depends on whether the physical sensors are wired to this
+   board; out of scope for this session.
 
 ---
 
