@@ -36,7 +36,7 @@ PIPE_MINER_SRCS = miner_pipe.c miner_io_pipe.c stratum.c job.c odocrypt_header.c
                   odocrypt_state.c $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
 
 # 5. miner_io_test — hardware bring-up test for miner_io layer
-MINER_IO_TEST_SRCS = minor_io_test.c miner_io.c odocrypt_state.c
+MINER_IO_TEST_SRCS = miner_io_test.c miner_io.c odocrypt_state.c
 
 # 6. Algorithm self-test (C implementation vs upstream C++)
 TEST_C_SRCS  = test_odo.c odocrypt_state.c miner_io.c \
