@@ -147,10 +147,29 @@ def send(conn, obj):
     conn.sendall((json.dumps(obj) + "\n").encode())
 
 
+def _word_swap_prevhash(rpc_display_hex):
+    """Classic Stratum V1 prevhash convention: reverse the whole 32 bytes
+    (RPC display -> internal order), THEN reverse the bytes within each
+    4-byte word while keeping word order (the "word-swap" stratum quirk).
+    This bridge used to send the raw RPC-display hash verbatim with neither
+    transform, which only "worked" because the (now-fixed) C client did a
+    plain full reversal that happened to cancel it out for OUR closed loop --
+    self-consistent with our own bridge but incompatible with real pool
+    software (verified against a live Miningcore pool 2026-06-20, by
+    comparing a captured mining.notify prevhash against the real chain's
+    getbestblockhash). Matching the real convention here keeps this bridge a
+    faithful stratum implementation, not just internally consistent with our
+    own client."""
+    b = bytes.fromhex(rpc_display_hex)[::-1]              # RPC display -> internal order
+    words = [b[i:i + 4][::-1] for i in range(0, len(b), 4)]  # then word-swap
+    return b"".join(words).hex()
+
+
 def notify(conn, job):
     t = job["tmpl"]
+    prevhash = _word_swap_prevhash(t["previousblockhash"])
     send(conn, {"id": None, "method": "mining.notify", "params": [
-        job["id"], t["previousblockhash"], job["cb"]["coinb1"],
+        job["id"], prevhash, job["cb"]["coinb1"],
         job["cb"]["coinb2"], [], format(t["version"], "08x"),
         format(int(t["bits"], 16), "08x"), format(t["curtime"], "08x"), True]})
 

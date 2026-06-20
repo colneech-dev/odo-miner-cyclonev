@@ -342,14 +342,22 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
             job.extranonce2[i] = (uint8_t)(en2 >> (8 * i));
     }
 
-    /* prevhash: pool sends big-endian, reverse to LE for header construction */
+    /* prevhash: classic Stratum V1 convention sends it word-swapped -- the
+     * 32 bytes as eight 4-byte words in REVERSE WORD ORDER, but with each
+     * word's own bytes UNCHANGED (NOT a full 32-byte mirror reversal, which
+     * is what this used to do). Verified against a live pool 2026-06-20:
+     * comparing a captured mining.notify prevhash against the real chain's
+     * getbestblockhash, the per-word-swap-undo recovers the correct internal
+     * hash bytes; a full reversal does not. Reversing the bytes within each
+     * 4-byte word (leaving word order as received) is self-inverse, so this
+     * one loop both "receives" and "produces" the same convention. */
     if (hex_to_bytes(prevhash_hex, job.prevhash, sizeof(job.prevhash))
             != sizeof(job.prevhash))
         return -1;
-    for (size_t i = 0; i < sizeof(job.prevhash) / 2; ++i) {
-        uint8_t tmp = job.prevhash[i];
-        job.prevhash[i] = job.prevhash[31 - i];
-        job.prevhash[31 - i] = tmp;
+    for (size_t w = 0; w < sizeof(job.prevhash); w += 4) {
+        uint8_t tmp;
+        tmp = job.prevhash[w];   job.prevhash[w]   = job.prevhash[w + 3]; job.prevhash[w + 3] = tmp;
+        tmp = job.prevhash[w+1]; job.prevhash[w+1] = job.prevhash[w + 2]; job.prevhash[w + 2] = tmp;
     }
 
     /* Build coinbase: coinb1 + extranonce1 + extranonce2 + coinb2 */
