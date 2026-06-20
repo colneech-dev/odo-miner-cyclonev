@@ -91,7 +91,54 @@ static struct {
     time_t   started;
     double   work_acc;        /* cumulative expected hashes from accepted shares */
     double   hashrate;        /* H/s = work_acc / uptime (pool-style estimate)   */
+    double   best_diff_session; /* highest difficulty share this run */
+    double   best_diff_alltime; /* highest difficulty share ever (persisted) */
 } g_st;
+
+/* -----------------------------------------------------------------------
+ * best_diff_alltime persistence — separate file from the FSM daemon's
+ * /var/lib/odod/stats (different share-counting semantics; only the
+ * all-time-best record would make sense to share, not worth the format
+ * coordination between two independently-evolving daemons).
+ * ---------------------------------------------------------------------- */
+#define PIPE_STATS_PATH "/var/lib/odod/stats_pipe"
+
+static void stats_load(void)
+{
+    FILE *f = fopen(PIPE_STATS_PATH, "r");
+    if (!f) return;
+    double best = 0.0;
+    if (fscanf(f, "%lf", &best) == 1)
+        g_st.best_diff_alltime = best;
+    fclose(f);
+}
+
+static void stats_save(void)
+{
+    FILE *f = fopen(PIPE_STATS_PATH ".tmp", "w");
+    if (!f) return;
+    fprintf(f, "%.6g\n", g_st.best_diff_alltime);
+    fclose(f);
+    rename(PIPE_STATS_PATH ".tmp", PIPE_STATS_PATH);
+}
+
+/* Difficulty of a 32-byte LE hash relative to the OdoCrypt diff-1 target
+ * (0xFFFF << 208). Uses the top bytes for a good double approximation.
+ * Mirrors miner.c's hash_to_difficulty exactly (same diff-1 convention). */
+static double hash_to_difficulty(const uint8_t hash_le[32])
+{
+    double h = 0.0;
+    int i;
+    for (i = 31; i >= 24; i--)
+        h = h * 256.0 + (double)hash_le[i];
+    if (h < 1.0) {
+        for (i = 23; i >= 16; i--)
+            h = h * 256.0 + (double)hash_le[i];
+        if (h < 1.0) return 1e15;
+        return (double)0xFFFF0000U / h * 18446744073709551616.0;
+    }
+    return (double)0xFFFF0000U / h;
+}
 
 /* Expected number of hashes represented by one share at this target:
  * P(hash <= target) = target / 2^256, so each accepted share is ~2^256/target
@@ -146,14 +193,15 @@ static void status_write(void)
         "  \"shares_found\": %" PRIu64 ",\n"
         "  \"shares_submitted\": %" PRIu64 ",\n"
         "  \"last_share\": %ld,\n"
-        "  \"best_diff_session\": 0,\n"
-        "  \"best_diff_alltime\": 0,\n"
+        "  \"best_diff_session\": %.6g,\n"
+        "  \"best_diff_alltime\": %.6g,\n"
         "  \"uptime\": %ld,\n"
         "  \"updated\": %ld\n"
         "}\n",
         g_st.pool, g_st.connected ? "true" : "false", g_st.job_id,
         g_st.epoch, g_st.bitstream_epoch, g_st.epoch_interval, enext, g_st.hashrate,
         g_st.found, g_st.shares, (long)g_st.last_share,
+        g_st.best_diff_session, g_st.best_diff_alltime,
         (long)up, (long)now);
     fclose(f);
     rename(tmp, path);
@@ -197,6 +245,7 @@ int main(int argc, char **argv)
     g_st.bitstream_epoch = seed;   /* fixed: what's actually baked into the FPGA */
     g_st.started = time(NULL);
     g_mono_start = mono_s();       /* clock-step-safe uptime baseline */
+    stats_load();                  /* best_diff_alltime, survives reboots */
     status_write();
 
     stratum_ctx_t st;
@@ -281,9 +330,16 @@ int main(int argc, char **argv)
                         g_st.shares     = shares;
                         g_st.last_share = time(NULL);
                         g_st.work_acc  += share_work(cur.share_target);
+                        double d = hash_to_difficulty(h);
+                        if (d > g_st.best_diff_session)
+                            g_st.best_diff_session = d;
+                        if (d > g_st.best_diff_alltime) {
+                            g_st.best_diff_alltime = d;
+                            stats_save();
+                        }
                         printf("[pipe] SHARE job=%s nonce=0x%08" PRIx32
-                               " (found=%" PRIu64 " shares=%" PRIu64 ")\n",
-                               cur.job_id, nonce, found, shares);
+                               " diff=%.6g (found=%" PRIu64 " shares=%" PRIu64 ")\n",
+                               cur.job_id, nonce, d, found, shares);
                     } else {
                         fprintf(stderr, "[pipe] stratum_submit_share failed\n");
                     }
