@@ -28,6 +28,9 @@ hdl/qsys/*.bsp
 
 # Logs
 logs/
+
+# epoch_autorenew.ps1 runtime state (markers + log, regenerated each run)
+scripts/.epoch_autorenew/
 *.log
 
 # Editor / OS
