@@ -79,7 +79,11 @@ static struct {
     char     pool[80];
     int      connected;
     char     job_id[JOB_MAX_JOBID_LEN];
-    uint32_t epoch;
+    uint32_t epoch;             /* CURRENT JOB's epoch (overwritten per job)  */
+    uint32_t bitstream_epoch;   /* FPGA's baked-in epoch (fixed at startup) -
+                                  * the authoritative epoch-renewal trigger is
+                                  * epoch != bitstream_epoch, not a wall-clock
+                                  * guess (see epoch-update.sh) */
     uint32_t epoch_interval;
     uint64_t found;
     uint64_t shares;
@@ -134,6 +138,7 @@ static void status_write(void)
         "  \"core\": \"pipelined\",\n"
         "  \"job_id\": \"%s\",\n"
         "  \"epoch\": %" PRIu32 ",\n"
+        "  \"bitstream_epoch\": %" PRIu32 ",\n"
         "  \"epoch_interval\": %" PRIu32 ",\n"
         "  \"epoch_next\": %ld,\n"
         "  \"hashrate\": %.1f,\n"
@@ -147,7 +152,7 @@ static void status_write(void)
         "  \"updated\": %ld\n"
         "}\n",
         g_st.pool, g_st.connected ? "true" : "false", g_st.job_id,
-        g_st.epoch, g_st.epoch_interval, enext, g_st.hashrate,
+        g_st.epoch, g_st.bitstream_epoch, g_st.epoch_interval, enext, g_st.hashrate,
         g_st.found, g_st.shares, (long)g_st.last_share,
         (long)up, (long)now);
     fclose(f);
@@ -188,7 +193,8 @@ int main(int argc, char **argv)
 
     /* Seed the status struct: pool string, epoch params, start time. */
     snprintf(g_st.pool, sizeof(g_st.pool), "%s:%s", host, port);
-    g_st.epoch   = seed;
+    g_st.epoch           = seed;   /* overwritten per job below */
+    g_st.bitstream_epoch = seed;   /* fixed: what's actually baked into the FPGA */
     g_st.started = time(NULL);
     g_mono_start = mono_s();       /* clock-step-safe uptime baseline */
     status_write();
