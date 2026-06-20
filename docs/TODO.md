@@ -164,11 +164,14 @@ cores). Bitstream: 3.3 MB, deployed to board 2026-06-14. ✅
 - ~~ads7846 touch calibration~~ — **DONE (2026-06-11)**: `swap_xy=1, inv_y=1`
   confirmed on hardware (rotate=270 panel). T_IRQ does not reach GIC; polling
   mode required. See `docs/DISPLAY_WIRING.md` bring-up checklist §5.
-- `hps/miner_daemon.c` (odod) is the legacy daemon loop; `odo-miner`
-  (miner.c) is canonical. Either port fixes or retire miner_daemon.c.
+- ~~`hps/miner_daemon.c` (odod) is the legacy daemon loop~~ — **DONE
+  (2026-06-20)**: retired, never launched by any init script and missing
+  every consensus fix accumulated in `miner.c` since (prevhash byte-swap,
+  stale-job guard, CLOCK_MONOTONIC). Makefile's `odod` target removed.
 - stratum.c JSON parsing is hand-rolled (fine for pool basics; fragile for
-  exotic pools). Pool failover (`ODOD_POOL_HOST2/PORT2` in S90odod) not yet
-  wired into miner.c reconnect loop.
+  exotic pools). Pool failover (`ODOD_POOL_HOST2/PORT2` in S90odod) is wired
+  into both `miner.c` and `miner_pipe.c`'s reconnect loops (verified
+  2026-06-20 — already symmetric, this note was stale).
 - Fan/thermal/reset button software (DS18B20 tach RPM, `thermal_fan_state()`,
   GPIO 464 reset poll) pending — see `docs/FAN_SENSOR_WIRING.md` tasks 3–6.
 - `claude/18b20-fan-gpio-setup-r4bm1f` branch ready to merge after fixing
