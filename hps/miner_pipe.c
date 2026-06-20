@@ -93,12 +93,16 @@ static struct {
     double   hashrate;        /* H/s = work_acc / uptime (pool-style estimate)   */
     double   best_diff_session; /* highest difficulty share this run */
     double   best_diff_alltime; /* highest difficulty share ever (persisted) */
+    uint64_t blocks_found;      /* shares that ALSO met the network target,
+                                  * ever (persisted) — a genuine found block,
+                                  * not just a pool share */
+    time_t   last_block;        /* unix time of the most recent block (0 = none yet) */
 } g_st;
 
 /* -----------------------------------------------------------------------
- * best_diff_alltime persistence — separate file from the FSM daemon's
- * /var/lib/odod/stats (different share-counting semantics; only the
- * all-time-best record would make sense to share, not worth the format
+ * best_diff_alltime / blocks_found persistence — separate file from the FSM
+ * daemon's /var/lib/odod/stats (different share-counting semantics; only
+ * the all-time records would make sense to share, not worth the format
  * coordination between two independently-evolving daemons).
  * ---------------------------------------------------------------------- */
 #define PIPE_STATS_PATH "/var/lib/odod/stats_pipe"
@@ -108,8 +112,12 @@ static void stats_load(void)
     FILE *f = fopen(PIPE_STATS_PATH, "r");
     if (!f) return;
     double best = 0.0;
-    if (fscanf(f, "%lf", &best) == 1)
+    unsigned long long blocks = 0;
+    int n = fscanf(f, "%lf %llu", &best, &blocks);
+    if (n >= 1)
         g_st.best_diff_alltime = best;
+    if (n >= 2)
+        g_st.blocks_found = blocks;
     fclose(f);
 }
 
@@ -117,7 +125,7 @@ static void stats_save(void)
 {
     FILE *f = fopen(PIPE_STATS_PATH ".tmp", "w");
     if (!f) return;
-    fprintf(f, "%.6g\n", g_st.best_diff_alltime);
+    fprintf(f, "%.6g %" PRIu64 "\n", g_st.best_diff_alltime, g_st.blocks_found);
     fclose(f);
     rename(PIPE_STATS_PATH ".tmp", PIPE_STATS_PATH);
 }
@@ -195,6 +203,8 @@ static void status_write(void)
         "  \"last_share\": %ld,\n"
         "  \"best_diff_session\": %.6g,\n"
         "  \"best_diff_alltime\": %.6g,\n"
+        "  \"blocks_found\": %" PRIu64 ",\n"
+        "  \"last_block\": %ld,\n"
         "  \"uptime\": %ld,\n"
         "  \"updated\": %ld\n"
         "}\n",
@@ -202,6 +212,7 @@ static void status_write(void)
         g_st.epoch, g_st.bitstream_epoch, g_st.epoch_interval, enext, g_st.hashrate,
         g_st.found, g_st.shares, (long)g_st.last_share,
         g_st.best_diff_session, g_st.best_diff_alltime,
+        g_st.blocks_found, (long)g_st.last_block,
         (long)up, (long)now);
     fclose(f);
     rename(tmp, path);
@@ -333,10 +344,19 @@ int main(int argc, char **argv)
                         double d = hash_to_difficulty(h);
                         if (d > g_st.best_diff_session)
                             g_st.best_diff_session = d;
-                        if (d > g_st.best_diff_alltime) {
+                        int new_best = (d > g_st.best_diff_alltime);
+                        if (new_best)
                             g_st.best_diff_alltime = d;
-                            stats_save();
+                        int is_block = target_met(h, cur.target);
+                        if (is_block) {
+                            g_st.blocks_found++;
+                            g_st.last_block = time(NULL);
+                            printf("[pipe] *** BLOCK FOUND *** job=%s nonce=0x%08"
+                                   PRIx32 " diff=%.6g (blocks_found=%" PRIu64 ")\n",
+                                   cur.job_id, nonce, d, g_st.blocks_found);
                         }
+                        if (new_best || is_block)
+                            stats_save();
                         printf("[pipe] SHARE job=%s nonce=0x%08" PRIx32
                                " diff=%.6g (found=%" PRIu64 " shares=%" PRIu64 ")\n",
                                cur.job_id, nonce, d, found, shares);

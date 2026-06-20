@@ -183,6 +183,9 @@ static struct {
     char     job_id[64];
     double   best_diff_session; /* highest difficulty share this session */
     double   best_diff_alltime; /* highest difficulty share ever (persisted) */
+    uint64_t blocks_found;      /* shares that ALSO met the network target,
+                                  * ever (persisted) — a genuine found block */
+    time_t   last_block;        /* unix time of the most recent block (0 = none yet) */
 } g_stat;
 
 /* -----------------------------------------------------------------------
@@ -194,15 +197,17 @@ static void stats_load(void)
 {
     FILE *f = fopen(STATS_PATH, "r");
     if (!f) return;
-    unsigned long long found = 0, submitted = 0;
+    unsigned long long found = 0, submitted = 0, blocks = 0;
     double best = 0.0;
-    int n = fscanf(f, "%llu %llu %lf", &found, &submitted, &best);
+    int n = fscanf(f, "%llu %llu %lf %llu", &found, &submitted, &best, &blocks);
     if (n >= 2) {
         g_stat.shares_found     = found;
         g_stat.shares_submitted = submitted;
     }
     if (n >= 3)
         g_stat.best_diff_alltime = best;
+    if (n >= 4)
+        g_stat.blocks_found = blocks;
     fclose(f);
 }
 
@@ -210,10 +215,11 @@ static void stats_save(void)
 {
     FILE *f = fopen(STATS_PATH ".tmp", "w");
     if (!f) return;
-    fprintf(f, "%llu %llu %.6g\n",
+    fprintf(f, "%llu %llu %.6g %llu\n",
             (unsigned long long)g_stat.shares_found,
             (unsigned long long)g_stat.shares_submitted,
-            g_stat.best_diff_alltime);
+            g_stat.best_diff_alltime,
+            (unsigned long long)g_stat.blocks_found);
     fclose(f);
     rename(STATS_PATH ".tmp", STATS_PATH);
 }
@@ -287,6 +293,8 @@ static void status_write(void)
         "  \"last_share\": %ld,\n"
         "  \"best_diff_session\": %.6g,\n"
         "  \"best_diff_alltime\": %.6g,\n"
+        "  \"blocks_found\": %" PRIu64 ",\n"
+        "  \"last_block\": %ld,\n"
         "  \"uptime\": %ld,\n"
         "  \"updated\": %ld\n"
         "}\n",
@@ -304,6 +312,8 @@ static void status_write(void)
         (long)g_stat.last_share,
         g_stat.best_diff_session,
         g_stat.best_diff_alltime,
+        g_stat.blocks_found,
+        (long)g_stat.last_block,
         (long)(now - g_stat.started),
         (long)now);
     fclose(f);
@@ -552,8 +562,12 @@ int main(int argc, char **argv)
                         if (d > g_stat.best_diff_alltime)
                             g_stat.best_diff_alltime = d;
                     }
-                    if (target_met(found_hash, job.target))
-                        log_info("*** BLOCK CANDIDATE (meets network target) ***");
+                    if (target_met(found_hash, job.target)) {
+                        g_stat.blocks_found++;
+                        g_stat.last_block = time(NULL);
+                        log_info("*** BLOCK FOUND (meets network target) *** "
+                                 "blocks_found=%" PRIu64, g_stat.blocks_found);
+                    }
                     stats_save();
                     if (target_met(found_hash, job.share_target)) {
                         if (stratum_submit_share(&st, &job, found_nonce) == 0) {
