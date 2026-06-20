@@ -36,7 +36,16 @@ param(
     [Parameter(Mandatory=$true)][long]$Epoch,
     [int]$Throughput = 8,
     [string]$BoardIp = "192.168.1.35",
-    [string]$SshKey = "tools/testnet/odo-miner"
+    [string]$SshKey = "tools/testnet/odo-miner",
+    # Filename to stage the built .rbf as on the board's FAT boot partition.
+    # Default "fpga_next.rbf" is the slot epoch-update.sh's cron job watches
+    # for the CURRENTLY CONFIGURED pool's auto-renewal -- only use the default
+    # when this epoch is the next one for whatever pool the board is presently
+    # mining. Building an epoch for a DIFFERENT pool (e.g. a one-off mainnet
+    # bitstream while the board mines testnet) must use a different name (e.g.
+    # "fpga_mainnet.rbf") so it doesn't get silently auto-applied on the next
+    # unrelated epoch rollover.
+    [string]$StageAs = "fpga_next.rbf"
 )
 
 $ErrorActionPreference = "Stop"
@@ -99,16 +108,39 @@ try {
     $rbfTime = (Get-Item "hdl/quartus/output_files/odo_miner.rbf").LastWriteTime
     Write-Host "      built: $rbfTime"
 
-    Write-Host "[6/6] staging on the board as /boot/fpga_next.rbf (NOT applied until epoch-update.sh swaps it at the boundary)"
+    Write-Host "[6/6] staging on the board as /boot/$StageAs"
     $rbf = "hdl/quartus/output_files/odo_miner.rbf"
     $md5 = (Get-FileHash $rbf -Algorithm MD5).Hash
-    wsl bash -c "scp -i $SshKey -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '$($rbf -replace '\\','/')' root@${BoardIp}:/tmp/fpga_next_staging.rbf"
-    wsl bash -c "ssh -i $SshKey -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$BoardIp 'mkdir -p /mnt/boot && mount -t vfat /dev/mmcblk0p1 /mnt/boot && mv /tmp/fpga_next_staging.rbf /mnt/boot/fpga_next.rbf && sync && md5sum /mnt/boot/fpga_next.rbf && umount /mnt/boot'"
+
+    # SSH refuses world/group-readable key files. The repo checkout is on a
+    # Windows filesystem (no real POSIX perms), so copy the key into WSL's own
+    # filesystem and chmod it there before use -- using $SshKey directly (as
+    # exposed through /mnt/c/...) fails with "bad permissions" / publickey
+    # denied, and a bare wsl bash -c pipeline does NOT surface that as a
+    # script-terminating error by default, so this used to silently print
+    # "DONE" while staging nothing. Check exit codes explicitly now too.
+    $wslKeyTmp = "/tmp/epoch_deploy_key"
+    wsl bash -c "cp '$($SshKey -replace '\\','/')' $wslKeyTmp && chmod 600 $wslKeyTmp"
+    if ($LASTEXITCODE -ne 0) { throw "failed to stage SSH key into WSL" }
+
+    wsl bash -c "scp -i $wslKeyTmp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '$($rbf -replace '\\','/')' root@${BoardIp}:/tmp/${StageAs}.staging"
+    if ($LASTEXITCODE -ne 0) { throw "scp to board failed (rc=$LASTEXITCODE)" }
+
+    $remoteMd5 = wsl bash -c "ssh -i $wslKeyTmp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$BoardIp 'mkdir -p /mnt/boot && mount -t vfat /dev/mmcblk0p1 /mnt/boot && mv /tmp/${StageAs}.staging /mnt/boot/$StageAs && sync && md5sum /mnt/boot/$StageAs && umount /mnt/boot'"
+    if ($LASTEXITCODE -ne 0) { throw "staging on board failed (rc=$LASTEXITCODE): $remoteMd5" }
+    if ($remoteMd5 -notmatch [regex]::Escape($md5.ToLower())) {
+        throw "staged file md5 mismatch: local=$md5 remote-report=$remoteMd5"
+    }
 
     Write-Host ""
-    Write-Host "DONE. Epoch $Epoch staged as fpga_next.rbf (md5 $md5)."
-    Write-Host "The board's epoch-update.sh cron job will swap it in and reboot automatically"
-    Write-Host "once the currently-running miner reports epoch_next within 60s."
+    Write-Host "DONE. Epoch $Epoch staged as /boot/$StageAs (md5 $md5, verified)."
+    if ($StageAs -eq "fpga_next.rbf") {
+        Write-Host "The board's epoch-update.sh cron job will swap it in and reboot automatically"
+        Write-Host "once the currently-running miner's job epoch diverges from its baked epoch."
+    } else {
+        Write-Host "Staged under a non-default name -- NOT in the auto-renewal path. Apply manually:"
+        Write-Host "  cp /boot/$StageAs /boot/fpga.rbf  (after backing up fpga.rbf) + reboot"
+    }
 }
 finally {
     Pop-Location
