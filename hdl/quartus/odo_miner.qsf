@@ -48,8 +48,8 @@ set_global_assignment -name AUTO_SHIFT_REGISTER_RECOGNITION OFF
 # The pipelined OdoCrypt core needs THROUGHPUT (hash rate fold) and ODOKEY
 # (the baked-in epoch seed) as Verilog macros. ODOKEY must match the
 # odo_<seed>.v listed in pipelined_miner_hw.tcl and the deployed epoch.
-set_global_assignment -name VERILOG_MACRO "THROUGHPUT=8"
-set_global_assignment -name VERILOG_MACRO "ODOKEY=1781913600"
+set_global_assignment -name VERILOG_MACRO "THROUGHPUT=7"
+set_global_assignment -name VERILOG_MACRO "ODOKEY=1781568000"
 
 # --- Pin assignments ----------------------------------------------------------
 # Extracted from QMTECH Cyclone V SoC KFB Schematic v01 (32-bit DDR3)
