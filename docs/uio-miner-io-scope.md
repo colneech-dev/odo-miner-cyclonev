@@ -105,14 +105,28 @@ polling *faster*.
 | **1 — Software hardening** | Non-root operation, even without the IRQ win | udev rule, non-root user, `S90odod` updated, confirm `/dev/mem`-free operation works end-to-end on the FSM daemon | 2-3 days |
 | **2 — Production target** (if §6 says yes) | Same benefit on `miner_pipe.c`, the daemon actually running | `pipelined_miner_top.v` IRQ output, `miner_io_pipe_uio.c`, full soak test, deploy | 1 week |
 
-## 6. Decisions needed before starting
+## 6. Decisions (resolved 2026-06-22)
 
-1. **Which daemon is this for?** `miner.c` only (lower risk, but not the
-   live system), or also `miner_pipe.c` (the actual production path, but
-   means touching the currently-stable pipelined core's RTL)?
-2. **Is the security win (non-root) worth doing on its own**, even if Phase
-   0's latency measurement comes back marginal? `/dev/mem` access is a real
-   exposure regardless of the performance angle.
-3. **Acceptable to touch `pipelined_miner_top.v`'s RTL** for an IRQ output,
-   given T=7 is currently stable in production and any RTL change there
-   means a re-fit/re-timing-closure/re-soak cycle on the live core?
+1. **Which daemon is this for?** → **`miner_pipe.c` (production)**. Skip the
+   FSM-core-only spike in §5 — go straight at the live pipelined daemon and
+   `pipelined_miner_top.v`. Accepted tradeoff: this means a new IRQ output on
+   the core that's currently stable in production, with a full
+   re-fit/re-timing-closure/re-soak cycle before it can replace what's
+   deployed.
+2. **Non-root worth doing standalone?** → **Yes.** Proceed with Phase 1
+   (udev rule, non-root user, `S90odod` change) even if the IRQ latency
+   measurement in Phase 0/2 comes back marginal — `/dev/mem` root exposure is
+   worth closing on its own.
+3. **Sequencing vs. fan/thermal hardware verification** → **Start scoping
+   now, in parallel.** This branch is independent of `feat/fan-thermal`'s
+   pending hardware test; both can proceed concurrently. Risk item 4 below
+   (privilege footprint across miner regs + thermal/PWM regs + framebuffer)
+   still needs to fold in whatever fan/thermal lands on, so the *implementation*
+   of WS2's non-root user/udev setup should wait until that footprint is known
+   even though scoping/RTL work here can start immediately.
+
+Given decision 1, the phased plan in §5 collapses: skip the FSM-core spike,
+start directly on **WS1 (IRQ output on `pipelined_miner_top.v`)** as the
+first concrete step. Effort estimate accordingly closer to the original
+Phase 2 number (~1 week) than the staged 3-5/2-3/1-week breakdown, since
+there's no separate lower-risk spike absorbing early unknowns.
