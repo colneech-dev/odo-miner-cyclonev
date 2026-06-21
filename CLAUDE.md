@@ -103,8 +103,8 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 
 - `docs/TODO.md` is the authoritative status/plan document (refreshed 2026-06-14).
 - `docs/DISPLAY_WIRING.md` — physical wiring for the SPI touch screen.
-- `docs/FAN_SENSOR_WIRING.md` — J12 GPIO_1 wiring for DS18B20, PWM fan,
-  reset button; pending software tasks listed there.
+- `docs/FAN_SENSOR_WIRING.md` — J10 ("GPIO_1") fabric-PIO wiring for DS18B20,
+  PWM fan, reset button; pending software tasks listed there.
 - RTL regression: `hdl/tb/run_tb.sh` (Icarus in WSL). Run it after ANY
   change to core/tables/keccak, then copy updated RTL into
   `hdl/qsys/soc_system/synthesis/submodules/` before recompiling Quartus
@@ -135,7 +135,11 @@ bitstream off-board** (an x86 host runs the upstream `autocompile.sh`) and
 pipelined core for our `5CSXFC6C6` and measure fit/Fmax/MH/s (go/no-go gate).
 
 Non-performance backlog:
-1. Fan/thermal/reset button software (pending tasks 3–6 in `docs/FAN_SENSOR_WIRING.md`).
-2. Merge `claude/18b20-fan-gpio-setup-r4bm1f` → `Fabel` after fixing DTS comments
-   and Makefile dead-code identified in that branch's review.
-3. Pool failover: wire `ODOD_POOL_HOST2/PORT2` into `hps/miner.c` reconnect loop.
+1. Fan/thermal/reset button software (pending tasks in `docs/FAN_SENSOR_WIRING.md`) —
+   PWM fan deployed 2026-06-21, awaiting hardware verification; reset button
+   (J10 pin 36/AE20, wired in hardware) has no driver yet.
+2. ~~Merge `claude/18b20-fan-gpio-setup-r4bm1f`~~ — superseded by the J10
+   fabric-PIO rework (the J12/HPS-pin approach that branch implements was
+   abandoned for IOCSR reasons); branch is stale, pending deletion.
+3. ~~Pool failover~~ — done. `ODOD_POOL_HOST2/PORT2` is wired into the
+   reconnect loop in both `hps/miner.c` and the active `hps/miner_pipe.c`.

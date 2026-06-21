@@ -1,139 +1,156 @@
-# Fan & Temperature Sensor Wiring — J12 (GPIO_1)
+# Fan & Temperature Sensor Wiring — J10 ("GPIO_1" header, FPGA fabric)
 
 Covers the DS18B20 one-wire temperature sensor, 4-wire PWM fan, and optional
-reset button, all on the J12 (GPIO_1) header.  J12 is fully free — no signals
-shared with the display (display is on GPIO_0).
+reset button, all on the **J10** header.
+
+> **Architecture history:** this feature was originally built against
+> **J12** (the connector that mixes Arduino-shield signals with the genuine
+> HPS dedicated pins `HPS_SPIM_MOSI/SS/CLK/MISO`), driven through Linux GPIO
+> sysfs + the kernel `w1-gpio` driver. That path hit a hard wall: those HPS
+> balls also need correct **IOCSR** scan-chain configuration (separate from
+> the pin-mux selector) — an opaque ~20,000-bit chain with no per-pin
+> structure, not safely hand-patchable without the original Quartus
+> pin-assignment project for this board (see
+> `reference_hps_pinmux_and_gpio` in project memory). The harness was moved
+> to **J10** instead — wired entirely to FPGA fabric I/O (`GPIO_1_Dn`
+> signals, no HPS pins involved at all) — and is now driven through two
+> Qsys Avalon-MM peripherals, the same well-understood mechanism this
+> project already uses for the display (`pio_lcd`/`pio_in`/`pio_led`). This
+> sidesteps SPL pin-mux/IOCSR entirely.
+>
+> Fan speed control was then upgraded a second time, from a simple GPIO
+> on/off bit to a real PWM generator (`hdl/src/pwm_fan.v`) for proportional
+> speed ramping — see "4-wire PWM fan" below.
 
 ---
 
-## J12 header power pins (DE10-Nano / MiSTer convention, verified)
+## J10 header power pins (same convention as J11/J12, user-verified by meter)
 
-| J12 pin | Rail | Status |
+| J10 pin | Rail | Status |
 |---------|------|--------|
-| 11 | 5 V | **Confirmed 5.4 V by meter** — within 5 V fan tolerance |
-| 12 | GND | Available |
-| 29 | 3.3 V | Available |
-| 30 | GND | Available |
-
-GPIO_0 pins 29 and 30 are occupied by the display — J12 pins 29/30 are separate.
+| 11 | VIN (5 V) | Fan VCC |
+| 29 | 3.3 V | DS18B20 VDD + top of pull-up resistors |
+| 30 | GND | Shared ground |
 
 ---
 
-## Complete J12 pin assignment
+## Complete J10 pin assignment
 
-| J12 pin | HPS signal | portA | GPIO# | Connected to |
-|---------|-----------|-------|-------|--------------|
-| 11 | 5 V | — | — | Fan VCC (red wire) |
-| 12 | GND | — | — | Fan GND (black) + DS18B20 GND, shared |
-| 29 | 3.3 V | — | — | DS18B20 VDD + top of all pull-up resistors |
-| 33 | HPS_SPIM_MOSI | portA.1 | 462 | DS18B20 DATA |
-| 34 | HPS_SPIM_SS | portA.0 | 461 | Fan PWM (blue wire) |
-| 35 | HPS_SPIM_CLK | portA.2 | 463 | Fan tach (yellow wire) |
-| 36 | HPS_SPIM_MISO | portA.3 | 464 | Reset button (one side) |
+| J10 pin | Net | FPGA ball | Peripheral | Connected to |
+|---------|-----|-----------|------------|--------------|
+| 35 | `GPIO_1_D32` | AF18 | `pio_thermal` bit0 (`THERMAL_BIT_DATA`) | DS18B20 DATA |
+| 36 | `GPIO_1_D33` | AF20 | `pwm_fan` DUTY output | Fan PWM (blue wire) |
+| 37 | `GPIO_1_D34` | AG15 | `pio_thermal` bit1 (`THERMAL_BIT_TACH`) | Fan tach (yellow wire) |
+| 38 | `GPIO_1_D35` | AE20 | `pio_thermal` bit2 (`THERMAL_BIT_RESET`) | Reset button (one side, deferred) |
+
+`pio_thermal` is a 3-bit Bidirectional `altera_avalon_pio` at LWH2F offset
+`0x1500`. `pwm_fan` is a separate single-register Avalon-MM peripheral
+(`hdl/src/pwm_fan.v`) at LWH2F offset `0x1600` — see
+`hdl/qsys/add_pio_thermal.tcl` and `hdl/qsys/add_pwm_fan.tcl` for the exact
+Qsys wiring, and `hps/thermal.h`/`hps/thermal.c` for the register-level
+driver. Both peripherals fall inside the same 4 KB page so the HPS driver
+maps them with a single `mmap()` call.
 
 ---
 
 ## Passive components
 
 ```
-Pin 29 (3.3V) ─┬─ 4.7 kΩ ──── Pin 33  (DS18B20 one-wire pull-up)
-               ├─ 10 kΩ  ──── Pin 35  (fan tach pull-up)
-               └─ 10 kΩ  ──── Pin 36  (reset button pull-up)
+Pin 29 (3.3V) ─┬─ 4.7 kΩ ──── Pin 35  (DS18B20 one-wire pull-up)
+               ├─ 10 kΩ  ──── Pin 37  (fan tach pull-up)
+               └─ 10 kΩ  ──── Pin 38  (reset button pull-up)
 
-Pin 36 ── momentary switch ── Pin 12 (GND)   [reset button]
+Pin 38 ── momentary switch ── Pin 30 (GND)   [reset button]
 ```
 
-Pins 29, 33, 35, and 36 are all odd-numbered (same row of the header).
-Physical span for resistors:
-
-| Resistor | Pins | Span |
-|----------|------|------|
-| 4.7 kΩ (DS18B20) | 29 → 33 | 10 mm (2 positions) |
-| 10 kΩ (tach) | 29 → 35 | 15 mm (3 positions) |
-| 10 kΩ (reset btn) | 29 → 36 | 18 mm (3.5 positions, crosses rows) |
-
-Standard ¼W through-hole resistors fit with legs bent directly into header sockets.
+Pins 29, 35, 37, and 38 — check header row/column spacing on J10 before
+bending resistor legs; this was not re-measured after the J12→J10 pin
+renumbering (see Pending tasks).
 
 ---
 
 ## DS18B20 sensor (3-wire mode)
 
-| DS18B20 pin | J12 pin |
+| DS18B20 pin | J10 pin |
 |-------------|---------|
 | VDD | 29 (3.3 V) |
-| GND | 12 (GND) |
-| DATA | 33 |
+| GND | 30 (GND) |
+| DATA | 35 |
 
-4.7 kΩ pull-up between DATA (pin 33) and VDD (pin 29).
+4.7 kΩ pull-up between DATA (pin 35) and VDD (pin 29). Driven by a
+software-bit-banged one-wire protocol from userspace (`hps/thermal.c`):
+reset/presence pulse, skip-ROM (single-drop bus), Convert T, ~750 ms
+conversion wait, Read Scratchpad + CRC-8 (retried up to 5×, since the
+conversion result sits stable in the scratchpad and a marginal bus bit only
+needs a re-read, not a re-convert).
 
 ---
 
 ## 4-wire PWM fan
 
-| Fan wire | J12 pin | Notes |
+| Fan wire | J10 pin | Notes |
 |----------|---------|-------|
-| Red (VCC) | 11 | 5.4 V measured |
-| Black (GND) | 12 | Shared with DS18B20 GND |
-| Blue (PWM) | 34 | Open-drain input on fan; HPS drives low = min speed |
-| Yellow (tach) | 35 | Open-collector; 10 kΩ pull-up to pin 29 |
+| Red (VCC) | 11 (VIN/5 V) | |
+| Black (GND) | 30 | Shared with DS18B20 GND |
+| Blue (PWM) | 36 | Driven by `pwm_fan` (FPGA fabric), push-pull 3.3 V LVTTL, ~26.9 kHz carrier |
+| Yellow (tach) | 37 | Open-collector; 10 kΩ pull-up to pin 29 |
 
-Fan PWM note: at 0 % duty cycle (GPIO low) the fan runs at minimum speed,
-not fully off.  For simple thermal on/off control this is acceptable.
-Tach pulses twice per revolution; RPM = (falling edges / 2) × 60 / interval.
+`pwm_fan` (`hdl/src/pwm_fan.v`) is an 11-bit free-running counter clocked
+off `clk_fab` (~55 MHz) compared against an 8-bit duty register, giving
+55 MHz / 2048 ≈ **26.9 kHz** carrier — above the 21-28 kHz convention for
+4-pin PC fans and above human hearing. Duty is commanded as a 0-255 register
+value; the HPS driver exposes it as a 0-100% API
+(`thermal_fan_set_pct()`/`thermal_fan_update()` in `hps/thermal.c`/`.h`).
+0% is a genuine off (unlike the old GPIO on/off scheme, where 0 still left
+the fan at its electrical minimum speed on this particular fan). Speed
+ramps linearly from `THERMAL_FAN_MIN_PCT` (30%) at `THERMAL_FAN_ON_C`
+(50°C) up to 100% at `THERMAL_FAN_MAX_C` (65°C); once running, the fan only
+drops back to 0% below `THERMAL_FAN_OFF_C` (45°C), preserving a hysteresis
+gap against chatter at the threshold.
+
+Tach pulses twice per revolution; RPM = (falling edges / 2) × 60000 /
+window_ms (`thermal_tach_rpm()`).
 
 ---
 
 ## Reset button
 
-Wire a momentary normally-open push button between J12 pin 36 and J12 pin 12
-(GND).  10 kΩ pull-up from pin 36 to pin 29 (3.3 V) holds the line high at
-rest; pressing the button pulls it to GND.
-
-GPIO 464 (portA.3) is read from Linux userspace via `/sys/class/gpio/gpio464/`.
-odo-ui polls this pin and triggers miner restart or board reboot depending on
-press duration (short = restart miner, long ≥ 3 s = reboot).
+Wire a momentary normally-open push button between J10 pin 38 and pin 30
+(GND). 10 kΩ pull-up from pin 38 to pin 29 (3.3 V) holds the line high at
+rest; pressing the button pulls it to GND. Hardware-allocated
+(`THERMAL_BIT_RESET`, `pio_thermal` bit2, direction fixed input) but
+**software handling not implemented** — deferred, see Pending tasks.
 
 ---
 
-## Kernel config requirements (DTS overlay)
+## FPGA/Qsys/kernel notes
 
-File: `boot/devicetree/w1_fan_overlay.dts`
-
-The overlay claims portA.1 for the one-wire bus master.  Fan PWM (portA.0),
-tach (portA.2), and reset button (portA.3) are managed from userspace via
-sysfs — no DTS node needed for those.
-
-```
-CONFIG_W1=y
-CONFIG_W1_MASTER_GPIO=y
-CONFIG_W1_SLAVE_THERM=y
-```
-
-Pinmux: the base DTS must not activate the altera_spi driver on SPIM0 or
-those pads will be claimed before the GPIO driver can use them.  Disable
-`spi0` in the base DTS or add a pinmux override to set those pads to GPIO mode.
+- **Qsys**: `hdl/qsys/add_pio_thermal.tcl` adds `pio_thermal`;
+  `hdl/qsys/add_pwm_fan.tcl` adds `pwm_fan` and shrinks `pio_thermal` from
+  4-bit to 3-bit (the fan bit moved off it). Both are small standalone
+  incremental scripts run against the live `soc_system.qsys` — *not*
+  `hdl/qsys/qsys_add_peripherals.tcl`, which is a documentation-only
+  cumulative spec and is never re-run once a system exists.
+- **soc_top.v / odo_miner.qsf**: `THERMAL_IO[2:0]` (balls AF18/AG15/AE20)
+  and `FAN_PWM` (ball AF20), both `3.3-V LVTTL`.
+- **No kernel/DTS involvement at all** — this is pure FPGA-fabric I/O
+  accessed by the HPS via direct `/dev/mem` mmap of the LWH2F bridge, the
+  same mechanism the display peripherals use. No `w1-gpio` driver, no
+  `CONFIG_GPIO_SYSFS`, no DTS node, no U-Boot SPL pinmux patch — all of
+  those J12-era kernel/SPL changes were reverted.
 
 ---
 
-## Pending software tasks
+## Pending software/hardware tasks
 
-| # | File | What |
-|---|------|------|
-| 1 | `boot/devicetree/w1_fan_overlay.dts` | Fix comment: pin 27 → 29 (3V3), pin 31 → 12 (GND) |
-| 2 | `hps/thermal.h` | Remove stale "default 433 = bank-B" comment; update to 461 / portA |
-| 3 | `hps/thermal.h/.c` | Add `TACH_GPIO_NUM 463`; `thermal_tach_rpm()` — export GPIO 463 as input, count falling edges over 1 s window |
-| 4 | `hps/thermal.h/.c` | Add `thermal_fan_state()` getter; fix `push_status()` to use it instead of threshold comparison |
-| 5 | `hps/thermal.h/.c` | Add `RESET_BTN_GPIO_NUM 464`; export as input with poll on falling edge |
-| 6 | `sw/odo-ui/odo_ui.c` | Poll GPIO 464; short press → restart miner, long press (≥ 3 s) → reboot |
-| 7 | `hps/Makefile` | Remove `thermal.c http_status.c` from `MINER_SRCS` until `miner.c` actually calls them |
-| 8 | `services/S90odod` | ~~Add `mkdir -p /run/odod` before starting miner~~ — **DONE** (already present in S90odod line 23) |
-| 9 | `sw/odo-webd/odo_webd.c` | Expose tach RPM and reset button state in `/status.json` |
+| # | What | Status |
+|---|------|--------|
+| 1 | DS18B20 read over `pio_thermal` (one-wire bit-bang) | presence pulse + readings work; CRC mismatches still seen intermittently (electrical noise — pull-up value/wire routing/decoupling not yet revisited) |
+| 2 | Fan tach over `pio_thermal` | not retested since the J10 pin correction; needs a fresh check |
+| 3 | `pwm_fan` proportional speed control | RTL/HPS driver complete, **not yet hardware-verified** — pending bitstream deploy |
+| 4 | UI: `fan_duty_pct` on touch UI + web dashboard | done |
+| 5 | Reset button polling (`pio_thermal` bit2) | **not started** |
 
----
-
-## Branch to merge first
-
-`claude/18b20-fan-gpio-setup-r4bm1f` contains `thermal.h/c`, `http_status.h/c`,
-`miner_daemon.c`, `w1_fan_overlay.dts`, and `hps/Makefile` changes.
-Review findings are in the session notes.  Items 1–5 above address the open
-bugs in that branch before merge.
+Once PWM is verified on hardware (fan spins at several intermediate duty%
+values, tach RPM scales sensibly with duty), re-check the DS18B20 CRC issue
+and tach reliability and update this section.

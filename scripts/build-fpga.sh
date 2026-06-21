@@ -67,11 +67,16 @@ cd "$PROJECT_ROOT/hdl/qsys"
 PATH="$QSYS_BIN:$PATH" qsys-generate soc_system.qsys --synthesis=VERILOG \
     --output-directory=soc_system --search-path="$(pwd),\$" > /tmp/qsys-gen.log 2>&1 \
     || die "qsys-generate failed (see /tmp/qsys-gen.log)"
-for f in odocrypt_top odocrypt_core odocrypt_epoch_tables odocrypt_sbox_bank keccak800; do
-    src_md5=$(md5sum "../src/"*"/$f.v" "../src/$f.v" 2>/dev/null | head -1 | cut -d' ' -f1)
-    gen_md5=$(md5sum "soc_system/synthesis/submodules/$f.v" 2>/dev/null | cut -d' ' -f1)
-    [ "$src_md5" = "$gen_md5" ] || die "stale submodule copy: $f.v (qsys did not refresh it)"
-done
+# Read the active fileset straight from pipelined_miner_hw.tcl rather than a
+# hardcoded list -- odo_0 is `pipelined_miner_top`, not the legacy single/dual
+# -core `odocrypt_top`/`odocrypt_core` FSM design, and the epoch RTL file
+# (odo_<seed>.v) changes per autocompile, so a fixed list goes stale.
+while read -r relpath; do
+    f="$(basename "$relpath")"
+    src_md5=$(md5sum "$relpath" 2>/dev/null | cut -d' ' -f1)
+    gen_md5=$(md5sum "soc_system/synthesis/submodules/$f" 2>/dev/null | cut -d' ' -f1)
+    [ -n "$src_md5" ] && [ "$src_md5" = "$gen_md5" ] || die "stale submodule copy: $f (qsys did not refresh it)"
+done < <(grep -oP 'add_fileset_file\s+\S+\s+VERILOG\s+PATH\s+\K\S+' pipelined_miner_hw.tcl)
 ok "Platform Designer system generated; submodule copies verified current"
 
 # ----------------------------------------------------------------------------

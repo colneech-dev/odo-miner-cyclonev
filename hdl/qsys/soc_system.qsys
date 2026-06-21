@@ -29,7 +29,7 @@
    {
       datum _sortIndex
       {
-         value = "8";
+         value = "7";
          type = "int";
       }
    }
@@ -37,7 +37,7 @@
    {
       datum _sortIndex
       {
-         value = "6";
+         value = "5";
          type = "int";
       }
    }
@@ -45,7 +45,7 @@
    {
       datum _sortIndex
       {
-         value = "5";
+         value = "4";
          type = "int";
       }
    }
@@ -53,7 +53,23 @@
    {
       datum _sortIndex
       {
-         value = "7";
+         value = "6";
+         type = "int";
+      }
+   }
+   element pio_thermal
+   {
+      datum _sortIndex
+      {
+         value = "8";
+         type = "int";
+      }
+   }
+   element pwm_fan
+   {
+      datum _sortIndex
+      {
+         value = "9";
          type = "int";
       }
    }
@@ -61,7 +77,7 @@
    {
       datum _sortIndex
       {
-         value = "3";
+         value = "2";
          type = "int";
       }
    }
@@ -69,7 +85,7 @@
    {
       datum _sortIndex
       {
-         value = "4";
+         value = "3";
          type = "int";
       }
    }
@@ -123,6 +139,12 @@
    internal="pio_led.external_connection"
    type="conduit"
    dir="end" />
+ <interface
+   name="pio_thermal"
+   internal="pio_thermal.external_connection"
+   type="conduit"
+   dir="end" />
+ <interface name="pwm_fan" internal="pwm_fan.pwm" type="conduit" dir="end" />
  <interface name="reset" internal="clk_0.clk_in_reset" type="reset" dir="end" />
  <interface name="spi_lcd" internal="spi_lcd.external" type="conduit" dir="end" />
  <interface
@@ -709,6 +731,25 @@
   <parameter name="simDrivenValue" value="0" />
   <parameter name="width" value="8" />
  </module>
+ <module
+   name="pio_thermal"
+   kind="altera_avalon_pio"
+   version="25.1"
+   enabled="1">
+  <parameter name="bitClearingEdgeCapReg" value="false" />
+  <parameter name="bitModifyingOutReg" value="false" />
+  <parameter name="captureEdge" value="false" />
+  <parameter name="clockRate" value="50000000" />
+  <parameter name="direction" value="Bidir" />
+  <parameter name="edgeType" value="RISING" />
+  <parameter name="generateIRQ" value="false" />
+  <parameter name="irqType" value="LEVEL" />
+  <parameter name="resetValue" value="0" />
+  <parameter name="simDoTestBenchWiring" value="false" />
+  <parameter name="simDrivenValue" value="0" />
+  <parameter name="width" value="3" />
+ </module>
+ <module name="pwm_fan" kind="pwm_fan" version="1.0" enabled="1" />
  <module name="spi_lcd" kind="altera_avalon_spi" version="25.1" enabled="1">
   <parameter name="avalonSpec" value="2.0" />
   <parameter name="clockPhase" value="0" />
@@ -754,6 +795,15 @@
    kind="avalon"
    version="25.1"
    start="hps_0.h2f_lw_axi_master"
+   end="pwm_fan.s0">
+  <parameter name="arbitrationPriority" value="1" />
+  <parameter name="baseAddress" value="0x1600" />
+  <parameter name="defaultConnection" value="false" />
+ </connection>
+ <connection
+   kind="avalon"
+   version="25.1"
+   start="hps_0.h2f_lw_axi_master"
    end="pio_lcd.s1">
   <parameter name="arbitrationPriority" value="1" />
   <parameter name="baseAddress" value="0x1200" />
@@ -781,6 +831,15 @@
    kind="avalon"
    version="25.1"
    start="hps_0.h2f_lw_axi_master"
+   end="pio_thermal.s1">
+  <parameter name="arbitrationPriority" value="1" />
+  <parameter name="baseAddress" value="0x1500" />
+  <parameter name="defaultConnection" value="false" />
+ </connection>
+ <connection
+   kind="avalon"
+   version="25.1"
+   start="hps_0.h2f_lw_axi_master"
    end="spi_lcd.spi_control_port">
   <parameter name="arbitrationPriority" value="1" />
   <parameter name="baseAddress" value="0x1000" />
@@ -801,6 +860,8 @@
  <connection kind="clock" version="25.1" start="clk_0.clk" end="pio_in.clk" />
  <connection kind="clock" version="25.1" start="clk_0.clk" end="pio_led.clk" />
  <connection kind="clock" version="25.1" start="clk_0.clk" end="odo_0.clk" />
+ <connection kind="clock" version="25.1" start="clk_0.clk" end="pio_thermal.clk" />
+ <connection kind="clock" version="25.1" start="clk_0.clk" end="pwm_fan.clk" />
  <connection
    kind="clock"
    version="25.1"
@@ -868,6 +929,16 @@
    start="clk_0.clk_reset"
    end="pio_led.reset" />
  <connection kind="reset" version="25.1" start="clk_0.clk_reset" end="odo_0.reset" />
+ <connection
+   kind="reset"
+   version="25.1"
+   start="clk_0.clk_reset"
+   end="pio_thermal.reset" />
+ <connection
+   kind="reset"
+   version="25.1"
+   start="clk_0.clk_reset"
+   end="pwm_fan.reset" />
  <interconnectRequirement for="$system" name="qsys_mm.clockCrossingAdapter" value="HANDSHAKE" />
  <interconnectRequirement for="$system" name="qsys_mm.enableEccProtection" value="FALSE" />
  <interconnectRequirement for="$system" name="qsys_mm.insertDefaultSlave" value="FALSE" />
