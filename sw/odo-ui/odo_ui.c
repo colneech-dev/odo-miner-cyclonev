@@ -339,6 +339,9 @@ typedef struct {
     double best_diff_session, best_diff_alltime;
     long long blocks_found;
     long   last_block;
+    long   temp_c;      /* DS18B20 reading, -1 = no sensor/no reading yet */
+    long   fan_duty_pct; /* commanded fan speed, 0-100 (%) */
+    long   fan_rpm;      /* -1 = no tach */
 } status_t;
 
 static long json_long(const char *buf, const char *key, long def)
@@ -393,6 +396,9 @@ static int status_read(const char *path, status_t *s)
     s->best_diff_alltime  = json_double(buf, "best_diff_alltime", 0.0);
     s->blocks_found        = json_long(buf, "blocks_found", 0);
     s->last_block          = json_long(buf, "last_block", 0);
+    s->temp_c              = json_long(buf, "temp_c", -1);
+    s->fan_duty_pct        = json_long(buf, "fan_duty_pct", 0);
+    s->fan_rpm             = json_long(buf, "fan_rpm", -1);
     s->uptime             = json_long(buf, "uptime", 0);
     s->updated            = json_long(buf, "updated", 0);
     return 0;
@@ -895,6 +901,21 @@ static void draw_detail(fb_t *fb, const status_t *st, time_t now,
         fmt_age(st->last_block ? now - (time_t)st->last_block : -1L, age, sizeof(age));
         fb_text(fb, xRv, y, age, 1, C_TEXT);
     }
+    y += 14;
+
+    fb_text(fb, xL, y, "TEMP",  1, C_DIM);
+    if (st->temp_c >= -50 && st->temp_c <= 150) {  /* sane DS18B20 range */
+        snprintf(val, sizeof(val), "%ldC", st->temp_c);
+        fb_text(fb, xLv, y, val, 1, st->temp_c >= 65 ? C_WARN : C_TEXT);
+    } else {
+        fb_text(fb, xLv, y, "--", 1, C_DIM);
+    }
+    fb_text(fb, xR, y, "FAN", 1, C_DIM);
+    if (st->fan_rpm >= 0)
+        snprintf(val, sizeof(val), "%ld%% %ld", st->fan_duty_pct, st->fan_rpm);
+    else
+        snprintf(val, sizeof(val), "%ld%%", st->fan_duty_pct);
+    fb_text(fb, xRv, y, val, 1, st->fan_duty_pct > 0 ? C_OK : C_DIM);
 }
 
 /* Full-screen celebratory takeover when a NEW block is found, replacing the

@@ -444,3 +444,19 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to LED[4]
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to LED[5]
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to LED[6]
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to LED[7]
+
+# Fan/thermal header (J10 "GPIO_1", pins 35/37/38 — FPGA fabric, NOT HPS pins;
+# J12's HPS-dedicated pins for this function were abandoned, see
+# docs/FAN_SENSOR_WIRING.md). bit0=DS18B20 data, bit1=tach,
+# bit2=reset button (hardware allocated, software deferred).
+set_location_assignment PIN_AF18 -to THERMAL_IO[0]
+set_location_assignment PIN_AG15 -to THERMAL_IO[1]
+set_location_assignment PIN_AE20 -to THERMAL_IO[2]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to THERMAL_IO[0]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to THERMAL_IO[1]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to THERMAL_IO[2]
+
+# Fan PWM speed control (J10 pin 36 — same physical net the old on/off fan
+# bit used).
+set_location_assignment PIN_AF20 -to FAN_PWM
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to FAN_PWM
