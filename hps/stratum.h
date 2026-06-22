@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
 #include "job.h"
 
 #define STRATUM_RECV_BUF      (16 * 1024)
@@ -14,6 +15,12 @@
 #define STRATUM_MAX_USER      256
 #define STRATUM_MAX_PASS      128
 #define STRATUM_MAX_JOBID     64
+
+/* Force a reconnect if the pool sends NOTHING (no notify, no keepalive) for
+ * this long while the socket still looks open — catches a silently half-dead
+ * TCP connection that would otherwise go unnoticed until the next share submit
+ * fails. Pools normally re-notify well within a minute. */
+#define STRATUM_IDLE_TIMEOUT  120
 
 typedef enum {
     STRATUM_DISCONNECTED = 0,
@@ -50,6 +57,10 @@ typedef struct {
 
     char rxbuf[STRATUM_RECV_BUF];
     size_t rxlen;
+
+    time_t last_rx;          /* time() of the last bytes received from the pool;
+                                0 until the first successful connect. Drives the
+                                STRATUM_IDLE_TIMEOUT dead-pool watchdog. */
 
     uint64_t next_id;
 } stratum_ctx_t;

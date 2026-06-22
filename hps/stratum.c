@@ -230,7 +230,11 @@ static int handle_subscribe_result(stratum_ctx_t *ctx, const char *body)
     /* Skip comma and whitespace, then parse EN2_SIZE integer */
     while (*p && (*p == ',' || *p == ' ' || *p == '\t')) p++;
     ctx->extranonce2_size = (int)strtol(p, NULL, 10);
-    if (ctx->extranonce2_size < 0 || ctx->extranonce2_size > (int)sizeof(ctx->extranonce1))
+    /* Clamp against the extranonce2 DESTINATION buffer (job_t.extranonce2,
+     * JOB_MAX_EXTRANONCE) — not extranonce1, which only happens to be the same
+     * size today. A pool advertising a larger EN2_SIZE would otherwise overflow
+     * job.extranonce2[] at submit time (stratum.c share build). */
+    if (ctx->extranonce2_size < 0 || ctx->extranonce2_size > JOB_MAX_EXTRANONCE)
         ctx->extranonce2_size = 0;
 
     ctx->subscribed = true;
@@ -517,6 +521,7 @@ int stratum_connect(stratum_ctx_t *ctx)
         goto fail;
 
     ctx->state = STRATUM_SUBSCRIBED;
+    ctx->last_rx = time(NULL);   /* arm the idle watchdog from connect time */
     return 0;
 
 fail:
@@ -533,13 +538,23 @@ int stratum_poll(stratum_ctx_t *ctx, int timeout_ms)
     int rc = poll(&pfd, 1, timeout_ms);
     if (rc < 0)
         return -1;
-    if (rc == 0)
+    if (rc == 0) {
+        /* No data this tick. If the pool has been silent past the watchdog
+         * window, the connection is likely half-dead — force a reconnect
+         * instead of mining blind until the next submit fails. */
+        if (ctx->last_rx != 0 && time(NULL) - ctx->last_rx > STRATUM_IDLE_TIMEOUT) {
+            fprintf(stderr, "[stratum] no data for >%ds — assuming dead pool, reconnecting\n",
+                    STRATUM_IDLE_TIMEOUT);
+            return -1;
+        }
         return 0;
+    }
 
     char buffer[4096];
     ssize_t n = recv(ctx->fd, buffer, sizeof(buffer), 0);
     if (n <= 0)
         return -1;
+    ctx->last_rx = time(NULL);   /* pool is alive — pet the watchdog */
 
     if ((size_t)n + ctx->rxlen >= sizeof(ctx->rxbuf))
         return -1;
