@@ -87,6 +87,8 @@ static struct {
     uint32_t epoch_interval;
     uint64_t found;
     uint64_t shares;
+    uint64_t shares_accepted;   /* pool-confirmed result:true (H3)  */
+    uint64_t shares_rejected;   /* pool-confirmed result:false (H3) */
     time_t   last_share;
     time_t   started;
     double   work_acc;        /* cumulative expected hashes from accepted shares */
@@ -200,6 +202,8 @@ static void status_write(void)
         "  \"hashes_total\": 0,\n"
         "  \"shares_found\": %" PRIu64 ",\n"
         "  \"shares_submitted\": %" PRIu64 ",\n"
+        "  \"shares_accepted\": %" PRIu64 ",\n"
+        "  \"shares_rejected\": %" PRIu64 ",\n"
         "  \"last_share\": %ld,\n"
         "  \"best_diff_session\": %.6g,\n"
         "  \"best_diff_alltime\": %.6g,\n"
@@ -210,7 +214,8 @@ static void status_write(void)
         "}\n",
         g_st.pool, g_st.connected ? "true" : "false", g_st.job_id,
         g_st.epoch, g_st.bitstream_epoch, g_st.epoch_interval, enext, g_st.hashrate,
-        g_st.found, g_st.shares, (long)g_st.last_share,
+        g_st.found, g_st.shares, g_st.shares_accepted, g_st.shares_rejected,
+        (long)g_st.last_share,
         g_st.best_diff_session, g_st.best_diff_alltime,
         g_st.blocks_found, (long)g_st.last_block,
         (long)up, (long)now);
@@ -374,6 +379,8 @@ int main(int argc, char **argv)
                 time_t now = time(NULL);
                 if (now - last_status >= 3) {
                     last_status = now;
+                    stratum_share_stats(&st, &g_st.shares_accepted,
+                                        &g_st.shares_rejected);
                     status_write();
                 }
             }

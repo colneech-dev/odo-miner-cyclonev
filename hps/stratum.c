@@ -236,6 +236,12 @@ static int handle_subscribe_result(stratum_ctx_t *ctx, const char *body)
      * job.extranonce2[] at submit time (stratum.c share build). */
     if (ctx->extranonce2_size < 0 || ctx->extranonce2_size > JOB_MAX_EXTRANONCE)
         ctx->extranonce2_size = 0;
+    else if (ctx->extranonce2_size > 0 && ctx->extranonce2_size < 4)
+        /* H2: the per-job counter fills extranonce2's low bytes, so a tiny
+         * EN2_SIZE repeats coinbases after 2^(8*size) jobs. Harmless at the
+         * usual 4+, worth a heads-up if a pool advertises 1-3 bytes. */
+        fprintf(stderr, "[stratum] WARN small EN2_SIZE=%d: extranonce2 repeats "
+                "after 2^%d jobs\n", ctx->extranonce2_size, 8 * ctx->extranonce2_size);
 
     ctx->subscribed = true;
     fprintf(stderr, "[stratum] subscribe: EN1=%s (%zu B) EN2_SIZE=%d\n",
@@ -433,6 +439,40 @@ static void handle_set_difficulty(stratum_ctx_t *ctx, const char *params)
     fprintf(stderr, "[stratum] difficulty set to %g\n", diff);
 }
 
+/* Record a mining.submit request id as awaiting its result. Drops the oldest
+ * if the in-flight set is full (that result then goes uncounted — bounded). */
+static void track_pending_submit(stratum_ctx_t *ctx, uint64_t id)
+{
+    if (ctx->n_pending_submits >= STRATUM_MAX_PENDING_SUBMITS) {
+        memmove(&ctx->pending_submits[0], &ctx->pending_submits[1],
+                (STRATUM_MAX_PENDING_SUBMITS - 1) * sizeof(ctx->pending_submits[0]));
+        ctx->n_pending_submits = STRATUM_MAX_PENDING_SUBMITS - 1;
+    }
+    ctx->pending_submits[ctx->n_pending_submits++] = id;
+}
+
+/* If id is a tracked submit, remove it and return true (this result belongs to
+ * a share, not to subscribe/authorize). */
+static bool take_pending_submit(stratum_ctx_t *ctx, uint64_t id)
+{
+    for (int i = 0; i < ctx->n_pending_submits; i++) {
+        if (ctx->pending_submits[i] == id) {
+            memmove(&ctx->pending_submits[i], &ctx->pending_submits[i + 1],
+                    (size_t)(ctx->n_pending_submits - i - 1) * sizeof(ctx->pending_submits[0]));
+            ctx->n_pending_submits--;
+            return true;
+        }
+    }
+    return false;
+}
+
+void stratum_share_stats(const stratum_ctx_t *ctx,
+                         uint64_t *accepted, uint64_t *rejected)
+{
+    if (accepted) *accepted = ctx ? ctx->shares_accepted : 0;
+    if (rejected) *rejected = ctx ? ctx->shares_rejected : 0;
+}
+
 static void handle_result(stratum_ctx_t *ctx, const char *line)
 {
     /* find_json_key skips whitespace after ':', handling "result": [[...]] */
@@ -440,6 +480,27 @@ static void handle_result(stratum_ctx_t *ctx, const char *line)
     if (rp && *rp == '[') {
         if (handle_subscribe_result(ctx, line) == 0)
             return;
+    }
+
+    /* H3: correlate this response to a share submit by request id. The pool's
+     * result:true/false here is the authoritative accept/reject — distinct from
+     * the daemon's fire-and-forget "submitted" count. Submit ids are the only
+     * ids we track, so authorize/other results fall through untouched. */
+    const char *idp = find_json_key(line, "id");
+    if (idp) {
+        uint64_t id = strtoull(idp, NULL, 10);
+        if (id != 0 && take_pending_submit(ctx, id)) {
+            bool ok = false;
+            if (parse_json_bool(line, "result", &ok)) {
+                if (ok) {
+                    ctx->shares_accepted++;
+                } else {
+                    ctx->shares_rejected++;
+                    fprintf(stderr, "[stratum] share REJECTED: %s\n", line);
+                }
+            }
+            return;
+        }
     }
 
     bool ok = false;
@@ -635,17 +696,21 @@ int stratum_submit_share(stratum_ctx_t *ctx,
     bytes_to_hex(job->extranonce2, job->extranonce2_len,
                  extranonce2_hex, sizeof(extranonce2_hex));
 
+    uint64_t id = ctx->next_id++;
     char line[1024];
     snprintf(line, sizeof(line),
              "{\"id\":%llu,\"method\":\"mining.submit\","
              "\"params\":[\"%s\",\"%s\",\"%s\",\"%08x\",\"%08x\"]}\n",
-             (unsigned long long)ctx->next_id++, ctx->user,
+             (unsigned long long)id, ctx->user,
              job->job_id,
              extranonce2_hex,
              job->ntime,
              nonce);
 
-    return send_line(ctx, line);
+    int rc = send_line(ctx, line);
+    if (rc >= 0)
+        track_pending_submit(ctx, id);   /* count the pool's accept/reject */
+    return rc;
 }
 
 int stratum_submit(stratum_ctx_t *ctx,
@@ -657,18 +722,22 @@ int stratum_submit(stratum_ctx_t *ctx,
     if (!ctx || !job || ctx->fd < 0 || !ctx->authorized)
         return -1;
 
+    uint64_t id = ctx->next_id++;
     char line[1024];
     snprintf(line, sizeof(line),
              "{\"id\":%llu,\"method\":\"mining.submit\","
              "\"params\":[\"%s\",\"%s\",\"%s\",\"%s\",\"%08x\"]}\n",
-             (unsigned long long)ctx->next_id++,
+             (unsigned long long)id,
              ctx->user,
              job->job_id,
              extranonce2_hex ? extranonce2_hex : "",
              ntime_hex ? ntime_hex : "00000000",
              nonce);
 
-    return send_line(ctx, line);
+    int rc = send_line(ctx, line);
+    if (rc >= 0)
+        track_pending_submit(ctx, id);
+    return rc;
 }
 
 const char *stratum_state_str(stratum_state_t state)
