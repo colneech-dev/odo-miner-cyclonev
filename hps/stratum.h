@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
 #include "job.h"
 
 #define STRATUM_RECV_BUF      (16 * 1024)
@@ -14,6 +15,17 @@
 #define STRATUM_MAX_USER      256
 #define STRATUM_MAX_PASS      128
 #define STRATUM_MAX_JOBID     64
+
+/* Force a reconnect if the pool sends NOTHING (no notify, no keepalive) for
+ * this long while the socket still looks open — catches a silently half-dead
+ * TCP connection that would otherwise go unnoticed until the next share submit
+ * fails. Pools normally re-notify well within a minute. */
+#define STRATUM_IDLE_TIMEOUT  120
+
+/* In-flight mining.submit request ids awaiting a result. Bounds the memory for
+ * accept/reject correlation; if more than this many submits are outstanding the
+ * oldest is dropped (its result simply goes uncounted). */
+#define STRATUM_MAX_PENDING_SUBMITS  64
 
 typedef enum {
     STRATUM_DISCONNECTED = 0,
@@ -51,6 +63,19 @@ typedef struct {
     char rxbuf[STRATUM_RECV_BUF];
     size_t rxlen;
 
+    time_t last_rx;          /* time() of the last bytes received from the pool;
+                                0 until the first successful connect. Drives the
+                                STRATUM_IDLE_TIMEOUT dead-pool watchdog. */
+
+    /* Pool-confirmed share accounting (H3): mining.submit ids awaiting a
+     * result, and the accept/reject tallies once results arrive. Distinct from
+     * the daemon's "submitted" count (socket-write success) — these reflect
+     * what the pool actually acknowledged. */
+    uint64_t pending_submits[STRATUM_MAX_PENDING_SUBMITS];
+    int      n_pending_submits;
+    uint64_t shares_accepted;
+    uint64_t shares_rejected;
+
     uint64_t next_id;
 } stratum_ctx_t;
 
@@ -68,6 +93,11 @@ bool stratum_get_job(stratum_ctx_t *ctx, job_t *out);
 int  stratum_submit_share(stratum_ctx_t *ctx,
                           const job_t *job,
                           uint32_t nonce);
+
+/* Pool-confirmed share tallies (accept/reject correlated to mining.submit
+ * results by request id). Either out pointer may be NULL. */
+void stratum_share_stats(const stratum_ctx_t *ctx,
+                         uint64_t *accepted, uint64_t *rejected);
 
 const char *stratum_state_str(stratum_state_t state);
 
