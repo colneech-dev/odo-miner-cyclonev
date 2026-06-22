@@ -33,14 +33,15 @@ SMOKE_PIPE_SRCS = fpga_smoke_pipe.c miner_io_pipe.c odocrypt_state.c \
 
 # 4c. Pipelined mining daemon (stratum loop, free-running pipelined core)
 PIPE_MINER_SRCS = miner_pipe.c miner_io_pipe.c stratum.c job.c odocrypt_header.c \
-                  odocrypt_state.c $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
+                  odocrypt_state.c thermal.c \
+                  $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
 
 # 4d. Pipelined daemon, UIO backend (non-root + IRQ-driven; WS3 of
 # docs/uio-miner-io-scope.md). Identical to 4c but swaps the /dev/mem register
 # layer (miner_io_pipe.c) for the UIO one (miner_io_pipe_uio.c). Needs the
 # kernel UIO device from WS2 to run; builds + links standalone for CI/regression.
 PIPE_MINER_UIO_SRCS = miner_pipe.c miner_io_pipe_uio.c stratum.c job.c \
-                  odocrypt_header.c odocrypt_state.c \
+                  odocrypt_header.c odocrypt_state.c thermal.c \
                   $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
 
 # 5. miner_io_test — hardware bring-up test for miner_io layer

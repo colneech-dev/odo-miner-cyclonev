@@ -7,6 +7,11 @@
 #   - pio_lcd    : 3-bit output PIO (D/C, RESET_n, backlight)
 #   - pio_in     : 3-bit input PIO with falling-edge IRQ (PENIRQ_n, KEY0, KEY1)
 #   - pio_led    : 8-bit output PIO (board LEDs)
+#   - pio_thermal: 3-bit bidirectional PIO (DS18B20 data, tach, reset btn)
+#                  on J10 (FPGA-fabric header) — see docs/FAN_SENSOR_WIRING.md
+#   - pwm_fan    : fan-speed PWM generator (pwm_fan_hw.tcl), ~26.9 kHz carrier,
+#                  8-bit duty register; drives the J10 fan pin pio_thermal
+#                  used to own (PIN_AF20) — see hdl/src/pwm_fan.v
 # and connects everything to the LWH2F bridge + f2h_irq0.
 #
 # Run from hdl/qsys:
@@ -63,10 +68,17 @@ set_instance_parameter_value pio_led {direction}  {Output}
 set_instance_parameter_value pio_led {width}      {8}
 set_instance_parameter_value pio_led {resetValue} {0x0}
 
+add_instance pio_thermal altera_avalon_pio 25.1
+set_instance_parameter_value pio_thermal {direction}  {Bidir}
+set_instance_parameter_value pio_thermal {width}      {3}
+set_instance_parameter_value pio_thermal {resetValue} {0x0}
+
+add_instance pwm_fan pwm_fan 1.0
+
 # -----------------------------------------------------------------------------
 # Clocks and resets
 # -----------------------------------------------------------------------------
-foreach inst {odo_0 spi_lcd spi_touch pio_lcd pio_in pio_led} {
+foreach inst {odo_0 spi_lcd spi_touch pio_lcd pio_in pio_led pio_thermal pwm_fan} {
     add_connection clk_0.clk       ${inst}.clk
     add_connection clk_0.clk_reset ${inst}.reset
 }
@@ -92,6 +104,12 @@ set_connection_parameter_value hps_0.h2f_lw_axi_master/pio_in.s1 baseAddress {0x
 
 add_connection hps_0.h2f_lw_axi_master pio_led.s1
 set_connection_parameter_value hps_0.h2f_lw_axi_master/pio_led.s1 baseAddress {0x1400}
+
+add_connection hps_0.h2f_lw_axi_master pio_thermal.s1
+set_connection_parameter_value hps_0.h2f_lw_axi_master/pio_thermal.s1 baseAddress {0x1500}
+
+add_connection hps_0.h2f_lw_axi_master pwm_fan.s0
+set_connection_parameter_value hps_0.h2f_lw_axi_master/pwm_fan.s0 baseAddress {0x1600}
 
 # -----------------------------------------------------------------------------
 # Interrupts → f2h_irq0 (Linux GIC: 72 + n on Cyclone V)
@@ -119,5 +137,9 @@ add_interface          pio_in conduit end
 set_interface_property pio_in EXPORT_OF pio_in.external_connection
 add_interface          pio_led conduit end
 set_interface_property pio_led EXPORT_OF pio_led.external_connection
+add_interface          pio_thermal conduit end
+set_interface_property pio_thermal EXPORT_OF pio_thermal.external_connection
+add_interface          pwm_fan conduit end
+set_interface_property pwm_fan EXPORT_OF pwm_fan.pwm
 
 save_system {soc_system.qsys}

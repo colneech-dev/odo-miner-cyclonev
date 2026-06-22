@@ -32,7 +32,8 @@ BR2_TOOLCHAIN_GLIBC_GCONV_LIBS_COPY=y
 # -----------------------------------------------------------------------------
 # Kernel (6.6.26) — headers default to "same as kernel", no explicit config.
 # Fragments: linux-wifi (Realtek USB WiFi), linux-fpga (FPGA manager/bridges),
-# linux-display (fabric SPI TFT + touch + keys/LEDs).
+# linux-display (fabric SPI TFT + touch + keys/LEDs). Fan/thermal needs no
+# kernel fragment — driven via direct /dev/mem PIO access, see hps/thermal.c.
 # -----------------------------------------------------------------------------
 BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION=y
