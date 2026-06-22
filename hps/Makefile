@@ -33,7 +33,8 @@ SMOKE_PIPE_SRCS = fpga_smoke_pipe.c miner_io_pipe.c odocrypt_state.c \
 
 # 4c. Pipelined mining daemon (stratum loop, free-running pipelined core)
 PIPE_MINER_SRCS = miner_pipe.c miner_io_pipe.c stratum.c job.c odocrypt_header.c \
-                  odocrypt_state.c $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
+                  odocrypt_state.c thermal.c \
+                  $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
 
 # 5. miner_io_test — hardware bring-up test for miner_io layer
 MINER_IO_TEST_SRCS = miner_io_test.c miner_io.c odocrypt_state.c

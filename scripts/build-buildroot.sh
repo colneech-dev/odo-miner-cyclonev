@@ -147,6 +147,14 @@ if [ -d output/build ] && ls -d output/build/linux-* > /dev/null 2>&1; then
     make linux-dirclean > /dev/null 2>&1 || true
     log_info "  ✓ linux-dirclean done (kernel will rebuild with new config)"
 fi
+# Same problem applies to U-Boot: BR2_TARGET_UBOOT_PATCH is only applied at
+# extract time, so an already-extracted source tree silently keeps stale
+# patches applied (or unapplied) even after this script's copy step above.
+if [ -d output/build ] && ls -d output/build/uboot-* > /dev/null 2>&1; then
+    log_info "Step 2.6: Cleaning U-Boot package (pinmux patch changed)..."
+    make uboot-dirclean > /dev/null 2>&1 || true
+    log_info "  ✓ uboot-dirclean done (U-Boot will re-extract + re-patch)"
+fi
 
 # Step 3: Show configuration summary
 log_info "Step 3: Configuration summary"
@@ -224,10 +232,15 @@ if [ ! -x "$CROSS_GCC" ]; then
 fi
 export CC="$CROSS_GCC"
 export CXX="$CROSS_GXX"
-export CFLAGS="-O2 -march=armv7-a -mfpu=neon -mthumb"
-export CXXFLAGS="-O2 -march=armv7-a -mfpu=neon -mthumb"
+# Deliberately NOT exporting CFLAGS/CXXFLAGS here: each project Makefile sets
+# its own CFLAGS with `?=` (e.g. hps/Makefile needs -I$(UPSTREAM_CRYPTO) for
+# odo-miner-pipe, sw/odo-ui/Makefile needs -I./stb) — an exported CFLAGS env
+# var wins over `?=` and silently drops those required include paths, which
+# only shows up as a "fatal error: ... No such file" deep in a sub-build.
+# The control-plane C code here isn't NEON/thumb-sensitive (the hot path is
+# the FPGA), so skipping arch-specific tuning costs nothing measurable.
 
-if make 2>&1 | tee hps-build-arm.log; then
+if make odo-miner odo-miner-watcher fpga_smoke_test odo-miner-pipe 2>&1 | tee hps-build-arm.log; then
     log_info "  ✓ HPS software built for ARM"
     # Touch UI + web dashboard (sw/) with the same toolchain
     for app in odo-ui odo-webd; do
@@ -240,7 +253,7 @@ if make 2>&1 | tee hps-build-arm.log; then
 
     # List binaries
     echo "  Built binaries:"
-    ls -lh odo-miner odo-miner-watcher fpga_smoke_test miner_io_test 2>/dev/null | awk '{print "    " $9 " (" $5 ")"}'
+    ls -lh odo-miner odo-miner-watcher fpga_smoke_test odo-miner-pipe miner_io_test 2>/dev/null | awk '{print "    " $9 " (" $5 ")"}'
 else
     log_warn "  ⚠ HPS build failed"
     log_warn "  Check hps-build-arm.log; ensure the Buildroot build completed first"
