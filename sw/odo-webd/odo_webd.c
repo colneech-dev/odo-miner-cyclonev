@@ -13,8 +13,17 @@
  *   POST /wifi            -> write /etc/wpa_supplicant.conf and reconnect
  *                            (form fields: ssid, psk — empty psk = open network)
  *
- * Plain single-threaded HTTP/1.1, no dependencies. Intended for a trusted
- * LAN: there is NO authentication — do not expose this port to the internet.
+ * Plain single-threaded HTTP/1.1, no dependencies.
+ *
+ * SECURITY MODEL: trusted LAN, NO authentication (accepted by design,
+ * 2026-06-22). The mutating endpoints — POST /action (incl. reboot),
+ * /config, /wifi — and the expensive GET /wifiscan are reachable by any
+ * client that can reach this port. The control is network isolation: run
+ * this only on a trusted home/lab LAN and NEVER expose the port to the
+ * internet (no port-forward, no DMZ). The slow-loris / oversized-request /
+ * scan-hammer hardening below bounds resource abuse, but does NOT add
+ * authentication. To live on an untrusted network, front it with an
+ * authenticating reverse proxy or add a shared-secret token here.
  *
  * Build: make           (cross-compile with CC=...-gcc)
  */
