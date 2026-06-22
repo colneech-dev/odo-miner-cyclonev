@@ -36,6 +36,7 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
+#include <time.h>
 
 #define STATUS_PATH "/run/odod/status.json"
 #define CONF_PATH   "/etc/odod.conf"
@@ -231,14 +232,32 @@ static void serve_wifi_status(int fd)
     send_response(fd, "200 OK", "application/json", body, (size_t)n);
 }
 
+/* A full `iw scan` takes seconds and briefly interrupts the live association
+ * the dashboard rides on. Since the endpoint is unauthenticated, cache the
+ * result so repeated hits can't be used to hammer the radio (a cheap, no-UX
+ * mitigation for the self-DoS; full auth on this endpoint is still TODO —
+ * see docs/review-action-plan.md Bucket C H1). */
+#define WIFI_SCAN_TTL 15   /* seconds */
+
 static void serve_wifi_scan(int fd)
 {
+    static char   cache[3072];
+    static size_t cache_len = 0;
+    static time_t cache_at  = 0;
+
+    time_t now = time(NULL);
+    if (cache_len > 0 && now - cache_at < WIFI_SCAN_TTL) {
+        send_response(fd, "200 OK", "application/json", cache, cache_len);
+        return;
+    }
+
     char body[3072];
     size_t off = 0;
     off += (size_t)snprintf(body + off, sizeof(body) - off, "{\"ssids\":[");
 
-    /* Interface must be up to scan; `ip link set up` is harmless if it is */
-    if (system("ip link set wlan0 up 2>/dev/null") != 0) { }
+    /* Deliberately NOT bouncing the interface up here: on a working board it is
+     * already up, and `ip link set wlan0 up` from an unauthenticated GET would
+     * disrupt the active link. If wlan0 is down the scan just returns nothing. */
     FILE *p = popen("iw dev wlan0 scan 2>/dev/null | sed -n 's/^[[:space:]]*SSID: //p' | sort -u",
                     "r");
     int first = 1;
@@ -258,6 +277,12 @@ static void serve_wifi_scan(int fd)
         pclose(p);
     }
     off += (size_t)snprintf(body + off, sizeof(body) - off, "]}");
+
+    if (off < sizeof(cache)) {            /* refresh the cache */
+        memcpy(cache, body, off);
+        cache_len = off;
+        cache_at  = now;
+    }
     send_response(fd, "200 OK", "application/json", body, off);
 }
 
@@ -450,7 +475,11 @@ int main(int argc, char **argv)
             perror("accept");
             break;
         }
-        struct timeval tv = { 5, 0 };
+        /* Short per-connection receive timeout: this server is single-threaded,
+         * so a client that connects and then stalls would otherwise hold the
+         * whole loop for the timeout window (slow-loris). 2 s is ample for a
+         * LAN request and bounds the damage one idle peer can do. */
+        struct timeval tv = { 2, 0 };
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
         char req[8192];
@@ -468,6 +497,15 @@ int main(int argc, char **argv)
             const char *cl = strstr(req, "Content-Length:");
             if (cl) {
                 long want = strtol(cl + 15, NULL, 10);
+                /* Reject bodies that can't fit the fixed buffer instead of
+                 * silently truncating and then parsing a partial form. */
+                long capacity = (long)(sizeof(req) - (size_t)(body - req) - 1);
+                if (want > capacity) {
+                    send_response(fd, "413 Payload Too Large", "text/plain",
+                                  "request too large\n", 18);
+                    close(fd);
+                    continue;
+                }
                 long have = n - (body - req);
                 while (have < want && have < (long)(sizeof(req) - (body - req) - 1)) {
                     ssize_t m = read(fd, req + n, sizeof(req) - 1 - (size_t)n);
@@ -487,7 +525,11 @@ int main(int argc, char **argv)
             if (pf) {
                 static char page_buf[65536];
                 size_t pn = fread(page_buf, 1, sizeof(page_buf) - 1, pf);
+                int truncated = !feof(pf);   /* file exceeds the buffer */
                 fclose(pf);
+                if (truncated)
+                    fprintf(stderr, "odo-webd: %s exceeds %zu B — serving truncated\n",
+                            CUSTOM_PAGE, sizeof(page_buf) - 1);
                 send_response(fd, "200 OK", "text/html", page_buf, pn);
             } else {
                 send_response(fd, "200 OK", "text/html", PAGE, sizeof(PAGE) - 1);
