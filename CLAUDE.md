@@ -150,19 +150,22 @@ Further throughput would need **THROUGHPUT=4** (~37 MH/s, the upstream max on
 this Cyclone V class), but that ~2× unroll browned the core rail in earlier
 tests — power/regulator-bound, **deferred** (see the `soc_top.v` POWER NOTE).
 
-Active work (see `docs/review-action-plan.md` for the full prioritized list):
+Merged to `main` (2026-06-22): the code-review hardening (stratum extranonce2
+clamp / dead-pool watchdog / pool-confirmed share accept-reject, `odo-webd`
+slow-loris + trusted-LAN model, docs reconciliation) and **`feat/fan-thermal`**
+(PWM fan + J10 fabric-PIO thermal, hardware-verified).
+
+Still on its own branch (see `docs/review-action-plan.md` for the full list):
 - **`feat/uio-miner-io`** — non-root + interrupt-driven register access. WS1
   (found-nonce IRQ RTL), WS2 (kernel UIO + DTS), WS3 (`miner_io_pipe_uio.c`)
   done in software; pending a reflash to verify + WS3b daemon integration.
-- **`fix/daemon-hardening`** — stratum robustness from the code review:
-  extranonce2 clamp, dead-pool watchdog, pool-confirmed share accept/reject.
-- **`feat/fan-thermal`** — PWM fan + J10 fabric-PIO thermal, deployed to SD,
-  awaiting hardware verification; reset-button driver still TODO.
 
 Non-performance backlog:
-1. Fan/thermal/reset-button software — see `docs/FAN_SENSOR_WIRING.md`.
+1. ~~Fan/thermal~~ — done + **hardware-verified 2026-06-22** (PWM fan, DS18B20,
+   tach, 50/45 °C hysteresis; see `docs/FAN_SENSOR_WIRING.md`). Remaining:
+   the **reset-button** driver (J10 pin 36/AE20, wired, no software yet).
 2. ~~Pool failover~~ — done; `ODOD_POOL_HOST2/PORT2` wired into the reconnect
    loop in both `hps/miner.c` and the active `hps/miner_pipe.c`.
-3. Deferred review items: `odo-webd` is unauthenticated on the LAN
-   (`docs/review-action-plan.md` Bucket C); stratum `parse_hex_u32` / oversized-
-   line hardening (Bucket A M5/M1); async-FIFO the 1-deep found handoff.
+3. Deferred review items: `odo-webd` is unauthenticated on the LAN (accepted —
+   trusted-LAN model, documented in `odo_webd.c`); stratum `parse_hex_u32` /
+   oversized-line hardening (Bucket A M5/M1); async-FIFO the 1-deep found handoff.

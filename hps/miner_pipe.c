@@ -25,6 +25,7 @@
 #include "odocrypt_state.h"
 #include "KeccakP-800-SnP.h"
 #include "miner_io_pipe.h"
+#include "thermal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,7 @@
 #include <signal.h>
 #include <time.h>
 #include <math.h>
+#include <pthread.h>
 
 static volatile sig_atomic_t g_term = 0;
 static void on_sig(int s) { (void)s; g_term = 1; }
@@ -99,7 +101,41 @@ static struct {
                                   * ever (persisted) — a genuine found block,
                                   * not just a pool share */
     time_t   last_block;        /* unix time of the most recent block (0 = none yet) */
+    int      temp_c;            /* DS18B20 reading, -1 = no sensor/no reading yet */
+    int      fan_pct;           /* current commanded fan speed, 0-100 (%) */
+    int      fan_rpm;           /* tach-measured RPM, -1 = no tach */
 } g_st;
+
+/* -----------------------------------------------------------------------
+ * Thermal monitoring runs on its own thread so a tach-sampling window
+ * (thermal_tach_rpm blocks for its full duration) never delays draining
+ * the FPGA's 1-deep found-FIFO. g_therm_mu only guards the three fields
+ * above between this thread and status_write() on the main thread.
+ * ---------------------------------------------------------------------- */
+static pthread_mutex_t g_therm_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static void *thermal_thread(void *arg)
+{
+    (void)arg;
+    if (thermal_init() != 0)
+        fprintf(stderr, "[pipe] thermal_init failed; fan control disabled\n");
+
+    while (!g_term) {
+        int t;
+        if (thermal_read_c(&t) == 0) {
+            thermal_fan_update(t);
+            int rpm = thermal_tach_rpm(200);
+            pthread_mutex_lock(&g_therm_mu);
+            g_st.temp_c  = t;
+            g_st.fan_pct = thermal_fan_state();
+            g_st.fan_rpm = rpm;
+            pthread_mutex_unlock(&g_therm_mu);
+        }
+        sleep_ms(2000);
+    }
+    thermal_shutdown();
+    return NULL;
+}
 
 /* -----------------------------------------------------------------------
  * best_diff_alltime / blocks_found persistence — separate file from the FSM
@@ -188,6 +224,9 @@ static void status_write(void)
     g_st.hashrate = (up > 0.0) ? g_st.work_acc / up : 0.0;
     long enext = (g_st.epoch && g_st.epoch_interval)
                ? (long)g_st.epoch + (long)g_st.epoch_interval : 0L;
+    pthread_mutex_lock(&g_therm_mu);
+    int temp_c = g_st.temp_c, fan_pct = g_st.fan_pct, fan_rpm = g_st.fan_rpm;
+    pthread_mutex_unlock(&g_therm_mu);
     fprintf(f,
         "{\n"
         "  \"pool\": \"%s\",\n"
@@ -209,6 +248,9 @@ static void status_write(void)
         "  \"best_diff_alltime\": %.6g,\n"
         "  \"blocks_found\": %" PRIu64 ",\n"
         "  \"last_block\": %ld,\n"
+        "  \"temp_c\": %d,\n"
+        "  \"fan_duty_pct\": %d,\n"
+        "  \"fan_rpm\": %d,\n"
         "  \"uptime\": %ld,\n"
         "  \"updated\": %ld\n"
         "}\n",
@@ -218,6 +260,7 @@ static void status_write(void)
         (long)g_st.last_share,
         g_st.best_diff_session, g_st.best_diff_alltime,
         g_st.blocks_found, (long)g_st.last_block,
+        temp_c, fan_pct, fan_rpm,
         (long)up, (long)now);
     fclose(f);
     rename(tmp, path);
@@ -260,9 +303,16 @@ int main(int argc, char **argv)
     g_st.epoch           = seed;   /* overwritten per job below */
     g_st.bitstream_epoch = seed;   /* fixed: what's actually baked into the FPGA */
     g_st.started = time(NULL);
+    g_st.temp_c  = -1;             /* no reading yet */
+    g_st.fan_rpm = -1;
     g_mono_start = mono_s();       /* clock-step-safe uptime baseline */
     stats_load();                  /* best_diff_alltime, survives reboots */
     status_write();
+
+    pthread_t therm_tid;
+    int have_therm = (pthread_create(&therm_tid, NULL, thermal_thread, NULL) == 0);
+    if (!have_therm)
+        fprintf(stderr, "[pipe] failed to start thermal thread\n");
 
     stratum_ctx_t st;
     if (stratum_init(&st, host, port, worker, pass) != 0) {
@@ -392,6 +442,8 @@ int main(int argc, char **argv)
 
     stratum_destroy(&st);
     miner_io_pipe_shutdown();
+    if (have_therm)
+        pthread_join(therm_tid, NULL);
     printf("[pipe] exit: found=%" PRIu64 " shares=%" PRIu64 " stale=%" PRIu64 "\n",
            found, shares, stale);
     return 0;

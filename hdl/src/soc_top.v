@@ -105,7 +105,17 @@ module soc_top (
     output wire        HPS_SPIM_CLK,
     output wire        HPS_SPIM_MOSI,
     input  wire        HPS_SPIM_MISO,
-    output wire        HPS_SPIM_SS
+    output wire        HPS_SPIM_SS,
+
+    // ---- Fan/thermal header (J10 "GPIO_1", FPGA fabric, pins 35/37/38) ----
+    // bit0=DS18B20 data (one-wire, bidirectional), bit1=tach, bit2=reset
+    // button. See docs/FAN_SENSOR_WIRING.md.
+    inout  wire [2:0]  THERMAL_IO,
+
+    // ---- Fan PWM speed control (J10 pin 36, FPGA fabric) ----
+    // Driven by the pwm_fan peripheral; same physical net pio_thermal's
+    // bit1 used to own when fan control was on/off-only.
+    output wire        FAN_PWM
 );
 
     // ---- Keep the onboard fabric SDRAM deselected (GPIO_0 used as GPIO) ----
@@ -248,6 +258,8 @@ module soc_top (
         .pio_lcd_export                        (pio_lcd_export),
         .pio_in_export                         ({KEY1, KEY0, TP_IRQ_n}),
         .pio_led_export                        (LED),
+        .pio_thermal_export                    (THERMAL_IO),
+        .pwm_fan_pwm_out                       (FAN_PWM),
 
         // HPS DDR3 (memory conduit — auto-assigned by HPS)
         .memory_mem_a                          (HPS_DDR3_ADDR),
