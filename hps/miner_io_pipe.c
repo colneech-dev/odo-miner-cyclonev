@@ -18,6 +18,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/mman.h>
 
 /* Self-contained LWH2F mmap (no dependency on the FSM miner_io.c). The
@@ -97,4 +98,20 @@ int miner_io_pipe_poll(uint32_t *out_nonce)
     uint32_t n = reg_rd(&g_pio, REG_PIPE_FNONCE);   /* read consumes the entry */
     if (out_nonce) *out_nonce = n;
     return 0;
+}
+
+int miner_io_pipe_wait(int timeout_ms)
+{
+    if (g_pio.regs == NULL) return -1;
+    /* A pending nonce means no need to wait at all. */
+    if (reg_rd(&g_pio, REG_PIPE_FSTATUS) & PIPE_FSTAT_VALID)
+        return 0;
+    /* The /dev/mem path has no interrupt: nap a bounded amount, then let the
+     * caller poll. Cap the nap at 5 ms (the daemon's historical poll cadence)
+     * so found-nonce latency stays low, and never sleep "forever". */
+    unsigned ms = (timeout_ms < 0 || timeout_ms > 5) ? 5u : (unsigned)timeout_ms;
+    struct timespec ts = { .tv_sec  = ms / 1000,
+                           .tv_nsec = (long)(ms % 1000) * 1000000L };
+    nanosleep(&ts, NULL);
+    return 1;   /* always "timeout" — there is no IRQ to wake on */
 }

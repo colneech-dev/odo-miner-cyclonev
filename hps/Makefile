@@ -35,6 +35,14 @@ SMOKE_PIPE_SRCS = fpga_smoke_pipe.c miner_io_pipe.c odocrypt_state.c \
 PIPE_MINER_SRCS = miner_pipe.c miner_io_pipe.c stratum.c job.c odocrypt_header.c \
                   odocrypt_state.c $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
 
+# 4d. Pipelined daemon, UIO backend (non-root + IRQ-driven; WS3 of
+# docs/uio-miner-io-scope.md). Identical to 4c but swaps the /dev/mem register
+# layer (miner_io_pipe.c) for the UIO one (miner_io_pipe_uio.c). Needs the
+# kernel UIO device from WS2 to run; builds + links standalone for CI/regression.
+PIPE_MINER_UIO_SRCS = miner_pipe.c miner_io_pipe_uio.c stratum.c job.c \
+                  odocrypt_header.c odocrypt_state.c \
+                  $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c
+
 # 5. miner_io_test — hardware bring-up test for miner_io layer
 MINER_IO_TEST_SRCS = miner_io_test.c miner_io.c odocrypt_state.c
 
@@ -54,7 +62,7 @@ all: odo-miner odo-miner-watcher $(SMOKE_TARGET)
 # -----------------------------------------------------------------------
 # Binaries
 # -----------------------------------------------------------------------
-.PHONY: odo-miner odo-miner-watcher smoke_test miner_io_test smoke_pipe odo-miner-pipe
+.PHONY: odo-miner odo-miner-watcher smoke_test miner_io_test smoke_pipe odo-miner-pipe odo-miner-pipe-uio
 
 odo-miner: $(MINER_OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -72,6 +80,9 @@ smoke_pipe: $(SMOKE_PIPE_SRCS)
 	$(CC) $(CFLAGS) -o $@ $^
 
 odo-miner-pipe: $(PIPE_MINER_SRCS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
+odo-miner-pipe-uio: $(PIPE_MINER_UIO_SRCS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 # -----------------------------------------------------------------------
