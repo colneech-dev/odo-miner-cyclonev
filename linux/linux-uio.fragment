@@ -1,0 +1,14 @@
+# Kernel config fragment: Userspace I/O (UIO) for the FPGA miner register block.
+#
+# Enables non-root + interrupt-driven access to the pipelined miner's Avalon-MM
+# window via /dev/uio0, as an alternative to the root-only /dev/mem path
+# (docs/uio-miner-io-scope.md WS2). multi_v7_defconfig ships neither symbol.
+#
+# uio_pdrv_genirq binds the "generic-uio" devicetree node
+# (socfpga_cyclone5_qmtech_odo.dts) and delivers the WS1 found-nonce interrupt
+# (f2h_irq0 line 3 = GIC SPI 75) to userspace. It only matches that compatible
+# when the kernel cmdline carries `uio_pdrv_genirq.of_id=generic-uio` — set in
+# the boot.scr bootargs (scripts/build-sdcard.sh). Userspace side:
+# hps/miner_io_pipe_uio.c.
+CONFIG_UIO=y
+CONFIG_UIO_PDRV_GENIRQ=y
