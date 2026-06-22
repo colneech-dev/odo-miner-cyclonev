@@ -2,6 +2,19 @@
 hps/*.o
 hps/odod
 hps/fpga_smoke_test
+hps/odo-miner-pipe
+hps/smoke_pipe
+
+# SD card raw image output (large / generated)
+sdcard-output/
+
+# Scratch Quartus runs under RTL experiment dirs
+hdl/src/**/quartus_test*/
+
+# Stray compiled device trees at repo root (build outputs — buildroot
+# regenerates the board DTB under output/images; these were committed by
+# mistake)
+/*.dtb
 
 # Quartus build output
 hdl/quartus/output_files/
@@ -20,6 +33,7 @@ hdl/quartus/*.qws
 hdl/qsys/*_generated/
 hdl/qsys/*.sopcinfo
 hdl/qsys/*.bsp
+hdl/qsys/*.bak
 
 # Bitstreams (tracked via Git LFS, not plain git)
 *.rbf

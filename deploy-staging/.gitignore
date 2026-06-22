@@ -1,8 +1,21 @@
 # Build artifacts staged for SD deployment — do not commit (large / generated).
 *.rbf
 *.log
+*.dtb
+zImage
 odo-miner-pipe
+odo-ui
+odo-webd
 smoke_pipe
 _rootfs.sh
+_rootfs_thermal.sh
+_rootfs_pwm.sh
+_fix_ssh_key.sh
+_spl_thermal.sh
+_build_odoui.sh
+_rebuild_thermal.sh
+*.sfp
+S90odod
+index.html
 # Keep the deploy scripts (reusable for per-epoch deploys).
 !*.ps1

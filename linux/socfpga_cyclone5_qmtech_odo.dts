@@ -13,6 +13,9 @@
  *   0xFF201200  PIO out: LCD D/C, RESET_n, backlight
  *   0xFF201300  PIO in : touch PENIRQ_n, KEY0, KEY1 (IRQ f2h 2 -> GIC SPI 74)
  *   0xFF201400  PIO out: board LEDs
+ *   0xFF201500  PIO bidir: fan/thermal header (J10 "GPIO_1", pins 33-36) --
+ *               no kernel driver, odo-miner-pipe bit-bangs DS18B20 one-wire
+ *               and drives fan/tach directly via /dev/mem (hps/thermal.c)
  *
  * NOTE: the LWH2F bridge must be enabled (via U-Boot bridge_enable or the
  * fpga2hps/hps2fpga bridge driver) before any of these devices probe usefully.
@@ -174,6 +177,7 @@
 		led6 { label = "odo:green:user6";   gpios = <&pio_led 6 GPIO_ACTIVE_HIGH>; };
 		led7 { label = "odo:green:user7";   gpios = <&pio_led 7 GPIO_ACTIVE_HIGH>; };
 	};
+
 };
 
 /* Fixed MAC for EMAC1 (U-Boot has no MAC in its env; without one Linux picks a

@@ -105,7 +105,17 @@ module soc_top (
     output wire        HPS_SPIM_CLK,
     output wire        HPS_SPIM_MOSI,
     input  wire        HPS_SPIM_MISO,
-    output wire        HPS_SPIM_SS
+    output wire        HPS_SPIM_SS,
+
+    // ---- Fan/thermal header (J10 "GPIO_1", FPGA fabric, pins 35/37/38) ----
+    // bit0=DS18B20 data (one-wire, bidirectional), bit1=tach, bit2=reset
+    // button. See docs/FAN_SENSOR_WIRING.md.
+    inout  wire [2:0]  THERMAL_IO,
+
+    // ---- Fan PWM speed control (J10 pin 36, FPGA fabric) ----
+    // Driven by the pwm_fan peripheral; same physical net pio_thermal's
+    // bit1 used to own when fan control was on/off-only.
+    output wire        FAN_PWM
 );
 
     // ---- Keep the onboard fabric SDRAM deselected (GPIO_0 used as GPIO) ----
@@ -143,10 +153,14 @@ module soc_top (
     defparam u_pll_fab.width_clock             = 6;
 
     // ---- PLL: 50 MHz → 150 MHz pipelined-miner clock -----------------------
-    // Dedicated PLL for the pipelined OdoCrypt core (THROUGHPUT=8 → ~18.75 MH/s
-    // raw). Separate from u_pll_fab so the 150 MHz and 55 MHz domains don't
-    // share a VCO solution. Exported into soc_system as miner_clk_clk; the
-    // wrapper's CDC bridges 55<->150 MHz.
+    // Dedicated PLL for the pipelined OdoCrypt core. DEPLOYED CONFIG:
+    // THROUGHPUT=7 @ 150 MHz ≈ 21.4 MH/s raw (see odo_miner.qsf VERILOG_MACRO).
+    // The clock-exploration narrative below predates the T=7 deployment and is
+    // written against the older T=8 build — kept for the power-regime context,
+    // but the live number is T=7/150 MHz/21.4 MH/s.
+    // Separate from u_pll_fab so the 150 MHz and 55 MHz domains don't share a
+    // VCO solution. Exported into soc_system as miner_clk_clk; the wrapper's CDC
+    // bridges 55<->150 MHz.
     // NOTE: an EARLIER 150 MHz brownout was at THROUGHPUT=4 (~2x this design's
     // active logic) — a different power regime. T=8 has now soaked stable on
     // hardware at 100/125/137.5 MHz with margin to spare (Fmax 158.58 MHz @
@@ -244,6 +258,8 @@ module soc_top (
         .pio_lcd_export                        (pio_lcd_export),
         .pio_in_export                         ({KEY1, KEY0, TP_IRQ_n}),
         .pio_led_export                        (LED),
+        .pio_thermal_export                    (THERMAL_IO),
+        .pwm_fan_pwm_out                       (FAN_PWM),
 
         // HPS DDR3 (memory conduit — auto-assigned by HPS)
         .memory_mem_a                          (HPS_DDR3_ADDR),
