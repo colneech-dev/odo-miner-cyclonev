@@ -3,6 +3,11 @@ hps/*.o
 hps/odod
 hps/fpga_smoke_test
 
+# Stray compiled device trees at repo root (build outputs — buildroot
+# regenerates the board DTB under output/images; these were committed by
+# mistake)
+/*.dtb
+
 # Quartus build output
 hdl/quartus/output_files/
 hdl/quartus/db/
