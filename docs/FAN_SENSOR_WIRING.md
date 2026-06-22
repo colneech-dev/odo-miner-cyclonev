@@ -141,16 +141,23 @@ rest; pressing the button pulls it to GND. Hardware-allocated
 
 ---
 
-## Pending software/hardware tasks
+## Software/hardware task status
+
+**Hardware-verified end-to-end on 2026-06-22** (board booted with the PWM
+bitstream + binaries; watched the full thermal loop under live mining load):
 
 | # | What | Status |
 |---|------|--------|
-| 1 | DS18B20 read over `pio_thermal` (one-wire bit-bang) | presence pulse + readings work; CRC mismatches still seen intermittently (electrical noise — pull-up value/wire routing/decoupling not yet revisited) |
-| 2 | Fan tach over `pio_thermal` | not retested since the J10 pin correction; needs a fresh check |
-| 3 | `pwm_fan` proportional speed control | RTL/HPS driver complete, **not yet hardware-verified** — pending bitstream deploy |
-| 4 | UI: `fan_duty_pct` on touch UI + web dashboard | done |
-| 5 | Reset button polling (`pio_thermal` bit2) | **not started** |
+| 1 | DS18B20 read over `pio_thermal` (one-wire bit-bang) | ✅ verified — real readings tracked load 34→49→45 °C (no 85/-127 error sentinels). CRC-retry in `thermal.c` handles intermittent one-wire noise; no bad readings observed this run. |
+| 2 | Fan tach over `pio_thermal` | ✅ verified — read **2700 RPM** while the fan ran at 30% duty. |
+| 3 | `pwm_fan` proportional speed control | ✅ verified — at 50 °C the daemon wrote `DUTY=0x4C` (76/255 ≈ 30% = `THERMAL_FAN_MIN_PCT`) to `0xFF201600` and the fan spun; off at 45 °C. Higher-duty points (toward `THERMAL_FAN_MAX_C` 65 °C) not yet exercised — idle-mining tops out ~50 °C. |
+| 4 | UI: `fan_duty_pct` on touch UI + web dashboard | ✅ done; `status.json` carries `temp_c`/`fan_duty_pct`/`fan_rpm`. |
+| 5 | Reset button polling (`pio_thermal` bit2) | **not started** — pin wired (J10 36/AE20), reads idle-high in `pio_thermal` data bit2; no driver yet. |
 
-Once PWM is verified on hardware (fan spins at several intermediate duty%
-values, tach RPM scales sensibly with duty), re-check the DS18B20 CRC issue
-and tach reliability and update this section.
+Verified hysteresis: fan **ON at `THERMAL_FAN_ON_C` (50 °C)**, **OFF at
+`THERMAL_FAN_OFF_C` (45 °C)**, no chatter. `THERMAL_FAN_MIN_PCT` = 30%,
+ramping to full by `THERMAL_FAN_MAX_C` (65 °C).
+
+Remaining: (a) exercise the duty ramp above 30% by driving the chip past
+50 °C under sustained load and confirming RPM scales toward `MAX_C`; (b) the
+reset-button driver (#5).
