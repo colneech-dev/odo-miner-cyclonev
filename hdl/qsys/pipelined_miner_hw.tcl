@@ -86,3 +86,12 @@ add_interface_port s0 avs_write       write       Input  1
 add_interface_port s0 avs_writedata   writedata   Input  32
 add_interface_port s0 avs_readdata    readdata    Output 32
 add_interface_port s0 avs_waitrequest waitrequest Output 1
+
+#
+# irq: Avalon interrupt sender, level, asserted while a found nonce is
+# waiting to be consumed (see pipelined_miner_top.v). docs/uio-miner-io-scope.md
+# WS1.
+#
+add_interface irq interrupt end
+set_interface_property irq associatedAddressablePoint s0
+add_interface_port irq irq irq Output 1

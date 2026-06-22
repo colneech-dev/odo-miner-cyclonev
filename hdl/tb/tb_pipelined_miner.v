@@ -23,13 +23,23 @@ module tb_pipelined_miner;
     reg  [31:0] avs_writedata = 0;
     wire [31:0] avs_readdata;
     wire        avs_waitrequest;
+    wire        irq;
 
     pipelined_miner_top dut (
         .clk(clk), .reset_n(reset_n), .miner_clk(miner_clk),
         .avs_address(avs_address), .avs_read(avs_read), .avs_write(avs_write),
         .avs_writedata(avs_writedata), .avs_readdata(avs_readdata),
-        .avs_waitrequest(avs_waitrequest)
+        .avs_waitrequest(avs_waitrequest), .irq(irq)
     );
+
+    // WS1 (docs/uio-miner-io-scope.md): irq must track found_valid exactly —
+    // one rising edge per found nonce, cleared the same cycle FNONCE is read.
+    integer irq_rises = 0;
+    reg     irq_d = 0;
+    always @(posedge clk) begin
+        if (reset_n && irq && !irq_d) irq_rises = irq_rises + 1;
+        irq_d <= irq;
+    end
 
     // register map (mirror of hps_regs_pipe.h)
     localparam ADDR_STATUS  = 8'h04;
@@ -84,6 +94,11 @@ module tb_pipelined_miner;
         avs_rd(ADDR_SEED, rdata);
         $display("SEED reg = 0x%08x (expect 0x%08x)", rdata, `ODOKEY);
 
+        if (irq !== 1'b0) begin
+            $display("TB_FAIL: irq asserted before any find (irq=%b)", irq);
+            $finish;
+        end
+
         // load header (19), target (8)
         for (i = 0; i < 19; i = i + 1) avs_wr(ADDR_HEADER + i*4, header_mem[i]);
         for (i = 0; i < 8;  i = i + 1) avs_wr(ADDR_TARGET + i*4, target_mem[i]);
@@ -102,8 +117,26 @@ module tb_pipelined_miner;
             $finish;
         end
 
+        // WS1: irq must already be asserted exactly once by the time
+        // FSTATUS reports a pending find (it's the same found_valid signal).
+        if (irq !== 1'b1 || irq_rises !== 1) begin
+            $display("TB_FAIL: irq not asserted exactly once at find time (irq=%b rises=%0d)",
+                      irq, irq_rises);
+            $finish;
+        end
+
         avs_rd(ADDR_FNONCE, found_nonce);  // read-to-consume
         $display("FOUND_NONCE=%08x  (after %0d polls)", found_nonce, polls);
+
+        // WS1: irq must clear the same cycle the nonce is consumed, and must
+        // not have fired again in the meantime (still exactly 1 rising edge).
+        if (irq !== 1'b0 || irq_rises !== 1) begin
+            $display("TB_FAIL: irq not cleared after FNONCE read (irq=%b rises=%0d)",
+                      irq, irq_rises);
+            $finish;
+        end
+
+        $display("IRQ_OK: asserted once, cleared on FNONCE consume");
         $display("TB_FOUND");  // run script verifies the nonce via the oracle
         $finish;
     end
