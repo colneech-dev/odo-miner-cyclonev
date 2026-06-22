@@ -30,7 +30,12 @@ module pipelined_miner_top (
     input  wire        avs_write,
     input  wire [31:0] avs_writedata,
     output reg  [31:0] avs_readdata,
-    output wire        avs_waitrequest
+    output wire        avs_waitrequest,
+
+    // Avalon interrupt sender: level, asserted while a found nonce is
+    // waiting to be consumed (mirrors FSTATUS bit0); clears itself the
+    // same cycle the HPS reads ADDR_FNONCE, no separate ack register.
+    output wire        irq
 );
     assign avs_waitrequest = 1'b0;   // single-cycle register access
 
@@ -127,6 +132,7 @@ module pipelined_miner_top (
     reg        ack_tgl_a;
     reg [31:0] fnonce_a;
     wire       found_valid = (reqa_s2 != ack_tgl_a);
+    assign     irq = found_valid;
     initial begin
         prev_nonce_m = 0; fnonce_hold_m = 0; req_tgl_m = 0;
         ackm_s1 = 0; ackm_s2 = 0;
