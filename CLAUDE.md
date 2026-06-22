@@ -31,16 +31,35 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 - `scripts/` — build and deployment helpers
 - `services/` — init/service unit files
 
-## Current status (2026-06-16)
+## Current status (2026-06-22)
 
-- **Algorithm correct in RTL, proven**: `hdl/tb/run_tb.sh` drives the full
-  register interface and reproduces upstream OdoCrypt+Keccak hashes bit-exact
-  for multiple (epoch, header, nonce) vectors. The C oracle in
-  `hps/odocrypt_state.c` matches upstream `odocrypt.cpp` (`make check`).
+- **DEPLOYED: pipelined core** (`feat/pipelined-miner`, merged to `main`). The
+  upstream pipelined `odo_encrypt` (epoch baked into LUTs, free-running nonce
+  sweep) is what the board runs today: **THROUGHPUT=7 @ 150 MHz miner clock ≈
+  21.4 MH/s raw** (`odo_miner.qsf` VERILOG_MACRO + `soc_top.v` `u_pll_miner`
+  ×3) — ~375× the old sequential FSM. Wrapper `hdl/src/pipelined/
+  pipelined_miner_top.v`, register map `hps/hps_regs_pipe.h` /
+  `docs/register-map.md`, daemon `hps/miner_pipe.c` + `hps/miner_io_pipe.c`.
+  Autonomy intact: per-epoch bitstreams are precompiled off-board and
+  hot-swapped + reboot when `job.epoch != SEED` (`usr/sbin/epoch-update.sh`).
+  Sim regression: `hdl/tb/run_tb_pipe.sh` (bit-exact vs the oracle).
+- **Algorithm correct in RTL, proven**: the testbenches drive the full register
+  interface and reproduce upstream OdoCrypt+Keccak hashes bit-exact for multiple
+  (epoch, header, nonce) vectors. The C oracle in `hps/odocrypt_state.c` matches
+  upstream `odocrypt.cpp` (`make check`).
 - **Mining on hardware, proven**: board mined ~485 blocks on the testnet
-  (2026-06-11). Running dual-core + shared tables at **~57 KH/s** @ 55 MHz on
-  the testnet pool (2026-06-16; was ~52 KH/s @ 50 MHz). WiFi stable (0 DEAUTH
-  events, USB autosuspend disabled).
+  (2026-06-11) and has accepted shares on mainnet. WiFi stable (0 DEAUTH events,
+  USB autosuspend disabled).
+
+### Superseded: sequential-FSM history (path retired)
+
+> The bullets below document the **sequential-FSM** core (`hdl/src/odocrypt_top.v`,
+> `~57 KH/s`), which the pipelined core above replaced. Kept for context on why
+> the FSM was abandoned (logic/routing ceiling). The FSM RTL + `hps/miner.c`
+> path still exist but are not deployed.
+
+- **Dual-core FSM** ran at **~57 KH/s** @ 55 MHz (was ~52 KH/s @ 50 MHz) — the
+  FSM ceiling on this device.
 - **Dual-core FPGA** (`perf/dual-core` branch): two independent
   `odocrypt_core` + `odocrypt_epoch_tables` pairs in `hdl/src/odocrypt_top.v`;
   epoch write stream fanned out to both; nonce range split at midpoint; first
@@ -101,41 +120,49 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 
 ## Notes
 
-- `docs/TODO.md` is the authoritative status/plan document (refreshed 2026-06-14).
+- `docs/TODO.md` is the authoritative status/plan document.
+- `docs/register-map.md` — the deployed pipelined-core Avalon register contract.
+- `docs/review-action-plan.md` — prioritized findings from the 2026-06-22 review.
 - `docs/DISPLAY_WIRING.md` — physical wiring for the SPI touch screen.
-- `docs/FAN_SENSOR_WIRING.md` — J12 GPIO_1 wiring for DS18B20, PWM fan,
-  reset button; pending software tasks listed there.
-- RTL regression: `hdl/tb/run_tb.sh` (Icarus in WSL). Run it after ANY
-  change to core/tables/keccak, then copy updated RTL into
+- `docs/FAN_SENSOR_WIRING.md` — J10 ("GPIO_1") fabric-PIO wiring for DS18B20,
+  PWM fan, reset button; pending software tasks listed there.
+- Pipelined RTL regression: `hdl/tb/run_tb_pipe.sh`. The FSM regression
+  `hdl/tb/run_tb.sh` still applies to the retired FSM core; run the relevant one
+  after a core/tables/keccak change, then copy updated RTL into
   `hdl/qsys/soc_system/synthesis/submodules/` before recompiling Quartus
   (Qsys caches its own copy — do NOT rely on auto-copy without re-generating).
 
 ## Next steps
 
-**Sequential-FSM hashrate is maxed at ~57 KH/s on this board** (hardware-proven
-2026-06-16). Both ways to add throughput were built and FAILED to fit/route:
-- **3rd core** (`perf/shared-keccak`, commit f9c430d, reverted): Quartus
-  Error 11802 *Can't fit* at 93% requested ALM — logic capacity wall.
-- **Widen Mix** 2 rot/cyc (commit 939c984, reverted): correct RTL (run_tb.sh
-  bit-exact) but the twin 10-rotator bank is *routing*-bound — "router
-  terminated due to congestion" at 82% ALM under HIGH PERFORMANCE EFFORT, and
-  with BALANCED + aggressive-routability it routes at 78% but clk_fab Fmax
-  craters to **26.4 MHz** (~31 KH/s). Can't get both route and timing.
-- **75 MHz** infeasible (Pbox rotator path ~17 ns; pipelining it nets only ~+7%).
-- The clean win that stuck: **shared Keccak** (71→67% ALM, frees logic but no
-  standalone hashrate gain) — an enabler, not a deploy target.
+**The performance path is DONE and deployed.** The architectural rewrite scoped
+in `docs/pipelined-miner-scope.md` shipped: the upstream pipelined `odo_encrypt`
+(epoch baked into LUTs) runs on the board at **THROUGHPUT=7 @ 150 MHz ≈ 21.4
+MH/s raw** — ~375× the retired sequential FSM. Autonomy is preserved by
+precompiling each epoch's bitstream off-board and hot-reconfiguring the fabric
+on the HPS (`CONFIG_FPGA_MGR_SOCFPGA` + bridges + region; `epoch-update.sh`).
 
-**The real performance path is architectural**, scoped in
-`docs/pipelined-miner-scope.md`: the upstream pipelined `odo_encrypt` does
-~**37 MH/s** on the same Cyclone V class (150 MHz, THROUGHPUT=4) by baking the
-epoch into LUTs — ~650× the FSM. Keep autonomy by **pre-compiling each epoch's
-bitstream off-board** (an x86 host runs the upstream `autocompile.sh`) and
-**hot-reconfiguring the fabric** on the HPS (kernel already has
-`CONFIG_FPGA_MGR_SOCFPGA` + bridges + region). Phase 0 spike = compile the
-pipelined core for our `5CSXFC6C6` and measure fit/Fmax/MH/s (go/no-go gate).
+For history: the **sequential FSM maxed at ~57 KH/s** and both ways to push it
+(3rd core, widen-Mix) failed to fit/route — a logic+routing ceiling, which is
+exactly why the pipelined rewrite was pursued. The FSM RTL is retired in place
+(`hdl/src/odocrypt_top.v`, not deployed).
+
+Further throughput would need **THROUGHPUT=4** (~37 MH/s, the upstream max on
+this Cyclone V class), but that ~2× unroll browned the core rail in earlier
+tests — power/regulator-bound, **deferred** (see the `soc_top.v` POWER NOTE).
+
+Active work (see `docs/review-action-plan.md` for the full prioritized list):
+- **`feat/uio-miner-io`** — non-root + interrupt-driven register access. WS1
+  (found-nonce IRQ RTL), WS2 (kernel UIO + DTS), WS3 (`miner_io_pipe_uio.c`)
+  done in software; pending a reflash to verify + WS3b daemon integration.
+- **`fix/daemon-hardening`** — stratum robustness from the code review:
+  extranonce2 clamp, dead-pool watchdog, pool-confirmed share accept/reject.
+- **`feat/fan-thermal`** — PWM fan + J10 fabric-PIO thermal, deployed to SD,
+  awaiting hardware verification; reset-button driver still TODO.
 
 Non-performance backlog:
-1. Fan/thermal/reset button software (pending tasks 3–6 in `docs/FAN_SENSOR_WIRING.md`).
-2. Merge `claude/18b20-fan-gpio-setup-r4bm1f` → `Fabel` after fixing DTS comments
-   and Makefile dead-code identified in that branch's review.
-3. Pool failover: wire `ODOD_POOL_HOST2/PORT2` into `hps/miner.c` reconnect loop.
+1. Fan/thermal/reset-button software — see `docs/FAN_SENSOR_WIRING.md`.
+2. ~~Pool failover~~ — done; `ODOD_POOL_HOST2/PORT2` wired into the reconnect
+   loop in both `hps/miner.c` and the active `hps/miner_pipe.c`.
+3. Deferred review items: `odo-webd` is unauthenticated on the LAN
+   (`docs/review-action-plan.md` Bucket C); stratum `parse_hex_u32` / oversized-
+   line hardening (Bucket A M5/M1); async-FIFO the 1-deep found handoff.
