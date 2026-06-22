@@ -143,10 +143,14 @@ module soc_top (
     defparam u_pll_fab.width_clock             = 6;
 
     // ---- PLL: 50 MHz → 150 MHz pipelined-miner clock -----------------------
-    // Dedicated PLL for the pipelined OdoCrypt core (THROUGHPUT=8 → ~18.75 MH/s
-    // raw). Separate from u_pll_fab so the 150 MHz and 55 MHz domains don't
-    // share a VCO solution. Exported into soc_system as miner_clk_clk; the
-    // wrapper's CDC bridges 55<->150 MHz.
+    // Dedicated PLL for the pipelined OdoCrypt core. DEPLOYED CONFIG:
+    // THROUGHPUT=7 @ 150 MHz ≈ 21.4 MH/s raw (see odo_miner.qsf VERILOG_MACRO).
+    // The clock-exploration narrative below predates the T=7 deployment and is
+    // written against the older T=8 build — kept for the power-regime context,
+    // but the live number is T=7/150 MHz/21.4 MH/s.
+    // Separate from u_pll_fab so the 150 MHz and 55 MHz domains don't share a
+    // VCO solution. Exported into soc_system as miner_clk_clk; the wrapper's CDC
+    // bridges 55<->150 MHz.
     // NOTE: an EARLIER 150 MHz brownout was at THROUGHPUT=4 (~2x this design's
     // active logic) — a different power regime. T=8 has now soaked stable on
     // hardware at 100/125/137.5 MHz with margin to spare (Fmax 158.58 MHz @
