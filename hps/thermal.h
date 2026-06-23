@@ -53,11 +53,19 @@
 /* Fan speed ramp: 0% below THERMAL_FAN_ON_C, linear THERMAL_FAN_MIN_PCT..100
  * between THERMAL_FAN_ON_C and THERMAL_FAN_MAX_C, then held at 100%. Once
  * running, only drops back to 0% below THERMAL_FAN_OFF_C (hysteresis gap
- * prevents chatter right at the threshold). */
-#define THERMAL_FAN_ON_C     50
-#define THERMAL_FAN_OFF_C    45
-#define THERMAL_FAN_MAX_C    65
-#define THERMAL_FAN_MIN_PCT  30
+ * prevents chatter right at the threshold).
+ *
+ * Curve shifted DOWN + STEEP (2026-06-23) for the T=6 power margin: the one
+ * early T=6 brownout happened the first time the die crossed ~50 C while the
+ * fan was only just ramping. Bringing the fan on at 38 C and to FULL by 48 C
+ * means it's already cooling hard before the die reaches the marginal zone,
+ * holding temp (and FPGA leakage current) lower so the rail stays under its
+ * limit. Under continuous mining load temp stays > OFF_C, so the fan simply
+ * runs continuously — fine for a dedicated miner. */
+#define THERMAL_FAN_ON_C     38
+#define THERMAL_FAN_OFF_C    33
+#define THERMAL_FAN_MAX_C    48
+#define THERMAL_FAN_MIN_PCT  40
 
 /*
  * thermal_init - map the pio_thermal register block and set fixed pin
