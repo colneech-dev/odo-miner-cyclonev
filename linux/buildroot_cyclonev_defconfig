@@ -39,7 +39,7 @@ BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.6.26"
 BR2_LINUX_KERNEL_DEFCONFIG="multi_v7"
-BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="board/qmtech/cyclonev/linux-wifi.fragment board/qmtech/cyclonev/linux-fpga.fragment board/qmtech/cyclonev/linux-display.fragment"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="board/qmtech/cyclonev/linux-wifi.fragment board/qmtech/cyclonev/linux-fpga.fragment board/qmtech/cyclonev/linux-display.fragment board/qmtech/cyclonev/linux-uio.fragment"
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
 # Primary DTB: custom QMTECH board DTS (SoCDK base + fabric peripherals).
 # SoCDK DTB is kept as a known-good fallback for bring-up.

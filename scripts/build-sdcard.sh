@@ -264,7 +264,11 @@ fi
 cat > "/tmp/odo-boot-$$.txt" <<UBOOT
 echo "odo-miner boot script"
 
-setenv bootargs root=/dev/mmcblk0p2 rw rootwait console=ttyS0,115200n8 consoleblank=0
+# uio_pdrv_genirq.of_id lets uio_pdrv_genirq bind the "generic-uio" miner node
+# (socfpga_cyclone5_qmtech_odo.dts) -> /dev/uio0 + the found-nonce IRQ. Harmless
+# when no such node/driver is present; required for the UIO miner backend
+# (hps/miner_io_pipe_uio.c, docs/uio-miner-io-scope.md WS2).
+setenv bootargs root=/dev/mmcblk0p2 rw rootwait console=ttyS0,115200n8 consoleblank=0 uio_pdrv_genirq.of_id=generic-uio
 
 if test -e mmc 0:1 fpga.rbf; then
     echo "Loading FPGA bitstream..."
