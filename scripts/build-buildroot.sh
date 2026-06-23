@@ -83,6 +83,7 @@ mkdir -p "$BUILDROOT_DIR/board/qmtech/cyclonev"
 cp "$FRAGMENTS_SRC_DIR/linux-wifi.fragment" \
    "$FRAGMENTS_SRC_DIR/linux-fpga.fragment" \
    "$FRAGMENTS_SRC_DIR/linux-display.fragment" \
+   "$FRAGMENTS_SRC_DIR/linux-uio.fragment" \
    "$FRAGMENTS_SRC_DIR/uboot-autoboot.fragment" \
    "$FRAGMENTS_SRC_DIR/socfpga_cyclone5_qmtech_odo.dts" \
    "$BUILDROOT_DIR/board/qmtech/cyclonev/"

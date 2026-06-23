@@ -42,6 +42,22 @@ int  miner_io_pipe_dispatch(const uint8_t header[80], const uint8_t target[32]);
  * 1 = none pending, <0 = error. */
 int  miner_io_pipe_poll(uint32_t *out_nonce);
 
+/* Block until the FPGA signals a found nonce, or until timeout_ms elapses.
+ * Lets the daemon stop fixed-interval polling: the UIO backend sleeps on the
+ * hardware interrupt (f2h_irq0 line 3 = the wrapper's found_valid level); the
+ * /dev/mem backend has no interrupt and falls back to a short bounded nap.
+ *
+ * timeout_ms MUST bound the wait so a missing/stuck IRQ degrades to polling
+ * rather than hanging the daemon under the watchdog (never infinite — see
+ * docs/uio-miner-io-scope.md risk #3); a negative value is treated as a sane
+ * default cap, not "wait forever". After any return, drain with
+ * miner_io_pipe_poll() until it returns 1.
+ *
+ * Returns: 0 = woken (a nonce is likely pending — drain now),
+ *          1 = timed out (drain defensively anyway),
+ *         <0 = error. */
+int  miner_io_pipe_wait(int timeout_ms);
+
 #ifdef __cplusplus
 }
 #endif

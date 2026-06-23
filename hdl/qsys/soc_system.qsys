@@ -904,6 +904,13 @@
   <parameter name="irqNumber" value="2" />
  </connection>
  <connection
+   kind="interrupt"
+   version="25.1"
+   start="hps_0.f2h_irq0"
+   end="odo_0.irq">
+  <parameter name="irqNumber" value="3" />
+ </connection>
+ <connection
    kind="reset"
    version="25.1"
    start="clk_0.clk_reset"

@@ -35,7 +35,7 @@ set_fileset_property QUARTUS_SYNTH ENABLE_FILE_OVERWRITE_MODE false
 add_fileset_file pipelined_miner_top.v VERILOG PATH ../src/pipelined/pipelined_miner_top.v TOP_LEVEL_FILE
 add_fileset_file odo_miner_core.v      VERILOG PATH ../src/pipelined/odo_miner_core.v
 add_fileset_file keccak800.v           VERILOG PATH ../src/pipelined/keccak800.v
-add_fileset_file odo_1781568000_t7.v   VERILOG PATH ../src/pipelined/odo_1781568000_t7.v
+add_fileset_file odo_1781568000_t6.v   VERILOG PATH ../src/pipelined/odo_1781568000_t6.v
 
 #
 # clk: Avalon / soc_system fabric clock (~55 MHz)
@@ -86,3 +86,12 @@ add_interface_port s0 avs_write       write       Input  1
 add_interface_port s0 avs_writedata   writedata   Input  32
 add_interface_port s0 avs_readdata    readdata    Output 32
 add_interface_port s0 avs_waitrequest waitrequest Output 1
+
+#
+# irq: Avalon interrupt sender, level, asserted while a found nonce is
+# waiting to be consumed (see pipelined_miner_top.v). docs/uio-miner-io-scope.md
+# WS1.
+#
+add_interface irq interrupt end
+set_interface_property irq associatedAddressablePoint s0
+add_interface_port irq irq irq Output 1
