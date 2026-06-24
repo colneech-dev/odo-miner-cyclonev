@@ -120,9 +120,15 @@ static size_t hex_to_bytes(const char *hex, uint8_t *out, size_t max_out)
     return len / 2;
 }
 
-static uint32_t parse_hex_u32(const char *hex)
+/* Parse a hex string to u32 (M5). Returns 0 on success and writes *out; -1 if
+ * the string is empty or contains any non-hex char — so a malformed
+ * version/nbits/ntime in a notify rejects the job instead of silently mining a
+ * zeroed field. */
+static int parse_hex_u32(const char *hex, uint32_t *out)
 {
     uint32_t value = 0;
+    if (!hex || *hex == '\0')
+        return -1;                         /* empty = malformed */
     while (*hex != '\0') {
         char c = *hex++;
         uint32_t nibble;
@@ -133,10 +139,11 @@ static uint32_t parse_hex_u32(const char *hex)
         else if (c >= 'A' && c <= 'F')
             nibble = (uint32_t)(10 + c - 'A');
         else
-            break;
+            return -1;                     /* non-hex char = malformed */
         value = (value << 4) | nibble;
     }
-    return value;
+    *out = value;
+    return 0;
 }
 
 static void bytes_to_hex(const uint8_t *src, size_t src_len, char *dst, size_t dst_len)
@@ -333,11 +340,14 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
 
 #undef NEXT_STR
 
-    /* Populate numeric fields */
+    /* Populate numeric fields — reject the job if any is malformed (M5). */
     snprintf(job.job_id, sizeof(job.job_id), "%s", job_id_buf);
-    job.version = parse_hex_u32(version_hex);
-    job.nbits   = parse_hex_u32(nbits_hex);
-    job.ntime   = parse_hex_u32(ntime_hex);
+    if (parse_hex_u32(version_hex, &job.version) != 0 ||
+        parse_hex_u32(nbits_hex,   &job.nbits)   != 0 ||
+        parse_hex_u32(ntime_hex,   &job.ntime)   != 0) {
+        fprintf(stderr, "[stratum] notify: malformed version/nbits/ntime — ignoring job\n");
+        return -1;
+    }
 
     /* OdoCrypt epoch key: ntime rounded down to the shapechange interval
      * (upstream pool/stratum/header.py: odokey = ntime - ntime % interval). */
@@ -617,8 +627,16 @@ int stratum_poll(stratum_ctx_t *ctx, int timeout_ms)
         return -1;
     ctx->last_rx = time(NULL);   /* pool is alive — pet the watchdog */
 
-    if ((size_t)n + ctx->rxlen >= sizeof(ctx->rxbuf))
-        return -1;
+    if ((size_t)n + ctx->rxlen >= sizeof(ctx->rxbuf)) {
+        /* A single line has grown past the buffer with no newline to split on
+         * (the parse loop drains complete lines every poll, so rxbuf only ever
+         * holds one trailing partial). Drop that overlong partial and resync on
+         * the next newline instead of tearing down the connection (M1). The
+         * 4 KB recv always fits once rxlen is reset, so parsing continues below. */
+        fprintf(stderr, "[stratum] oversized line >%zuB — dropping partial, resyncing\n",
+                sizeof(ctx->rxbuf));
+        ctx->rxlen = 0;
+    }
 
     memcpy(ctx->rxbuf + ctx->rxlen, buffer, (size_t)n);
     ctx->rxlen += (size_t)n;
