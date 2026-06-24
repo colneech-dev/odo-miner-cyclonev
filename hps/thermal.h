@@ -105,6 +105,12 @@ int  thermal_fan_state(void);
  */
 int  thermal_tach_rpm(int window_ms);
 
+/* thermal_reset_pressed - read the reset button (pio_thermal bit2). The line
+ * idles HIGH (pulled up) and is pulled LOW when the button is pressed, so this
+ * returns 1 = pressed, 0 = released (or block not mapped). Non-blocking; the
+ * caller debounces (e.g. require a sustained hold) before acting. */
+int  thermal_reset_pressed(void);
+
 /* thermal_shutdown - turn the fan off and unmap the register block. */
 void thermal_shutdown(void);
 
