@@ -114,12 +114,18 @@ static struct {
  * ---------------------------------------------------------------------- */
 static pthread_mutex_t g_therm_mu = PTHREAD_MUTEX_INITIALIZER;
 
+/* Reset button (pio_thermal bit2): hold ~2 s to reboot. Polled at 10 Hz during
+ * the thermal thread's idle window; the line idles high, so a floating/unpressed
+ * pin never triggers, and the long hold rules out accidental brushes. */
+#define RESET_HOLD_TICKS  20   /* 20 x 100 ms = ~2 s held */
+
 static void *thermal_thread(void *arg)
 {
     (void)arg;
     if (thermal_init() != 0)
         fprintf(stderr, "[pipe] thermal_init failed; fan control disabled\n");
 
+    int reset_held = 0;
     while (!g_term) {
         int t;
         if (thermal_read_c(&t) == 0) {
@@ -131,7 +137,19 @@ static void *thermal_thread(void *arg)
             g_st.fan_rpm = rpm;
             pthread_mutex_unlock(&g_therm_mu);
         }
-        sleep_ms(2000);
+        /* Idle window doubles as the reset-button poll (10 Hz). */
+        for (int i = 0; i < 20 && !g_term; i++) {
+            if (thermal_reset_pressed()) {
+                if (++reset_held >= RESET_HOLD_TICKS) {
+                    fprintf(stderr, "[pipe] reset button held -- rebooting\n");
+                    if (system("sync; reboot") != 0) { /* best effort */ }
+                    reset_held = 0;
+                }
+            } else {
+                reset_held = 0;
+            }
+            sleep_ms(100);
+        }
     }
     thermal_shutdown();
     return NULL;
