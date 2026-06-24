@@ -345,6 +345,13 @@ int thermal_tach_rpm(int window_ms)
     return (edges / 2) * 60000 / window_ms;
 }
 
+int thermal_reset_pressed(void)
+{
+    if (!g_th.regs) return 0;          /* not mapped -> treat as released */
+    /* Active-low: the line idles high (pulled up), pressed pulls it low. */
+    return pio_read_bit(THERMAL_BIT_RESET) ? 0 : 1;
+}
+
 void thermal_shutdown(void)
 {
     thermal_fan_set_pct(0);
