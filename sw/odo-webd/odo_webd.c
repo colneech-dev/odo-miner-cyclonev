@@ -143,6 +143,9 @@ static void serve_sysinfo(int fd)
     send_response(fd, "200 OK", "application/json", body, (size_t)n);
 }
 
+/* forward declaration — form_get defined later in this file */
+static void form_get(const char *body, const char *key, char *out, size_t out_sz);
+
 /* ------------------------------------------------------------------ */
 /* Screen settings (dim timeout + level)                               */
 /* ------------------------------------------------------------------ */
