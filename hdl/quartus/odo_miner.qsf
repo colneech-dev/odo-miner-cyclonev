@@ -49,7 +49,7 @@ set_global_assignment -name AUTO_SHIFT_REGISTER_RECOGNITION OFF
 # (the baked-in epoch seed) as Verilog macros. ODOKEY must match the
 # odo_<seed>.v listed in pipelined_miner_hw.tcl and the deployed epoch.
 set_global_assignment -name VERILOG_MACRO "THROUGHPUT=6"
-set_global_assignment -name VERILOG_MACRO "ODOKEY=1781568000"
+set_global_assignment -name VERILOG_MACRO "ODOKEY=1782432000"
 
 # --- Pin assignments ----------------------------------------------------------
 # Extracted from QMTECH Cyclone V SoC KFB Schematic v01 (32-bit DDR3)
@@ -387,17 +387,17 @@ set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_
 # GPIO_0 header index -> ball: D0=V12 D1=E8 D2=W12 D3=D11 D4=D8 D5=AH13
 #   D6=AF7 D7=AH14 D8=AF4 D9=AH3 D10=AD5 D11=AG14 D17=AD20 D28=Y18
 # =============================================================================
-set_location_assignment PIN_V12  -to LCD_SCLK
-set_location_assignment PIN_E8   -to LCD_MOSI
-set_location_assignment PIN_W12  -to LCD_MISO
-set_location_assignment PIN_D11  -to LCD_CS_n
-set_location_assignment PIN_D8   -to LCD_DC
+set_location_assignment PIN_V12 -to LCD_SCLK
+set_location_assignment PIN_E8 -to LCD_MOSI
+set_location_assignment PIN_W12 -to LCD_MISO
+set_location_assignment PIN_D11 -to LCD_CS_n
+set_location_assignment PIN_D8 -to LCD_DC
 set_location_assignment PIN_AH13 -to LCD_RST_n
-set_location_assignment PIN_AF7  -to LCD_BL
+set_location_assignment PIN_AF7 -to LCD_BL
 set_location_assignment PIN_AH14 -to TP_SCLK
-set_location_assignment PIN_AF4  -to TP_MOSI
-set_location_assignment PIN_AH3  -to TP_MISO
-set_location_assignment PIN_AD5  -to TP_CS_n
+set_location_assignment PIN_AF4 -to TP_MOSI
+set_location_assignment PIN_AH3 -to TP_MISO
+set_location_assignment PIN_AD5 -to TP_CS_n
 set_location_assignment PIN_AG14 -to TP_IRQ_n
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to LCD_SCLK
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to LCD_MOSI
@@ -416,7 +416,7 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to LCD_MISO
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to TP_MISO
 
 # Onboard fabric SDRAM chip selects (share GPIO_0 pins) — held high/disabled
-set_location_assignment PIN_Y18  -to SDRAM_CS0_n
+set_location_assignment PIN_Y18 -to SDRAM_CS0_n
 set_location_assignment PIN_AD20 -to SDRAM_CS1_n
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to SDRAM_CS0_n
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to SDRAM_CS1_n
@@ -428,13 +428,13 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to KEY0
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to KEY1
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to KEY0
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to KEY1
-set_location_assignment PIN_W15  -to LED[0]
+set_location_assignment PIN_W15 -to LED[0]
 set_location_assignment PIN_AA24 -to LED[1]
-set_location_assignment PIN_V16  -to LED[2]
-set_location_assignment PIN_V15  -to LED[3]
+set_location_assignment PIN_V16 -to LED[2]
+set_location_assignment PIN_V15 -to LED[3]
 set_location_assignment PIN_AF26 -to LED[4]
 set_location_assignment PIN_AE26 -to LED[5]
-set_location_assignment PIN_Y16  -to LED[6]
+set_location_assignment PIN_Y16 -to LED[6]
 set_location_assignment PIN_AA23 -to LED[7]
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to LED[0]
 set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to LED[1]
