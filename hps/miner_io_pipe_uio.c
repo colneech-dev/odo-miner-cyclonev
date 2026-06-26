@@ -178,3 +178,5 @@ int miner_io_pipe_wait(int timeout_ms)
         return -1;
     return 0;                               /* woken — a nonce is likely pending */
 }
+
+const char *miner_io_pipe_backend(void) { return "uio"; }

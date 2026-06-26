@@ -23,12 +23,20 @@ PIDFILE=/run/odod.pid
 # LW HPS->FPGA bridge (0xFF200008): 0x0001_xxxx = sequential FSM core,
 # 0x0002_xxxx = pipelined core. Pick the matching daemon so the same SD card
 # works with either bitstream. Falls back to the FSM daemon if devmem fails.
+# For the pipelined core, prefer the UIO interrupt-driven backend when
+# /dev/uio0 is present; fall back to the /dev/mem polling backend otherwise.
 pick_daemon() {
     DAEMON_SEL="$DAEMON"
     if [ -x /sbin/devmem ] || command -v devmem >/dev/null 2>&1; then
         ver=$(devmem 0xFF200008 32 2>/dev/null)
         case "$ver" in
-            0x0002*) [ -x "$DAEMON_PIPE" ] && DAEMON_SEL="$DAEMON_PIPE" ;;
+            0x0002*)
+                if [ -c /dev/uio0 ] && [ -x /usr/bin/odo-miner-pipe-uio ]; then
+                    DAEMON_SEL="/usr/bin/odo-miner-pipe-uio"
+                elif [ -x "$DAEMON_PIPE" ]; then
+                    DAEMON_SEL="$DAEMON_PIPE"
+                fi
+                ;;
         esac
     fi
 }
