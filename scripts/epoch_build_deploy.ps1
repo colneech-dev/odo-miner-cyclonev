@@ -34,7 +34,7 @@
 #>
 param(
     [Parameter(Mandatory=$true)][long]$Epoch,
-    [int]$Throughput = 8,
+    [int]$Throughput = 6,   # T=6 @ 150 MHz is the safe deployed config; per-epoch Fmax varies so 150 MHz is the floor
     [string]$BoardIp = "192.168.1.35",
     [string]$SshKey = "tools/testnet/odo-miner",
     # Filename to stage the built .rbf as on the board's FAT boot partition.
@@ -107,6 +107,27 @@ try {
     }
     $rbfTime = (Get-Item "hdl/quartus/output_files/odo_miner.rbf").LastWriteTime
     Write-Host "      built: $rbfTime"
+
+    # Fmax safety check: per-epoch LUT patterns affect routing, so Fmax varies
+    # per epoch. A build that meets 0 errors can still have a timing violation
+    # (Critical Warning). Parse the STA report and abort if Fmax < miner clock.
+    $staRpt = "hdl/quartus/output_files/odo_miner.sta.rpt"
+    if (Test-Path $staRpt) {
+        $fmaxLine = Select-String -Path $staRpt -Pattern "pll_miner.*PLL_OUTPUT_COUNTER.*divclk" |
+            Where-Object { $_ -match "(\d+\.\d+) MHz" } | Select-Object -First 1
+        if ($fmaxLine -and $fmaxLine.Line -match "; (\d+\.\d+) MHz") {
+            $fmax = [double]$Matches[1]
+            # Derive miner clock from soc_top.v defparams
+            $stv = Get-Content "hdl/src/soc_top.v" -Raw
+            $mul = if ($stv -match "clk0_multiply_by\s*=\s*(\d+)") { [double]$Matches[1] } else { 3 }
+            $div = if ($stv -match "clk0_divide_by\s*=\s*(\d+)") { [double]$Matches[1] } else { 1 }
+            $targetMhz = 50.0 * $mul / $div
+            Write-Host "      Fmax=$fmax MHz  target=$targetMhz MHz  margin=$([math]::Round($fmax-$targetMhz,2)) MHz"
+            if ($fmax -lt $targetMhz) {
+                throw "TIMING VIOLATION: Fmax $fmax MHz < target $targetMhz MHz for epoch $Epoch. Drop the miner clock to 150 MHz and rebuild."
+            }
+        }
+    }
 
     Write-Host "[6/6] staging on the board as /boot/$StageAs"
     $rbf = "hdl/quartus/output_files/odo_miner.rbf"
