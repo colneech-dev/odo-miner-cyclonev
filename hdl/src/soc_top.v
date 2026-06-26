@@ -187,8 +187,8 @@ module soc_top (
     defparam u_pll_miner.operation_mode         = "NORMAL";
     defparam u_pll_miner.compensate_clock       = "CLK0";
     defparam u_pll_miner.inclk0_input_frequency  = 20000;  // 50 MHz = 20 000 ps
-    defparam u_pll_miner.clk0_multiply_by        = 25;     // 50 × 25/8 = 156.25 MHz
-    defparam u_pll_miner.clk0_divide_by          = 8;      // +4% over 150 -> ~26 MH/s @ T=6 (Fmax/power-edge experiment)
+    defparam u_pll_miner.clk0_multiply_by        = 3;      // 50 × 3 = 150 MHz
+    defparam u_pll_miner.clk0_divide_by          = 1;
     defparam u_pll_miner.clk0_duty_cycle         = 50;
     defparam u_pll_miner.clk0_phase_shift        = "0";
     defparam u_pll_miner.port_inclk1             = "PORT_UNUSED";
