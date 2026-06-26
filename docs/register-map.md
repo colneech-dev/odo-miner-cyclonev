@@ -1,6 +1,6 @@
 # OdoCrypt Miner — Avalon-MM Register Map
 
-**Status:** v1.0 (2026-06-22, matches `pipelined_miner_top.v` + `hps/hps_regs_pipe.h`) · **Owner:** colneech-dev
+**Status:** v1.1 (2026-06-26, matches `pipelined_miner_top.v` + `hps/hps_regs_pipe.h`; UIO IRQ added) · **Owner:** colneech-dev
 **Applies to:** the **deployed pipelined core** — `hdl/src/pipelined/pipelined_miner_top.v` (Avalon-MM slave) ↔ `hps/hps_regs_pipe.h` / `hps/miner_io_pipe.c`
 
 > **Single source of truth.** Any change here MUST be matched in
@@ -63,10 +63,11 @@ span `0x1000` (`PIPE_MINER_SPAN`).
 FPGA→HPS interrupts (f2h_irq0): 0 = spi_lcd, 1 = spi_touch, 2 = pio_in
 (Linux GIC SPI 72/73/74).
 
-> **Found-nonce interrupt (in progress):** a level interrupt (= `FSTATUS.valid`)
-> is being added on `f2h_irq0` line 3 (GIC SPI 75) so the daemon can block on a
-> found nonce instead of polling. RTL/Qsys/kernel pieces live on branch
-> `feat/uio-miner-io`; see `docs/uio-miner-io-scope.md`. Not on `main` yet.
+> **Found-nonce interrupt (DEPLOYED 2026-06-25):** a level interrupt
+> (= `FSTATUS.valid`) on `f2h_irq0` line 3 (GIC SPI 75) lets the daemon block
+> on a found nonce instead of polling. RTL/Qsys/kernel/DTS all on `main`;
+> `/dev/uio0` present on board; `backend: "uio"` active. See
+> `docs/uio-miner-io-scope.md`.
 
 ---
 

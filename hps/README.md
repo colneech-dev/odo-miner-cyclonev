@@ -39,6 +39,11 @@ Expected output includes:
 
 ## Notes
 
-- The HPS daemon currently uses `hps/hps_regs.h` and expects the miner block to be mapped at `0xFF200000`.
-- On the target board, the daemon requires root or a suitable UIO driver to open `/dev/mem`.
-- The smoke test is useful before running the full miner daemon.
+- **Active daemon:** `miner_pipe.c` + `miner_io_pipe_uio.c` (UIO backend,
+  `/dev/uio0`). Uses `hps/hps_regs_pipe.h` and `hps/miner_io_pipe.h`. Runs as
+  `odo-miner-pipe-uio` at `/usr/bin/`. No root required; `/dev/mem` not used.
+- **Legacy daemon:** `miner.c` + `miner_io.c` use `hps/hps_regs.h` and access
+  the miner block at `0xFF200000` via `/dev/mem` (requires root). This targets
+  the retired sequential-FSM core and is **not deployed** — kept for reference.
+- The smoke test (`fpga_smoke_test`) validates the FPGA register interface using
+  `/dev/mem` and is useful for bring-up before the full daemon is run.

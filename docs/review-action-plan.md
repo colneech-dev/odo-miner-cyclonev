@@ -1,5 +1,10 @@
 # Review Action Plan (2026-06-22)
 
+> **Status as of 2026-06-26:** Buckets A (stratum hardening), B (docs
+> reconciliation), D (UIO — WS1–WS4 + WS3b), and E (fan/thermal + reset
+> button) have all **shipped to `main`**. Bucket C (async-FIFO found handoff,
+> `odo-webd` auth) remains deferred per accepted-risk decisions below.
+
 Consolidated next-steps plan from a three-pass code + documentation review:
 1. **Docs + RTL/register layer** (inline pass)
 2. **Production HPS mining daemon** — `miner_pipe.c`, `miner_io_pipe.c`, `stratum.c`, `job.c`

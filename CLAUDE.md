@@ -155,15 +155,17 @@ clamp / dead-pool watchdog / pool-confirmed share accept-reject, `odo-webd`
 slow-loris + trusted-LAN model, docs reconciliation) and **`feat/fan-thermal`**
 (PWM fan + J10 fabric-PIO thermal, hardware-verified).
 
-Still on its own branch (see `docs/review-action-plan.md` for the full list):
-- **`feat/uio-miner-io`** — non-root + interrupt-driven register access. WS1
-  (found-nonce IRQ RTL), WS2 (kernel UIO + DTS), WS3 (`miner_io_pipe_uio.c`)
-  done in software; pending a reflash to verify + WS3b daemon integration.
+Merged to `main` (2026-06-25): **`feat/uio-miner-io`** — non-root +
+interrupt-driven register access. WS1 (found-nonce IRQ RTL), WS2 (kernel UIO
++ DTS), WS3 (`miner_io_pipe_uio.c`), WS3b (daemon blocks on found-nonce IRQ)
+all **DONE and deployed**. `/dev/uio0` present; `backend: "uio"` confirmed in
+`status.json`; daemon runs as `odo-miner-pipe-uio` from `/usr/bin/`.
 
 Non-performance backlog:
 1. ~~Fan/thermal~~ — done + **hardware-verified 2026-06-22** (PWM fan, DS18B20,
-   tach, 50/45 °C hysteresis; see `docs/FAN_SENSOR_WIRING.md`). Remaining:
-   the **reset-button** driver (J10 pin 36/AE20, wired, no software yet).
+   tach, 50/45 °C hysteresis; see `docs/FAN_SENSOR_WIRING.md`).
+   ~~Reset-button~~ — **DONE 2026-06-24** (J10 pin 36/AE20, `pio_thermal` bit2,
+   active-low ~2 s hold → reboot; polling driver in `thermal.c`).
 2. ~~Pool failover~~ — done; `ODOD_POOL_HOST2/PORT2` wired into the reconnect
    loop in both `hps/miner.c` and the active `hps/miner_pipe.c`.
 3. Deferred review items: `odo-webd` is unauthenticated on the LAN (accepted —
