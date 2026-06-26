@@ -22,10 +22,10 @@
 | Item | Value | Source |
 |---|---|---|
 | Core | Pipelined `odo_encrypt` (epoch baked into LUTs), free-running nonce sweep | `pipelined_miner_top.v` |
-| THROUGHPUT | **7** (a new nonce every 7 miner-clock cycles) | `odo_miner.qsf` VERILOG_MACRO |
-| Miner clock | **150 MHz** (fabric PLL ×3, `soc_top.v` `u_pll_miner`) | `soc_top.v` |
-| Raw rate | 150 MHz / 7 ≈ **21.4 MH/s** | derived |
-| Baked epoch (ODOKEY) | 1781568000 (per-bitstream; read back at `SEED`) | `odo_miner.qsf` |
+| THROUGHPUT | **6** (a new nonce every 6 miner-clock cycles) | `odo_miner.qsf` VERILOG_MACRO |
+| Miner clock | **156.25 MHz** (fabric PLL ×25/8, `soc_top.v` `u_pll_miner`) | `soc_top.v` |
+| Raw rate | 156.25 MHz / 6 ≈ **26.0 MH/s** | derived |
+| Baked epoch (ODOKEY) | 1782432000 (per-bitstream; read back at `SEED`) | `odo_miner.qsf` |
 
 > The free-running core has no hardware hash counter; the daemon reports a
 > statistical hashrate (`work_acc / uptime`, see `miner_pipe.c:share_work`), so
@@ -43,7 +43,7 @@
 | Read/write | Full 32-bit only | No byteenable; sub-word access unsupported. |
 | `waitrequest` | Tied 0 | Single-cycle access; the pipelined core never stalls the bus. |
 | Reset | Active-low `reset_n` | Synchronous deassert, Avalon (55 MHz) clock domain. |
-| CDC | Internal | Header/target cross 55→150 MHz via a commit-toggle handshake; found nonces cross 150→55 MHz via a 1-deep 2-phase handshake. See the wrapper header comment. |
+| CDC | Internal | Header/target cross 55→156.25 MHz via a commit-toggle handshake; found nonces cross 156.25→55 MHz via a 1-deep 2-phase handshake. See the wrapper header comment. |
 
 The HPS reaches the slave through the **HPS-to-FPGA Lightweight (LWH2F) bridge**;
 base `0xFF20_0000`, miner slave at offset **0x0000** (`PIPE_MINER_BASE_OFFSET = 0`),
@@ -82,7 +82,7 @@ Byte offsets relative to the slave base. Mirrors `hps/hps_regs_pipe.h` exactly.
 | 0x00C | `SEED` | R | Baked-in epoch (`ODOKEY`) of this bitstream. Compare against the job's epoch; a mismatch means the FPGA must be reconfigured (epoch renewal). |
 | 0x020–0x03C | `TARGET[0..7]` | W | 256-bit share target, little-endian words (word 0 = LSW). |
 | 0x040–0x088 | `HEADER[0..18]` | W | 19 words = header bytes 0..75. Bytes 76..79 are swept internally as the nonce — do **not** write a nonce. |
-| 0x08C | `COMMIT` | W | Any write snapshots HEADER+TARGET into the 150 MHz domain and arms the settle window (drains stale pre-commit pipeline results). |
+| 0x08C | `COMMIT` | W | Any write snapshots HEADER+TARGET into the 156.25 MHz domain and arms the settle window (drains stale pre-commit pipeline results). |
 | 0x090 | `FNONCE` | R | Pop one found nonce. **Read-to-consume**: the read itself frees the 1-deep found slot. |
 | 0x094 | `FSTATUS` | R | bit0 = a found nonce is available (`PIPE_FSTAT_VALID`). |
 

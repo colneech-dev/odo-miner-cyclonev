@@ -35,9 +35,9 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 
 - **DEPLOYED: pipelined core** (`feat/pipelined-miner`, merged to `main`). The
   upstream pipelined `odo_encrypt` (epoch baked into LUTs, free-running nonce
-  sweep) is what the board runs today: **THROUGHPUT=7 @ 150 MHz miner clock ≈
-  21.4 MH/s raw** (`odo_miner.qsf` VERILOG_MACRO + `soc_top.v` `u_pll_miner`
-  ×3) — ~375× the old sequential FSM. Wrapper `hdl/src/pipelined/
+  sweep) is what the board runs today: **THROUGHPUT=6 @ 156.25 MHz miner clock ≈
+  26.0 MH/s raw** (`odo_miner.qsf` VERILOG_MACRO + `soc_top.v` `u_pll_miner`
+  ×25/8) — ~375× the old sequential FSM. Wrapper `hdl/src/pipelined/
   pipelined_miner_top.v`, register map `hps/hps_regs_pipe.h` /
   `docs/register-map.md`, daemon `hps/miner_pipe.c` + `hps/miner_io_pipe.c`.
   Autonomy intact: per-epoch bitstreams are precompiled off-board and
@@ -136,7 +136,7 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 
 **The performance path is DONE and deployed.** The architectural rewrite scoped
 in `docs/pipelined-miner-scope.md` shipped: the upstream pipelined `odo_encrypt`
-(epoch baked into LUTs) runs on the board at **THROUGHPUT=7 @ 150 MHz ≈ 21.4
+(epoch baked into LUTs) runs on the board at **THROUGHPUT=6 @ 156.25 MHz ≈ 26.0
 MH/s raw** — ~375× the retired sequential FSM. Autonomy is preserved by
 precompiling each epoch's bitstream off-board and hot-reconfiguring the fabric
 on the HPS (`CONFIG_FPGA_MGR_SOCFPGA` + bridges + region; `epoch-update.sh`).
