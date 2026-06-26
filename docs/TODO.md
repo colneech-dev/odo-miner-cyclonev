@@ -12,10 +12,10 @@ dual-SDRAM board (DE10-Nano-compatible ball-out, MiSTer-style).
 **1–4 below are DONE.** Board mines autonomously; epoch transitions self-apply
 with zero manual intervention, deploys go over SSH.
 
-> **Deployed config (2026-06-22):** the bitstream is **THROUGHPUT=7 @ 150 MHz ≈
-> 21.4 MH/s raw** (`odo_miner.qsf` VERILOG_MACRO + `soc_top.v` ×3 PLL). Earlier
-> notes in this file citing T=8 / 16.9 MH/s predate the T=7 deployment commit
-> (`build: T=7 deployment state`); treat the qsf macro as authoritative.
+> **Deployed config (2026-06-26):** the bitstream is **THROUGHPUT=6 @ 156.25 MHz ≈
+> 26.0 MH/s raw** (`odo_miner.qsf` VERILOG_MACRO + `soc_top.v` ×25/8 PLL). Epoch
+> 1782432000 Fmax = 159.24 MHz @ Slow/100C (+2.99 MHz margin). Earlier notes citing
+> T=7/150 MHz predate this update; treat the qsf macro as authoritative.
 
 1. ✅ **SSH access restored** — `etc/init.d/S50sshd` (host-key gen, strict
    perms, start sshd), `etc/ssh/sshd_config` (key-only root login),
