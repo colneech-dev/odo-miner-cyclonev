@@ -719,10 +719,42 @@ static void scan_draw(fb_t *fb, char list[][33], int n)
 static volatile sig_atomic_t g_stop = 0;
 static void on_sig(int s) { (void)s; g_stop = 1; }
 
-/* Auto-dim: blank the panel after this many seconds of touch inactivity. */
-#define DIM_IDLE_S 300
+/* ------------------------------------------------------------------ */
+/* Screen settings (dim timeout + dim level)                           */
+/* ------------------------------------------------------------------ */
+#define UI_CONF_PATH         "/etc/odo-ui.conf"
+#define DIM_TIMEOUT_DEFAULT  300  /* seconds; 0 = never */
+#define DIM_LEVEL_DEFAULT    0    /* 0 = full blank, 1-100 = dim to % */
+
+static int    g_dim_timeout   = DIM_TIMEOUT_DEFAULT;
+static int    g_dim_level     = DIM_LEVEL_DEFAULT;
 static time_t g_last_activity = 0;
-static int    g_blanked        = 0;
+static int    g_blanked       = 0;
+
+static void load_ui_conf(void)
+{
+    FILE *f = fopen(UI_CONF_PATH, "r");
+    if (!f) return;
+    char line[128];
+    while (fgets(line, sizeof(line), f)) {
+        char *eq = strchr(line, '=');
+        if (!eq || line[0] == '#') continue;
+        *eq = 0;
+        int val = atoi(eq + 1);
+        if      (strcmp(line, "DIM_TIMEOUT") == 0) g_dim_timeout = val < 0 ? 0 : val > 3600 ? 3600 : val;
+        else if (strcmp(line, "DIM_LEVEL")   == 0) g_dim_level   = val < 0 ? 0 : val > 100  ? 100  : val;
+    }
+    fclose(f);
+}
+
+static void save_ui_conf(void)
+{
+    FILE *f = fopen(UI_CONF_PATH ".tmp", "w");
+    if (!f) return;
+    fprintf(f, "DIM_TIMEOUT=%d\nDIM_LEVEL=%d\n", g_dim_timeout, g_dim_level);
+    fclose(f);
+    rename(UI_CONF_PATH ".tmp", UI_CONF_PATH);
+}
 
 static void fb_set_blank(int blank)
 {
@@ -734,6 +766,19 @@ static void fb_set_blank(int blank)
     ssize_t w = write(fd, blank ? "1\n" : "0\n", 2);
     (void)w;
     close(fd);
+}
+
+/* Software dim: scale every RGB565 pixel to pct% brightness (1-100). */
+static void fb_apply_dim(fb_t *fb, int pct)
+{
+    int n = fb->w * fb->h;
+    for (int i = 0; i < n; i++) {
+        uint16_t p = fb->pix[i];
+        int r = ((p >> 11) & 0x1F) * pct / 100;
+        int g = ((p >>  5) & 0x3F) * pct / 100;
+        int b = ( p        & 0x1F) * pct / 100;
+        fb->pix[i] = (uint16_t)((r << 11) | (g << 5) | b);
+    }
 }
 
 /* Full WiFi setup screen loop: keyboard + scan list. Returns when the user
@@ -990,6 +1035,57 @@ static void draw_detail(fb_t *fb, const status_t *st, time_t now,
     }
 }
 
+/* ---- Screen-settings page: hit rects returned to main loop ---- */
+typedef struct {
+    rect_t timeout_dec, timeout_inc;
+    rect_t level_dec,   level_inc;
+} settings_rects_t;
+
+static settings_rects_t draw_settings(fb_t *fb, int dim_timeout, int dim_level)
+{
+    bg_blit(fb);
+    settings_rects_t r;
+    char buf[32];
+    int cw = fb->w;
+
+    int y = 10;
+    const char *title = "SCREEN";
+    fb_text(fb, (cw - fb_text_w(1, title)) / 2, y, title, 1, C_ACCENT);
+    y += 26;
+
+    /* DIM TIMEOUT row */
+    fb_text(fb, 8, y, "DIM TIMEOUT", 1, C_DIM);
+    y += 17;
+    snprintf(buf, sizeof(buf), dim_timeout == 0 ? "NEVER" : "%ds", dim_timeout);
+    r.timeout_dec = (rect_t){ 8,       y, 36, 26 };
+    r.timeout_inc = (rect_t){ cw - 44, y, 36, 26 };
+    fb_rect(fb, r.timeout_dec.x, r.timeout_dec.y, r.timeout_dec.w, r.timeout_dec.h, C_ACCENT);
+    fb_text(fb, r.timeout_dec.x + (36 - fb_text_w(1, "-")) / 2, y + 8, "-", 1, C_BG);
+    fb_text(fb, (cw - fb_text_w(1, buf)) / 2, y + 8, buf, 1, C_TEXT);
+    fb_rect(fb, r.timeout_inc.x, r.timeout_inc.y, r.timeout_inc.w, r.timeout_inc.h, C_ACCENT);
+    fb_text(fb, r.timeout_inc.x + (36 - fb_text_w(1, "+")) / 2, y + 8, "+", 1, C_BG);
+    y += 44;
+
+    /* DIM LEVEL row */
+    fb_text(fb, 8, y, "DIM LEVEL", 1, C_DIM);
+    y += 17;
+    snprintf(buf, sizeof(buf), dim_level == 0 ? "BLANK" : "%d%%", dim_level);
+    r.level_dec = (rect_t){ 8,       y, 36, 26 };
+    r.level_inc = (rect_t){ cw - 44, y, 36, 26 };
+    fb_rect(fb, r.level_dec.x, r.level_dec.y, r.level_dec.w, r.level_dec.h, C_ACCENT);
+    fb_text(fb, r.level_dec.x + (36 - fb_text_w(1, "-")) / 2, y + 8, "-", 1, C_BG);
+    fb_text(fb, (cw - fb_text_w(1, buf)) / 2, y + 8, buf, 1, C_TEXT);
+    fb_rect(fb, r.level_inc.x, r.level_inc.y, r.level_inc.w, r.level_inc.h, C_ACCENT);
+    fb_text(fb, r.level_inc.x + (36 - fb_text_w(1, "+")) / 2, y + 8, "+", 1, C_BG);
+    y += 42;
+
+    const char *hint = dim_level == 0
+        ? "0=blank off  1-100=dim to %" : "1-100=dim to % brightness";
+    fb_text(fb, 8, y, hint, 1, C_DIM);
+
+    return r;
+}
+
 /* Full-screen celebratory takeover when a NEW block is found, replacing the
  * normal dashboard until the user taps to dismiss (see block_ack_* and the
  * main loop). A real find is rare and worth a hard-to-miss screen, not a
@@ -1097,16 +1193,35 @@ int main(int argc, char **argv)
     if (have_touch && access(WPA_CONF, F_OK) != 0)
         run_wifi_setup(&fb, &tp, keys, nk, have_touch);
 
+    load_ui_conf();
+
     int confirm = 0;            /* 0 none, 1 restart, 2 reboot */
     int rebooting = 0;
     time_t confirm_at = 0;
-    int ui_screen = 0;          /* 0 = glance, 1 = detail */
+    int ui_screen = 0;          /* 0 = glance, 1 = detail, 2 = screen settings */
     long long block_ack = -1;   /* -1 = not yet seeded from the first status read */
+
+    /* Screen-settings working copies (edited before Save commits them) */
+    int set_timeout = DIM_TIMEOUT_DEFAULT;
+    int set_level   = DIM_LEVEL_DEFAULT;
+    settings_rects_t set_rects;
+    memset(&set_rects, 0, sizeof(set_rects));
+
+    /* Reload screen config from disk periodically (web UI may have changed it) */
+    int conf_reload_tick = 0;
 
     g_last_activity = time(NULL);
 
     while (!g_stop) {
         time_t now = time(NULL);
+
+        /* Reload screen config every ~20 iterations (~2s) so web UI changes
+         * take effect without restarting odo-ui. Skip while in settings page
+         * (user may be mid-edit). */
+        if (ui_screen != 2 && ++conf_reload_tick >= 20) {
+            conf_reload_tick = 0;
+            load_ui_conf();
+        }
 
         if (rebooting) {
             draw_splash(&fb, "Rebooting...");
@@ -1115,19 +1230,21 @@ int main(int argc, char **argv)
             continue;
         }
 
-        /* Auto-dim: blank panel after DIM_IDLE_S seconds of no touch input */
-        if (!g_blanked && now - g_last_activity > DIM_IDLE_S) {
-            fb_set_blank(1);
+        /* Auto-dim: blank/dim panel after g_dim_timeout seconds (0 = never) */
+        if (!g_blanked && g_dim_timeout > 0 && now - g_last_activity > g_dim_timeout) {
+            if (g_dim_level == 0)
+                fb_set_blank(1);
+            else
+                fb_apply_dim(&fb, g_dim_level);
             g_blanked = 1;
         }
         if (g_blanked) {
-            /* Screen off: just poll touch to detect wake; skip drawing */
             struct timespec ts = { 0, 200 * 1000000L };
             nanosleep(&ts, NULL);
             if (have_touch) {
                 int sx, sy;
                 if (touch_poll(&tp, &fb, &sx, &sy)) {
-                    fb_set_blank(0);
+                    if (g_dim_level == 0) fb_set_blank(0);
                     g_blanked = 0;
                     g_last_activity = now;
                     /* discard this tap — it was a wake touch */
@@ -1155,8 +1272,10 @@ int main(int argc, char **argv)
         /* ---- draw active screen ---- */
         if (ui_screen == 0)
             draw_glance(&fb, &st, now, wssid, wdbm);
-        else
+        else if (ui_screen == 1)
             draw_detail(&fb, &st, now, wssid, wdbm);
+        else
+            set_rects = draw_settings(&fb, set_timeout, set_level);
 
         /* ---- buttons ---- */
         if (confirm && now - confirm_at > 6)
@@ -1201,7 +1320,7 @@ int main(int argc, char **argv)
                             b3[i].r.y + 13, b3[i].t, 1, b3[i].tc);
                 }
             }
-        } else {
+        } else if (ui_screen == 1) {
             /* Detail: [← BACK (wide)] [RESTART] [REBOOT] */
             struct { rect_t r; const char *t; uint16_t border, fill, tc; } b3[3] = {
                 { btn_left,  "< BACK",  C_ACCENT, C_ACCENT, C_BG  },
@@ -1214,6 +1333,15 @@ int main(int argc, char **argv)
                 fb_text(&fb, b3[i].r.x + (b3[i].r.w - fb_text_w(1, b3[i].t)) / 2,
                         b3[i].r.y + 11, b3[i].t, 1, b3[i].tc);
             }
+        } else {
+            /* Screen settings: [< BACK (left+mid wide)] [SAVE] */
+            int back_w = btn_mid.x + btn_mid.w - btn_left.x;
+            fb_rect(&fb, btn_left.x,   btn_left.y, back_w,       btn_left.h,  C_ACCENT);
+            fb_rect(&fb, btn_left.x+1, btn_left.y+1, back_w-2,   btn_left.h-2, C_PANEL);
+            fb_text(&fb, btn_left.x + 8, btn_left.y + 11, "< BACK", 1, C_TEXT);
+            fb_rect(&fb, btn_right.x, btn_right.y, btn_right.w, btn_right.h, C_ACCENT);
+            fb_text(&fb, btn_right.x + (btn_right.w - fb_text_w(1, "SAVE")) / 2,
+                    btn_right.y + 11, "SAVE", 1, C_BG);
         }
 
         /* ---- input ---- */
@@ -1228,7 +1356,13 @@ int main(int argc, char **argv)
                 int dx = sx - tp.press_x;
                 int in_content = tp.press_y < fb.h - 52;
                 if (in_content && abs(dx) > 40 && confirm <= 0) {
-                    if (dx < 0 && ui_screen == 0) ui_screen = 1;       /* swipe left  → detail */
+                    if      (dx < 0 && ui_screen == 0) ui_screen = 1;  /* swipe left  → detail */
+                    else if (dx < 0 && ui_screen == 1) {               /* swipe left  → settings */
+                        ui_screen = 2;
+                        set_timeout = g_dim_timeout;
+                        set_level   = g_dim_level;
+                    }
+                    else if (dx > 0 && ui_screen == 2) ui_screen = 1;  /* swipe right → detail */
                     else if (dx > 0 && ui_screen == 1) ui_screen = 0;  /* swipe right → glance */
                     tick = 99;
                 } else if (confirm > 0) {
@@ -1269,7 +1403,7 @@ int main(int argc, char **argv)
                             confirm = -1; confirm_at = now;
                         }
                     }
-                } else {
+                } else if (ui_screen == 1) {
                     /* Detail taps */
                     if (hit(&btn_left, sx, sy)) {
                         ui_screen = 0;
@@ -1277,6 +1411,30 @@ int main(int argc, char **argv)
                         confirm = 1; confirm_at = now;
                     } else if (hit(&btn_right, sx, sy)) {
                         confirm = 2; confirm_at = now;
+                    }
+                } else {
+                    /* Screen settings taps */
+                    rect_t back_r = { btn_left.x, btn_left.y,
+                                      btn_mid.x + btn_mid.w - btn_left.x, btn_left.h };
+                    if (hit(&back_r, sx, sy)) {
+                        ui_screen = 1;
+                    } else if (hit(&btn_right, sx, sy)) {
+                        g_dim_timeout = set_timeout;
+                        g_dim_level   = set_level;
+                        save_ui_conf();
+                        ui_screen = 1;
+                    } else if (hit(&set_rects.timeout_dec, sx, sy)) {
+                        set_timeout -= 30;
+                        if (set_timeout < 0) set_timeout = 0;
+                    } else if (hit(&set_rects.timeout_inc, sx, sy)) {
+                        set_timeout += 30;
+                        if (set_timeout > 3600) set_timeout = 3600;
+                    } else if (hit(&set_rects.level_dec, sx, sy)) {
+                        set_level -= 5;
+                        if (set_level < 0) set_level = 0;
+                    } else if (hit(&set_rects.level_inc, sx, sy)) {
+                        set_level += 5;
+                        if (set_level > 100) set_level = 100;
                     }
                 }
                 tick = 99;

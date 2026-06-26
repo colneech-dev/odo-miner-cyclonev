@@ -12,6 +12,9 @@
  *   GET  /wifiscan.json   -> nearby SSIDs (runs `iw scan`, takes a few seconds)
  *   POST /wifi            -> write /etc/wpa_supplicant.conf and reconnect
  *                            (form fields: ssid, psk — empty psk = open network)
+ *   GET  /screen.json     -> /etc/odo-ui.conf (dim_timeout, dim_level)
+ *   POST /screen          -> update /etc/odo-ui.conf (odo-ui polls it every ~2s)
+ *                            (form fields: timeout, level)
  *
  * Plain single-threaded HTTP/1.1, no dependencies.
  *
@@ -138,6 +141,57 @@ static void serve_sysinfo(int fd)
         "{\"ip\":\"%s\",\"load1\":%.2f,\"mem_free_mb\":%ld,\"sys_uptime\":%ld}",
         ip, load1, mem_free_mb, sys_up);
     send_response(fd, "200 OK", "application/json", body, (size_t)n);
+}
+
+/* ------------------------------------------------------------------ */
+/* Screen settings (dim timeout + level)                               */
+/* ------------------------------------------------------------------ */
+#define UI_CONF_PATH "/etc/odo-ui.conf"
+
+static void serve_screen(int fd)
+{
+    int timeout = 300, level = 0;
+    FILE *f = fopen(UI_CONF_PATH, "r");
+    if (f) {
+        char line[128];
+        while (fgets(line, sizeof(line), f)) {
+            char *eq = strchr(line, '=');
+            if (!eq || line[0] == '#') continue;
+            *eq = 0;
+            int val = atoi(eq + 1);
+            if      (strcmp(line, "DIM_TIMEOUT") == 0) timeout = val;
+            else if (strcmp(line, "DIM_LEVEL")   == 0) level   = val;
+        }
+        fclose(f);
+    }
+    char body[64];
+    int n = snprintf(body, sizeof(body),
+        "{\"dim_timeout\":%d,\"dim_level\":%d}", timeout, level);
+    send_response(fd, "200 OK", "application/json", body, (size_t)n);
+}
+
+static void handle_screen(int fd, const char *body)
+{
+    char stimeout[16] = "300", slevel[8] = "0";
+    form_get(body, "timeout", stimeout, sizeof(stimeout));
+    form_get(body, "level",   slevel,   sizeof(slevel));
+    int timeout = atoi(stimeout);
+    int level   = atoi(slevel);
+    if (timeout < 0 || timeout > 3600 || level < 0 || level > 100) {
+        send_response(fd, "400 Bad Request", "text/plain",
+                      "timeout 0-3600, level 0-100\n", 28);
+        return;
+    }
+    FILE *f = fopen(UI_CONF_PATH ".tmp", "w");
+    if (!f) {
+        send_response(fd, "500 Internal Server Error", "text/plain",
+                      "write failed\n", 13);
+        return;
+    }
+    fprintf(f, "DIM_TIMEOUT=%d\nDIM_LEVEL=%d\n", timeout, level);
+    fclose(f);
+    rename(UI_CONF_PATH ".tmp", UI_CONF_PATH);
+    send_redirect(fd, "/");
 }
 
 /* ------------------------------------------------------------------ */
@@ -543,6 +597,10 @@ int main(int argc, char **argv)
             } else {
                 send_response(fd, "200 OK", "text/html", PAGE, sizeof(PAGE) - 1);
             }
+        } else if (strncmp(req, "GET /screen.json", 16) == 0) {
+            serve_screen(fd);
+        } else if (strncmp(req, "POST /screen", 12) == 0 && body) {
+            handle_screen(fd, body);
         } else if (strncmp(req, "GET /config.json", 16) == 0) {
             serve_config(fd);
         } else if (strncmp(req, "GET /status.json", 16) == 0) {
