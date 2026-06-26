@@ -1,5 +1,11 @@
 #!/bin/bash
-# run_tb.sh — build vectors with the C oracle and run the RTL known-answer TB.
+# run_tb.sh — RTL regression for the RETIRED sequential-FSM core (odocrypt_top.v).
+#
+# *** NOT the deployed core. The pipelined core regression is run_tb_pipe.sh. ***
+#
+# Kept for historical reference — proves the FSM hash was ever correct.
+# The deployed path is the pipelined core (hdl/src/pipelined/); use
+# run_tb_pipe.sh for any work on the live bitstream.
 #
 # Usage: ./run_tb.sh            (run from hdl/tb, inside WSL/Linux)
 # Requires: gcc, iverilog (e.g. ~/oss-cad-suite/bin in PATH)

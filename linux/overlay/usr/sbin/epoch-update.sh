@@ -49,9 +49,9 @@ mkdir -p "$BOOT_MNT"
 mount -t vfat "$BOOT_DEV" "$BOOT_MNT" 2>/dev/null || { log "mount $BOOT_DEV failed"; exit 1; }
 
 if [ ! -f "$BOOT_MNT/$STAGED" ]; then
-    log "job epoch ($job_epoch) != baked epoch ($bake_epoch) but no $STAGED staged; staying on current bitstream (shares will reject until the next build lands)"
+    log "ERROR: job epoch ($job_epoch) != baked epoch ($bake_epoch) but no $STAGED staged; shares will reject until the build host stages the next bitstream"
     umount "$BOOT_MNT"
-    exit 0
+    exit 1
 fi
 
 log "job epoch ($job_epoch) != baked epoch ($bake_epoch); applying staged $STAGED"

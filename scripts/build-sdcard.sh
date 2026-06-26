@@ -119,8 +119,8 @@ fi
 
 # Check for HPS binaries
 hps_binaries=(
-    "$HPS_BUILD_DIR/odo-miner"
-    "$HPS_BUILD_DIR/odo-miner-watcher"
+    "$HPS_BUILD_DIR/odo-miner-pipe"
+    "$HPS_BUILD_DIR/odo-miner-pipe-uio"
     "$HPS_BUILD_DIR/fpga_smoke_test"
     "$PROJECT_ROOT/sw/odo-ui/odo-ui"
     "$PROJECT_ROOT/sw/odo-webd/odo-webd"

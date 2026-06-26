@@ -94,9 +94,8 @@ make -j"$PARALLEL_JOBS" 2>&1 | tee build-hps.log
 
 # Check for required binaries
 required_binaries=(
-    "odod"
-    "odo-miner"
-    "odo-miner-watcher"
+    "odo-miner-pipe"
+    "odo-miner-pipe-uio"
     "fpga_smoke_test"
 )
 
