@@ -93,13 +93,20 @@ body{margin:0;background:#100F0B;color:#F2EFE6;font-family:system-ui,sans-serif;
       <div class='form-group'><label class='form-label' for='w_psk'>WiFi password</label><input class='form-input' id='w_psk' name='psk' type='password'></div>
       <div class='form-group' style='flex-direction:row;align-items:center;gap:10px;margin-top:4px;'><input type='checkbox' id='c_testnet' name='testnet' style='width:16px;height:16px;accent-color:#F0B23C;'><label class='form-label' for='c_testnet' style='margin:0;'>Testnet mode (epoch interval 86400 s)</label></div>
       <div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;'><button class='button primary' type='button' onclick='saveConfig()'>Save & restart miner</button><button class='button secondary' type='button' onclick='saveWifi()'>Save WiFi</button><button class='button danger' type='button' onclick='rebootBoard()'>Reboot board</button></div>
+      <hr style='border:none;border-top:1px solid #3a3830;margin:18px 0 14px;'>
+      <div style='font-size:13px;color:#F0B23C;font-weight:600;margin-bottom:10px;'>Screen</div>
+      <div class='form-group'><label class='form-label' for='s_timeout'>Dim timeout (s)</label><input class='form-input' id='s_timeout' type='number' min='0' max='3600' step='30' style='max-width:90px;'> <span style='font-size:11px;color:#888;'>0 = never</span></div>
+      <div class='form-group'><label class='form-label' for='s_level'>Dim level (%)</label><input class='form-input' id='s_level' type='number' min='0' max='100' step='5' style='max-width:90px;'> <span style='font-size:11px;color:#888;'>0 = blank off</span></div>
+      <div style='margin-top:10px;'><button class='button secondary' type='button' onclick='saveScreen()'>Save screen</button></div>
     </div>
   </div>
 </div>
 <div class='toast' id='toast'><div class='toast-dot'>&#10003;</div><div id='toastText'>Saved — restarting…</div></div>
 <script>
-function showTab(tab){document.getElementById('tabMonitor').className='tab'+(tab==='monitor'?' active':'');document.getElementById('tabSettings').className='tab'+(tab==='settings'?' active':'');document.getElementById('monitorPanel').style.display=tab==='monitor'?'block':'none';document.getElementById('monitorTiles').style.display=tab==='monitor'?'grid':'none';document.getElementById('settingsPanel').style.display=tab==='settings'?'block':'none';if(tab==='settings')loadConfig();}
+function showTab(tab){document.getElementById('tabMonitor').className='tab'+(tab==='monitor'?' active':'');document.getElementById('tabSettings').className='tab'+(tab==='settings'?' active':'');document.getElementById('monitorPanel').style.display=tab==='monitor'?'block':'none';document.getElementById('monitorTiles').style.display=tab==='monitor'?'grid':'none';document.getElementById('settingsPanel').style.display=tab==='settings'?'block':'none';if(tab==='settings'){loadConfig();loadScreen();}}
 function loadConfig(){fetch('/config.json').then(function(r){return r.json();}).then(function(c){document.getElementById('c_host').value=c.host||'';document.getElementById('c_port').value=c.port||'';document.getElementById('c_worker').value=c.worker||'';document.getElementById('c_pass').value=c.pass||'';document.getElementById('c_testnet').checked=!!c.testnet;}).catch(function(){});}
+function loadScreen(){fetch('/screen.json').then(function(r){return r.json();}).then(function(s){document.getElementById('s_timeout').value=s.dim_timeout!==undefined?s.dim_timeout:300;document.getElementById('s_level').value=s.dim_level!==undefined?s.dim_level:0;}).catch(function(){});}
+function saveScreen(){var body='timeout='+encodeURIComponent(document.getElementById('s_timeout').value)+'&level='+encodeURIComponent(document.getElementById('s_level').value);xhrPost('/screen',body,'Screen saved','Save failed');}
 function fmtRate(h){if(h>=1e6)return (h/1e6).toFixed(2)+' MH/s';if(h>=1e3)return (h/1e3).toFixed(1)+' kH/s';return h.toFixed(0)+' H/s';}
 function fmtDiff(d){if(!d||d<=0)return '-';if(d>=1e9)return (d/1e9).toFixed(2)+'G';if(d>=1e6)return (d/1e6).toFixed(2)+'M';if(d>=1e3)return (d/1e3).toFixed(2)+'K';if(d>=1)return d.toFixed(3);return d.toFixed(5);}
 function fmtDur(s){if(s<0)return '-';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'d ':'')+(h?h+'h ':'')+m+'m';}
