@@ -152,25 +152,18 @@ module soc_top (
     defparam u_pll_fab.port_locked             = "PORT_USED";
     defparam u_pll_fab.width_clock             = 6;
 
-    // ---- PLL: 50 MHz → 150 MHz pipelined-miner clock -----------------------
+    // ---- PLL: 50 MHz → 156.25 MHz pipelined-miner clock --------------------
     // Dedicated PLL for the pipelined OdoCrypt core. DEPLOYED CONFIG:
-    // THROUGHPUT=7 @ 150 MHz ≈ 21.4 MH/s raw (see odo_miner.qsf VERILOG_MACRO).
-    // The clock-exploration narrative below predates the T=7 deployment and is
-    // written against the older T=8 build — kept for the power-regime context,
-    // but the live number is T=7/150 MHz/21.4 MH/s.
-    // Separate from u_pll_fab so the 150 MHz and 55 MHz domains don't share a
+    // THROUGHPUT=6 @ 156.25 MHz ≈ 26.0 MH/s raw (see odo_miner.qsf VERILOG_MACRO).
+    // Ratio 25/8 → 156.25 MHz; VCO = 1250 MHz (within 600–1600 MHz spec).
+    // Epoch 1782432000 Fmax = 159.24 MHz @ Slow/100C → +2.99 MHz margin.
+    // Separate from u_pll_fab so the 156.25 MHz and 55 MHz domains don't share a
     // VCO solution. Exported into soc_system as miner_clk_clk; the wrapper's CDC
-    // bridges 55<->150 MHz.
-    // NOTE: an EARLIER 150 MHz brownout was at THROUGHPUT=4 (~2x this design's
-    // active logic) — a different power regime. T=8 has now soaked stable on
-    // hardware at 100/125/137.5 MHz with margin to spare (Fmax 158.58 MHz @
-    // Slow/100C at the 137.5 build); 150 MHz is the next data point, not a
-    // repeat of the old failure.
-    // POWER NOTE: the brownouts were all at THROUGHPUT=4 (150 and 125 MHz) —
-    // T=4 unrolls ~2x the pipeline logic, so those drew ~2.5-3x the T=8 @ 100
-    // dynamic power and browned the core rail. KEEPING T=8 (35% ALM) and only
-    // raising the clock is a much smaller step: 125 MHz ≈ 1.25x the T=8 @ 100
-    // power. Pipeline Fmax is 143.97 MHz @ Slow/100C, so 125 MHz has margin.
+    // bridges 55<->156.25 MHz.
+    // POWER NOTE: the earlier brownouts were all at THROUGHPUT=4 (150 and 125 MHz)
+    // — T=4 unrolls ~2x the pipeline logic and browned the core rail. T=6 @ 150
+    // MHz soaked stable (core rail ~1.8 A, brownout ~2.0–2.2 A). 156.25 MHz is a
+    // 4.2% clock step so power increase is ~0.075 A — well within the margin.
     // If this is stable under sustained load, 137.5 MHz (×11/4) is the next step.
     wire        clk_miner;
     wire        miner_pll_locked;
@@ -187,8 +180,8 @@ module soc_top (
     defparam u_pll_miner.operation_mode         = "NORMAL";
     defparam u_pll_miner.compensate_clock       = "CLK0";
     defparam u_pll_miner.inclk0_input_frequency  = 20000;  // 50 MHz = 20 000 ps
-    defparam u_pll_miner.clk0_multiply_by        = 3;      // 50 × 3 = 150 MHz
-    defparam u_pll_miner.clk0_divide_by          = 1;
+    defparam u_pll_miner.clk0_multiply_by        = 25;     // 50 × 25/8 = 156.25 MHz
+    defparam u_pll_miner.clk0_divide_by          = 8;
     defparam u_pll_miner.clk0_duty_cycle         = 50;
     defparam u_pll_miner.clk0_phase_shift        = "0";
     defparam u_pll_miner.port_inclk1             = "PORT_UNUSED";
