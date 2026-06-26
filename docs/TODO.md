@@ -1,6 +1,6 @@
 # Project TODO — odo-miner-cyclonev
 
-**Last updated:** 2026-06-19
+**Last updated:** 2026-06-26
 **Owner:** colneech-dev / Claude
 **Device:** `5CSXFC6C6U23I7` — Cyclone V SX, 41,910 ALMs, 553 M10K, QMTECH KFB
 dual-SDRAM board (DE10-Nano-compatible ball-out, MiSTer-style).
@@ -32,18 +32,17 @@ with zero manual intervention, deploys go over SSH.
    pre-staging, pool confirmed shares accepted post-reboot.
 3. ✅ **More hashrate** — found the daemon's `stratum_poll` 50 ms timeout was
    capping found-FIFO drains at ~20/s regardless of clock (the real
-   bottleneck, not the FPGA); dropped to 5 ms. Then walked the miner clock
-   100→125→137.5→150 MHz (all T=8, all soak-stable — the old 150 MHz brownout
-   was T=4, ~2x the logic, a different power regime). **150 MHz is the
-   practical T=8 ceiling** (Fmax 157.88 MHz, thin remaining margin): ~16.9
-   MH/s effective, ~2.2x the session start. Further gains need T=4
-   (~25–37 MH/s raw) — same power/regulator constraint as before, deferred.
+   bottleneck, not the FPGA); dropped to 5 ms. Walked the miner clock
+   100→125→137.5→150 MHz (T=8) then switched to the pipelined upstream core.
+   **Deployed: THROUGHPUT=6 @ 156.25 MHz ≈ 26.0 MH/s raw** (Fmax 159.24 MHz
+   @ Slow/100C, +2.99 MHz margin). T=8 notes above are intermediate steps.
 4. ✅ **Backlog** — web dashboard was already working (port 80, not 8080 —
    earlier checks used the wrong port); pool failover ported from `miner.c`
    (`ODOD_POOL_HOST2/PORT2`, already exported by `S90odod`) and verified live.
-   Fan/thermal/reset-button **deferred** — needs a kernel/DTB rebuild +
-   reflash and depends on whether the physical sensors are wired to this
-   board; out of scope for this session.
+   ~~Fan/thermal/reset-button~~ — **all DONE and hardware-verified**: DS18B20
+   + PWM fan (2026-06-22), reset-button polling driver (2026-06-24). UIO
+   non-root + IRQ daemon (`odo-miner-pipe-uio`) — **DONE 2026-06-25**. See
+   `docs/FAN_SENSOR_WIRING.md` and `docs/uio-miner-io-scope.md`.
 
 ---
 
@@ -148,7 +147,8 @@ cores). Bitstream: 3.3 MB, deployed to board 2026-06-14. ✅
 3. ✅ Known-nonce on silicon — FPGA hash matches C oracle.
 4. ✅ Display up — fb_ili9341 + ads7846; odo-ui dashboard live on board.
 5. ✅ Testnet stratum round-trip — ~485 blocks mined 2026-06-11.
-   Board currently mining at **~52 KH/s** dual-core on testnet (2026-06-14).
+   Board was **~52 KH/s** dual-core FSM at that time (2026-06-14); now
+   **~26 MH/s** pipelined @ 156.25 MHz on mainnet (2026-06-26).
 
 ### 3. Performance — IN PROGRESS
 - ✅ **Dual-core at 52 KH/s** (`perf/dual-core` branch, deployed 2026-06-14).
@@ -176,10 +176,9 @@ cores). Bitstream: 3.3 MB, deployed to board 2026-06-14. ✅
   exotic pools). Pool failover (`ODOD_POOL_HOST2/PORT2` in S90odod) is wired
   into both `miner.c` and `miner_pipe.c`'s reconnect loops (verified
   2026-06-20 — already symmetric, this note was stale).
-- Fan/thermal/reset button software (DS18B20 tach RPM, `thermal_fan_state()`,
-  GPIO 464 reset poll) pending — see `docs/FAN_SENSOR_WIRING.md` tasks 3–6.
-- `claude/18b20-fan-gpio-setup-r4bm1f` branch ready to merge after fixing
-  DTS comment (pin 27→29, pin 31→12) and Makefile dead-code.
+- ~~Fan/thermal/reset button~~ — **all DONE**: DS18B20 + PWM fan hardware-
+  verified 2026-06-22; reset-button polling driver 2026-06-24. See
+  `docs/FAN_SENSOR_WIRING.md`.
 - Quartus Lite has no licensed Questa; sim runs on Icarus via WSL.
   Note: Qsys caches RTL in `soc_system/synthesis/submodules/` — copy updated
   `odocrypt_top.v` there manually after edits; do NOT rely on qsys-generate

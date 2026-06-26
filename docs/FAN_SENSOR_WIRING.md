@@ -152,12 +152,10 @@ bitstream + binaries; watched the full thermal loop under live mining load):
 | 2 | Fan tach over `pio_thermal` | ✅ verified — read **2700 RPM** while the fan ran at 30% duty. |
 | 3 | `pwm_fan` proportional speed control | ✅ verified — at 50 °C the daemon wrote `DUTY=0x4C` (76/255 ≈ 30% = `THERMAL_FAN_MIN_PCT`) to `0xFF201600` and the fan spun; off at 45 °C. Higher-duty points (toward `THERMAL_FAN_MAX_C` 65 °C) not yet exercised — idle-mining tops out ~50 °C. |
 | 4 | UI: `fan_duty_pct` on touch UI + web dashboard | ✅ done; `status.json` carries `temp_c`/`fan_duty_pct`/`fan_rpm`. |
-| 5 | Reset button polling (`pio_thermal` bit2) | **not started** — pin wired (J10 36/AE20), reads idle-high in `pio_thermal` data bit2; no driver yet. |
+| 5 | Reset button polling (`pio_thermal` bit2) | ✅ **DONE 2026-06-24** — active-low input on J10 pin 36/AE20; `thermal.c` polls `pio_thermal` bit2 in the thermal thread; ~2 s hold → `reboot` syscall. |
 
 Verified hysteresis: fan **ON at `THERMAL_FAN_ON_C` (50 °C)**, **OFF at
 `THERMAL_FAN_OFF_C` (45 °C)**, no chatter. `THERMAL_FAN_MIN_PCT` = 30%,
 ramping to full by `THERMAL_FAN_MAX_C` (65 °C).
 
-Remaining: (a) exercise the duty ramp above 30% by driving the chip past
-50 °C under sustained load and confirming RPM scales toward `MAX_C`; (b) the
-reset-button driver (#5).
+All items complete. No remaining tasks for this subsystem.

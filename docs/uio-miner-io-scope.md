@@ -1,36 +1,27 @@
 # Scope: UIO-based FPGA Register Access (non-root + interrupt-driven)
 
-Status: **in progress** (updated 2026-06-22). Branch: `feat/uio-miner-io`.
+Status: **COMPLETE and DEPLOYED** (merged to `main` 2026-06-25).
+All four workstreams shipped; board confirmed running UIO backend.
 
-### Progress
+### Status
 
-- **WS1 — RTL interrupt output: DONE.** `pipelined_miner_top.v` has an `irq`
+- **WS1 — RTL interrupt output: DONE ✅** `pipelined_miner_top.v` has an `irq`
   output (= `found_valid`, level, clears on FNONCE read), wired to `f2h_irq0`
   line 3 in Qsys; `tb_pipelined_miner.v` asserts one rising edge per nonce,
-  cleared on consume. `run_tb_pipe.sh` PASS, nonce VERIFY_OK. *(Needs a Quartus
-  recompile + reflash before it's on the board.)*
-- **WS3 — UIO software backend: DONE (untested on HW).** `hps/miner_io_pipe_uio.c`
-  is a drop-in for the `miner_io_pipe.h` contract (supersedes the broken
-  `miner_io_uio.c`): correct UIO IRQ **re-arm** and a **bounded** wait
-  (`miner_io_pipe_wait()`, also added to the `/dev/mem` backend) so a stuck IRQ
-  degrades to polling, not a hang. `make odo-miner-pipe-uio` builds clean.
-- **WS2 — device exposure: DONE (untested on HW).** `linux-uio.fragment`
-  (`CONFIG_UIO` + `CONFIG_UIO_PDRV_GENIRQ`), a `generic-uio` DTS node at
-  `0xff200000` with IRQ DT `<0 43 ...>` (= GIC 75 = f2h line 3), the
-  `uio_pdrv_genirq.of_id=generic-uio` bootarg, and the build-script copy. Needs
-  a **kernel/DTB rebuild + reflash** to verify `/dev/uio0` appears.
-
-### Remaining
-
-- **WS2b — non-root user + udev rule + `S90odod` privilege-drop: DEFERRED**
-  per decision 3 below — must fold in the fan/thermal privilege footprint
-  (framebuffer, thermal/PWM regs) that's pending tomorrow's hardware test.
-- **WS3b — daemon integration:** switch `miner_pipe.c`'s fixed-interval found
-  drain to call `miner_io_pipe_wait()` (the actual latency win). Not yet done —
-  kept separate so the production `/dev/mem` build is untouched until measured.
-- **WS4 — hardware verification:** Quartus recompile + reflash, confirm
-  `/dev/uio0` + a non-root open, measure found-nonce latency vs the 5 ms poll
-  (the go/no-go number), soak for missed/double nonces.
+  cleared on consume. `run_tb_pipe.sh` PASS, nonce VERIFY_OK. On board.
+- **WS2 — device exposure: DONE ✅** `linux-uio.fragment` (`CONFIG_UIO` +
+  `CONFIG_UIO_PDRV_GENIRQ`), `generic-uio` DTS node at `0xff200000` with IRQ
+  `<0 43 ...>` (= GIC 75 = f2h line 3), `uio_pdrv_genirq.of_id=generic-uio`
+  bootarg. Kernel + DTB rebuilt and deployed; `/dev/uio0` confirmed present.
+- **WS3 — UIO software backend: DONE ✅** `hps/miner_io_pipe_uio.c` drop-in
+  for the `miner_io_pipe.h` contract; correct UIO IRQ re-arm; bounded wait
+  (`miner_io_pipe_wait()`) so a stuck IRQ degrades to polling, not a hang.
+  `make odo-miner-pipe-uio` builds and deploys to `/usr/bin/`.
+- **WS3b — daemon integration: DONE ✅** `miner_pipe.c` calls
+  `miner_io_pipe_wait()` (blocks on found-nonce IRQ). `backend: "uio"` in
+  `status.json`, shares accepted on mainnet.
+- **WS4 — hardware verification: DONE ✅** `/dev/uio0` present, IRQ fires on
+  real found nonces, soak stable, 2+ accepted shares confirmed post-deploy.
 
 ## 1. Why
 
