@@ -77,7 +77,7 @@ try {
     }
 
     Write-Host "[2/6] point $qsysTcl at odo_$Epoch.v"
-    (Get-Content $qsysTcl) -replace 'add_fileset_file odo_\d+\.v(\s+)VERILOG PATH \.\./src/pipelined/odo_\d+\.v', "add_fileset_file odo_$Epoch.v`$1VERILOG PATH ../src/pipelined/odo_$Epoch.v" |
+    (Get-Content $qsysTcl) -replace 'add_fileset_file odo_[\d_a-z]+\.v(\s+)VERILOG PATH \.\./src/pipelined/odo_[\d_a-z]+\.v', "add_fileset_file odo_$Epoch.v`$1VERILOG PATH ../src/pipelined/odo_$Epoch.v" |
         Set-Content $qsysTcl
     if (-not (Select-String -Path $qsysTcl -Pattern "odo_$Epoch\.v" -Quiet)) {
         throw "failed to update $qsysTcl fileset reference"
