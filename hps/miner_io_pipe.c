@@ -115,3 +115,5 @@ int miner_io_pipe_wait(int timeout_ms)
     nanosleep(&ts, NULL);
     return 1;   /* always "timeout" — there is no IRQ to wake on */
 }
+
+const char *miner_io_pipe_backend(void) { return "devmem"; }

@@ -269,6 +269,7 @@ static void status_write(void)
         "  \"temp_c\": %d,\n"
         "  \"fan_duty_pct\": %d,\n"
         "  \"fan_rpm\": %d,\n"
+        "  \"backend\": \"%s\",\n"
         "  \"uptime\": %ld,\n"
         "  \"updated\": %ld\n"
         "}\n",
@@ -278,7 +279,7 @@ static void status_write(void)
         (long)g_st.last_share,
         g_st.best_diff_session, g_st.best_diff_alltime,
         g_st.blocks_found, (long)g_st.last_block,
-        temp_c, fan_pct, fan_rpm,
+        temp_c, fan_pct, fan_rpm, miner_io_pipe_backend(),
         (long)up, (long)now);
     fclose(f);
     rename(tmp, path);
