@@ -1354,8 +1354,7 @@ int main(int argc, char **argv)
                  * screens without needing the button; a tap (|dx|<40) falls through
                  * to normal button handling. */
                 int dx = sx - tp.press_x;
-                int in_content = tp.press_y < fb.h - 52;
-                if (in_content && abs(dx) > 40 && confirm <= 0) {
+                if (abs(dx) > 40 && confirm <= 0) {
                     if      (dx < 0 && ui_screen == 0) ui_screen = 1;  /* swipe left  → detail */
                     else if (dx < 0 && ui_screen == 1) {               /* swipe left  → settings */
                         ui_screen = 2;
