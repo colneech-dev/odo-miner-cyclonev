@@ -58,7 +58,7 @@ TEST_UP_SRCS = test_odo_upstream.cpp $(UPSTREAM_CRYPTO)/odocrypt.cpp
 # Default target
 # -----------------------------------------------------------------------
 .PHONY: all
-all: odo-miner odo-miner-watcher $(SMOKE_TARGET)
+all: odo-miner-pipe odo-miner-pipe-uio $(SMOKE_TARGET)
 
 # -----------------------------------------------------------------------
 # Binaries

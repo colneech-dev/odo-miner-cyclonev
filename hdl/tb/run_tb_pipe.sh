@@ -11,9 +11,15 @@ HPS="$REPO/hps"
 CRYPTO="$REPO/upstream/odo-miner/src/crypto"
 PIPE="$REPO/hdl/src/pipelined"
 VERGEN="$REPO/upstream/odo-miner/src/verilog"
+QSF="$REPO/hdl/quartus/odo_miner.qsf"
 
-KEY=${KEY:-1748736000}     # epoch seed
-TMSB=${TMSB:-16}           # target MSB byte (looser = faster sim)
+# Read THROUGHPUT and ODOKEY from the QSF so testbench matches deployed config.
+_QSF_T=$(grep 'VERILOG_MACRO.*THROUGHPUT=' "$QSF" | sed 's/.*THROUGHPUT=\([0-9]*\).*/\1/')
+_QSF_K=$(grep 'VERILOG_MACRO.*ODOKEY=' "$QSF" | sed 's/.*ODOKEY=\([0-9]*\).*/\1/')
+THROUGHPUT=${THROUGHPUT:-${_QSF_T:-6}}   # hash-pipeline fold (must match QSF)
+KEY=${KEY:-${_QSF_K:-1782432000}}        # epoch seed (must match baked bitstream)
+TMSB=${TMSB:-16}                         # target MSB byte (looser = faster sim)
+echo "=== Using QSF config: THROUGHPUT=$THROUGHPUT KEY=$KEY ==="
 
 IVERILOG=${IVERILOG:-iverilog}
 VVP=${VVP:-vvp}
@@ -35,7 +41,7 @@ if [ ! -f "$PIPE/odo_${KEY}.v" ]; then
 fi
 
 echo "=== Building testbench ==="
-"$IVERILOG" -g2005 -DTHROUGHPUT=6 -DODOKEY="$KEY" -o tb_pipe.vvp \
+"$IVERILOG" -g2005 -DTHROUGHPUT="$THROUGHPUT" -DODOKEY="$KEY" -o tb_pipe.vvp \
     tb_pipelined_miner.v \
     "$PIPE/pipelined_miner_top.v" \
     "$PIPE/odo_miner_core.v" \

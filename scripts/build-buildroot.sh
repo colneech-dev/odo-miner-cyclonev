@@ -241,7 +241,7 @@ export CXX="$CROSS_GXX"
 # The control-plane C code here isn't NEON/thumb-sensitive (the hot path is
 # the FPGA), so skipping arch-specific tuning costs nothing measurable.
 
-if make odo-miner odo-miner-watcher fpga_smoke_test odo-miner-pipe 2>&1 | tee hps-build-arm.log; then
+if make fpga_smoke_test odo-miner-pipe odo-miner-pipe-uio 2>&1 | tee hps-build-arm.log; then
     log_info "  ✓ HPS software built for ARM"
     # Touch UI + web dashboard (sw/) with the same toolchain
     for app in odo-ui odo-webd; do
@@ -254,7 +254,7 @@ if make odo-miner odo-miner-watcher fpga_smoke_test odo-miner-pipe 2>&1 | tee hp
 
     # List binaries
     echo "  Built binaries:"
-    ls -lh odo-miner odo-miner-watcher fpga_smoke_test odo-miner-pipe miner_io_test 2>/dev/null | awk '{print "    " $9 " (" $5 ")"}'
+    ls -lh fpga_smoke_test odo-miner-pipe odo-miner-pipe-uio 2>/dev/null | awk '{print "    " $9 " (" $5 ")"}'
 else
     log_warn "  ⚠ HPS build failed"
     log_warn "  Check hps-build-arm.log; ensure the Buildroot build completed first"

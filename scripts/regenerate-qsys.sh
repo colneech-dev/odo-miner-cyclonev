@@ -2,7 +2,7 @@
 # Regenerate Qsys DDR3 system from updated soc_system.qsys
 # Run from project root directory
 
-cd "c:\Users\Colin\Documents\GitHub\odo-miner-cyclonev"
+cd "$(dirname "$0")/.."
 
 QSYS_FILE="hdl/qsys/soc_system.qsys"
 OUTPUT_DIR="hdl/qsys/soc_system"
