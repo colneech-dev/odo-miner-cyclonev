@@ -31,11 +31,11 @@ echo "=== Generating vectors (key=$KEY target_msb=$TMSB) ==="
 
 if [ ! -f "$PIPE/odo_${KEY}.v" ]; then
     echo "=== Generating epoch RTL odo_${KEY}.v ==="
-    ( cd "$VERGEN" && make odo_gen >/dev/null && ./odo_gen "$KEY" 4 "odo_" > "$PIPE/odo_${KEY}.v" )
+    ( cd "$VERGEN" && make odo_gen >/dev/null && ./odo_gen "$KEY" 6 "odo_" > "$PIPE/odo_${KEY}.v" )
 fi
 
 echo "=== Building testbench ==="
-"$IVERILOG" -g2005 -DTHROUGHPUT=4 -DODOKEY="$KEY" -o tb_pipe.vvp \
+"$IVERILOG" -g2005 -DTHROUGHPUT=6 -DODOKEY="$KEY" -o tb_pipe.vvp \
     tb_pipelined_miner.v \
     "$PIPE/pipelined_miner_top.v" \
     "$PIPE/odo_miner_core.v" \

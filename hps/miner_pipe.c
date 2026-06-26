@@ -269,6 +269,7 @@ static void status_write(void)
         "  \"temp_c\": %d,\n"
         "  \"fan_duty_pct\": %d,\n"
         "  \"fan_rpm\": %d,\n"
+        "  \"backend\": \"%s\",\n"
         "  \"uptime\": %ld,\n"
         "  \"updated\": %ld\n"
         "}\n",
@@ -278,7 +279,7 @@ static void status_write(void)
         (long)g_st.last_share,
         g_st.best_diff_session, g_st.best_diff_alltime,
         g_st.blocks_found, (long)g_st.last_block,
-        temp_c, fan_pct, fan_rpm,
+        temp_c, fan_pct, fan_rpm, miner_io_pipe_backend(),
         (long)up, (long)now);
     fclose(f);
     rename(tmp, path);
@@ -369,11 +370,14 @@ int main(int argc, char **argv)
         status_write();
 
         while (!g_term) {
-            /* Short timeout: the FPGA's found-latch is 1-deep, so the loop must
-             * drain it far faster than finds arrive (~36/s at 125 MHz/T=8). A
-             * 50 ms poll capped captures at ~20/s and dropped most finds (incl.
-             * potential block hits). 5 ms -> ~200/s drain, plenty of margin. */
-            if (stratum_poll(&st, 5) < 0) {
+            /* WS3b: pace the loop on the found-nonce wait, then service stratum
+             * non-blocking. The UIO backend blocks on the found-nonce IRQ (waking
+             * the drain the instant a nonce lands); the /dev/mem backend does a
+             * bounded ~5 ms nap (returning early if one is already pending), so
+             * both keep the ~200/s drain that the 1-deep found-latch needs (a
+             * 50 ms cap previously dropped most finds, incl. potential blocks). */
+            miner_io_pipe_wait(5);
+            if (stratum_poll(&st, 0) < 0) {
                 fprintf(stderr, "[pipe] poll error; reconnecting\n");
                 break;
             }

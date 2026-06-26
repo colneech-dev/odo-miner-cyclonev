@@ -58,6 +58,12 @@ int  miner_io_pipe_poll(uint32_t *out_nonce);
  *         <0 = error. */
 int  miner_io_pipe_wait(int timeout_ms);
 
+/* Returns a short string identifying which I/O backend is active: "uio" when
+ * using the kernel UIO driver (interrupt-driven), "devmem" when falling back
+ * to /dev/mem polling. Used by status_write() to populate the "backend" field
+ * in status.json. */
+const char *miner_io_pipe_backend(void);
+
 #ifdef __cplusplus
 }
 #endif

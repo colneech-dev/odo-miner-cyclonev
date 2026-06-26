@@ -22,7 +22,7 @@
        live fpga.rbf or reboot -- epoch-update.sh applies it at the boundary)
 
   Usage:
-    .\epoch_build_deploy.ps1 -Epoch 1781913600 -Throughput 8 -BoardIp 192.168.1.35
+    .\epoch_build_deploy.ps1 -Epoch 1781913600 -Throughput 6 -BoardIp 192.168.1.35
 
   Run from anywhere; paths are resolved relative to the repo root. The script
   writes its own log to hdl/quartus/build_epoch_<epoch>.log -- do NOT wrap the
@@ -34,7 +34,7 @@
 #>
 param(
     [Parameter(Mandatory=$true)][long]$Epoch,
-    [int]$Throughput = 8,
+    [int]$Throughput = 6,   # T=6 @ 150 MHz is the safe deployed config; per-epoch Fmax varies so 150 MHz is the floor
     [string]$BoardIp = "192.168.1.35",
     [string]$SshKey = "tools/testnet/odo-miner",
     # Filename to stage the built .rbf as on the board's FAT boot partition.
@@ -64,20 +64,31 @@ try {
     # standalone but fail Quartus elaboration with "undefined entity
     # odo_encrypt" when wired into the wrapper -- caught the hard way on the
     # 1781913600 epoch build.
+    # Always regenerate: the file may exist from a previous run with a different
+    # -Throughput value (e.g. epoch_autorenew.ps1 defaulting to T=8 while the
+    # QSF uses T=6). Regeneration is <1s so there is no reason to cache it.
+    wsl bash -c "cd '$($repo -replace '\\','/' -replace '^C:','/mnt/c')' && upstream/odo-miner/src/verilog/odo_gen $Epoch $Throughput odo_ > $rtlFile"
     if (-not (Test-Path $rtlFile) -or (Get-Item $rtlFile).Length -eq 0) {
-        wsl bash -c "cd '$($repo -replace '\\','/' -replace '^C:','/mnt/c')' && upstream/odo-miner/src/verilog/odo_gen $Epoch $Throughput odo_ > $rtlFile"
-        if (-not (Test-Path $rtlFile) -or (Get-Item $rtlFile).Length -eq 0) {
-            throw "odo_gen produced an empty/missing $rtlFile"
-        }
-    } else {
-        Write-Host "      $rtlFile already exists (size $((Get-Item $rtlFile).Length)); reusing"
+        throw "odo_gen produced an empty/missing $rtlFile"
     }
     if (-not (Select-String -Path $rtlFile -Pattern '^module odo_encrypt\(' -Quiet)) {
         throw "$rtlFile has no 'module odo_encrypt(' -- wrong/missing module prefix (delete and re-run to regenerate with odo_gen ... odo_)"
     }
+    # Verify the generated file has the right localparam THROUGHPUT
+    if (-not (Select-String -Path $rtlFile -Pattern "localparam THROUGHPUT = $Throughput;" -Quiet)) {
+        throw "$rtlFile does not contain 'localparam THROUGHPUT = $Throughput;' -- odo_gen may have failed silently"
+    }
+    # Also copy to Qsys submodules so Quartus picks up the correct file even
+    # if qsys-generate (step 4) is skipped or stale. This is the REAL file
+    # Quartus reads via the soc_system.qip reference.
+    $submodules = "hdl/qsys/soc_system/synthesis/submodules"
+    if (Test-Path $submodules) {
+        Copy-Item $rtlFile "$submodules/odo_$Epoch.v" -Force
+        Write-Host "      copied to $submodules/odo_$Epoch.v"
+    }
 
     Write-Host "[2/6] point $qsysTcl at odo_$Epoch.v"
-    (Get-Content $qsysTcl) -replace 'add_fileset_file odo_\d+\.v(\s+)VERILOG PATH \.\./src/pipelined/odo_\d+\.v', "add_fileset_file odo_$Epoch.v`$1VERILOG PATH ../src/pipelined/odo_$Epoch.v" |
+    (Get-Content $qsysTcl) -replace 'add_fileset_file odo_[\d_a-z]+\.v(\s+)VERILOG PATH \.\./src/pipelined/odo_[\d_a-z]+\.v', "add_fileset_file odo_$Epoch.v`$1VERILOG PATH ../src/pipelined/odo_$Epoch.v" |
         Set-Content $qsysTcl
     if (-not (Select-String -Path $qsysTcl -Pattern "odo_$Epoch\.v" -Quiet)) {
         throw "failed to update $qsysTcl fileset reference"
@@ -107,6 +118,27 @@ try {
     }
     $rbfTime = (Get-Item "hdl/quartus/output_files/odo_miner.rbf").LastWriteTime
     Write-Host "      built: $rbfTime"
+
+    # Fmax safety check: per-epoch LUT patterns affect routing, so Fmax varies
+    # per epoch. A build that meets 0 errors can still have a timing violation
+    # (Critical Warning). Parse the STA report and abort if Fmax < miner clock.
+    $staRpt = "hdl/quartus/output_files/odo_miner.sta.rpt"
+    if (Test-Path $staRpt) {
+        $fmaxLine = Select-String -Path $staRpt -Pattern "pll_miner.*PLL_OUTPUT_COUNTER.*divclk" |
+            Where-Object { $_ -match "(\d+\.\d+) MHz" } | Select-Object -First 1
+        if ($fmaxLine -and $fmaxLine.Line -match "; (\d+\.\d+) MHz") {
+            $fmax = [double]$Matches[1]
+            # Derive miner clock from soc_top.v defparams
+            $stv = Get-Content "hdl/src/soc_top.v" -Raw
+            $mul = if ($stv -match "clk0_multiply_by\s*=\s*(\d+)") { [double]$Matches[1] } else { 3 }
+            $div = if ($stv -match "clk0_divide_by\s*=\s*(\d+)") { [double]$Matches[1] } else { 1 }
+            $targetMhz = 50.0 * $mul / $div
+            Write-Host "      Fmax=$fmax MHz  target=$targetMhz MHz  margin=$([math]::Round($fmax-$targetMhz,2)) MHz"
+            if ($fmax -lt $targetMhz) {
+                throw "TIMING VIOLATION: Fmax $fmax MHz < target $targetMhz MHz for epoch $Epoch. Drop the miner clock to 150 MHz and rebuild."
+            }
+        }
+    }
 
     Write-Host "[6/6] staging on the board as /boot/$StageAs"
     $rbf = "hdl/quartus/output_files/odo_miner.rbf"

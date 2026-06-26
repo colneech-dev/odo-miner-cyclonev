@@ -244,8 +244,10 @@ typedef struct {
     int fd;
     int raw_x, raw_y, down;
     int cur_x, cur_y;                /* live mapped position while pressed */
+    int press_x, press_y;           /* screen coords at the moment touch went down */
     int min_x, max_x, min_y, max_y;  /* raw calibration */
     int swap_xy, inv_x, inv_y;
+    int _was_down, _last_x, _last_y; /* internal poll state (replaces function statics) */
 } touch_t;
 
 static int touch_open(touch_t *t)
@@ -281,14 +283,14 @@ static int touch_open(touch_t *t)
     return t->fd >= 0 ? 0 : -1;
 }
 
-/* Pump events; returns 1 on a fresh "tap" (release), with screen coords */
+/* Pump events; returns 1 on a fresh "tap" (release), with screen coords.
+ * t->press_x/press_y hold the position where the touch started, so the caller
+ * can distinguish a tap (sx ≈ press_x) from a horizontal swipe (|sx−press_x| > threshold). */
 static int touch_poll(touch_t *t, fb_t *fb, int *sx, int *sy)
 {
     if (t->fd < 0) return 0;
     struct input_event ev;
     int tapped = 0;
-    static int was_down = 0;
-    static int last_x = 0, last_y = 0;
 
     while (read(t->fd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev)) {
         if (ev.type == EV_ABS) {
@@ -308,15 +310,19 @@ static int touch_poll(touch_t *t, fb_t *fb, int *sx, int *sy)
                 if (px >= fb->w) px = fb->w - 1;
                 if (py < 0) py = 0;
                 if (py >= fb->h) py = fb->h - 1;
-                last_x = (int)px;
-                last_y = (int)py;
-                t->cur_x = (int)px;
-                t->cur_y = (int)py;
-                was_down = 1;
-            } else if (was_down) {
-                was_down = 0;
-                *sx = last_x;
-                *sy = last_y;
+                if (!t->_was_down) {
+                    t->press_x = (int)px;
+                    t->press_y = (int)py;
+                }
+                t->_last_x = (int)px;
+                t->_last_y = (int)py;
+                t->cur_x   = (int)px;
+                t->cur_y   = (int)py;
+                t->_was_down = 1;
+            } else if (t->_was_down) {
+                t->_was_down = 0;
+                *sx = t->_last_x;
+                *sy = t->_last_y;
                 tapped = 1;
             }
         }
@@ -342,6 +348,10 @@ typedef struct {
     long   temp_c;      /* DS18B20 reading, -1 = no sensor/no reading yet */
     long   fan_duty_pct; /* commanded fan speed, 0-100 (%) */
     long   fan_rpm;      /* -1 = no tach */
+    long long shares_accepted;
+    long long shares_rejected;
+    long   bitstream_epoch;
+    char   backend[16];
 } status_t;
 
 static long json_long(const char *buf, const char *key, long def)
@@ -399,6 +409,10 @@ static int status_read(const char *path, status_t *s)
     s->temp_c              = json_long(buf, "temp_c", -1);
     s->fan_duty_pct        = json_long(buf, "fan_duty_pct", 0);
     s->fan_rpm             = json_long(buf, "fan_rpm", -1);
+    s->shares_accepted     = json_long(buf, "shares_accepted", 0);
+    s->shares_rejected     = json_long(buf, "shares_rejected", 0);
+    s->bitstream_epoch     = json_long(buf, "bitstream_epoch", 0);
+    json_string(buf, "backend", s->backend, sizeof(s->backend));
     s->uptime             = json_long(buf, "uptime", 0);
     s->updated            = json_long(buf, "updated", 0);
     return 0;
@@ -705,6 +719,23 @@ static void scan_draw(fb_t *fb, char list[][33], int n)
 static volatile sig_atomic_t g_stop = 0;
 static void on_sig(int s) { (void)s; g_stop = 1; }
 
+/* Auto-dim: blank the panel after this many seconds of touch inactivity. */
+#define DIM_IDLE_S 300
+static time_t g_last_activity = 0;
+static int    g_blanked        = 0;
+
+static void fb_set_blank(int blank)
+{
+    /* fbtft ties /sys/class/graphics/fb0/blank to the ILI9341 display-on/off
+     * command — writing "1" turns the panel off cleanly without wiping the
+     * framebuffer, so the next unblank instantly restores the last frame. */
+    int fd = open("/sys/class/graphics/fb0/blank", O_WRONLY);
+    if (fd < 0) return;
+    ssize_t w = write(fd, blank ? "1\n" : "0\n", 2);
+    (void)w;
+    close(fd);
+}
+
 /* Full WiFi setup screen loop: keyboard + scan list. Returns when the user
  * saves (writes wpa_supplicant.conf) or cancels. */
 static void run_wifi_setup(fb_t *fb, touch_t *tp, const kbkey_t *keys, int nk, int have_touch)
@@ -808,13 +839,35 @@ static void draw_glance(fb_t *fb, const status_t *st, time_t now,
         fb_text(fb, 14, 122, "loading...", 1, C_DIM);
         fb_rect(fb, 14, 148, fb->w - 28, 7, C_PANEL);
     }
-    /* status line */
-    {
-        char age[24], sline[80];
-        long ls = st->last_share ? now - (time_t)st->last_share : -1L;
-        fmt_age(ls, age, sizeof(age));
-        snprintf(sline, sizeof(sline), "share %s  ep %ld", age, st->epoch);
-        fb_text(fb, 14, 164, sline, 1, C_DIM);
+    /* Epoch mismatch warning OR shares + accept-rate line */
+    if (st->bitstream_epoch && st->epoch && st->bitstream_epoch != st->epoch) {
+        fb_rect(fb, 6, 158, fb->w - 12, 18, C_BAD);
+        const char *wt = "! WRONG EPOCH - REBOOT !";
+        fb_text(fb, (fb->w - fb_text_w(1, wt)) / 2, 161, wt, 1, C_TEXT);
+    } else {
+        char sline[80];
+        long long total = st->shares_accepted + st->shares_rejected;
+        if (total > 0) {
+            int pct = (int)(st->shares_accepted * 100LL / total);
+            snprintf(sline, sizeof(sline), "acc %lld / rej %lld  (%d%%)",
+                     st->shares_accepted, st->shares_rejected, pct);
+        } else {
+            char age[24];
+            long ls = st->last_share ? now - (time_t)st->last_share : -1L;
+            fmt_age(ls, age, sizeof(age));
+            snprintf(sline, sizeof(sline), "share %s  ep %ld", age, st->epoch);
+        }
+        fb_text(fb, 14, 162, sline, 1, C_DIM);
+    }
+    /* Temp + fan — right-aligned, always shown when sensor available */
+    if (st->temp_c >= -50 && st->temp_c <= 150) {
+        char tf[32];
+        if (st->fan_rpm >= 0)
+            snprintf(tf, sizeof(tf), "%ldC  fan %ld%%", st->temp_c, st->fan_duty_pct);
+        else
+            snprintf(tf, sizeof(tf), "%ldC", st->temp_c);
+        int tw = fb_text_w(1, tf);
+        fb_text(fb, fb->w - 14 - tw, 180, tf, 1, C_DIM);
     }
 }
 
@@ -916,6 +969,25 @@ static void draw_detail(fb_t *fb, const status_t *st, time_t now,
     else
         snprintf(val, sizeof(val), "%ld%%", st->fan_duty_pct);
     fb_text(fb, xRv, y, val, 1, st->fan_duty_pct > 0 ? C_OK : C_DIM);
+    y += 14;
+
+    /* Pool share acceptance rate */
+    long long total = st->shares_accepted + st->shares_rejected;
+    if (total > 0) {
+        int pct = (int)(st->shares_accepted * 100LL / total);
+        fb_text(fb, xL, y, "ACC/REJ", 1, C_DIM);
+        snprintf(val, sizeof(val), "%lld/%lld  %d%%",
+                 st->shares_accepted, st->shares_rejected, pct);
+        fb_text(fb, xLv, y, val, 1,
+                pct >= 90 ? C_OK : pct >= 70 ? C_WARN : C_BAD);
+        y += 14;
+    }
+    /* I/O backend (UIO interrupt-driven vs /dev/mem polling) */
+    if (st->backend[0]) {
+        fb_text(fb, xL, y, "BACKEND", 1, C_DIM);
+        fb_text(fb, xLv, y, st->backend, 1,
+                strcmp(st->backend, "uio") == 0 ? C_OK : C_TEXT);
+    }
 }
 
 /* Full-screen celebratory takeover when a NEW block is found, replacing the
@@ -1031,6 +1103,8 @@ int main(int argc, char **argv)
     int ui_screen = 0;          /* 0 = glance, 1 = detail */
     long long block_ack = -1;   /* -1 = not yet seeded from the first status read */
 
+    g_last_activity = time(NULL);
+
     while (!g_stop) {
         time_t now = time(NULL);
 
@@ -1038,6 +1112,27 @@ int main(int argc, char **argv)
             draw_splash(&fb, "Rebooting...");
             struct timespec ts = { 0, 400 * 1000000L };
             nanosleep(&ts, NULL);
+            continue;
+        }
+
+        /* Auto-dim: blank panel after DIM_IDLE_S seconds of no touch input */
+        if (!g_blanked && now - g_last_activity > DIM_IDLE_S) {
+            fb_set_blank(1);
+            g_blanked = 1;
+        }
+        if (g_blanked) {
+            /* Screen off: just poll touch to detect wake; skip drawing */
+            struct timespec ts = { 0, 200 * 1000000L };
+            nanosleep(&ts, NULL);
+            if (have_touch) {
+                int sx, sy;
+                if (touch_poll(&tp, &fb, &sx, &sy)) {
+                    fb_set_blank(0);
+                    g_blanked = 0;
+                    g_last_activity = now;
+                    /* discard this tap — it was a wake touch */
+                }
+            }
             continue;
         }
 
@@ -1126,7 +1221,17 @@ int main(int argc, char **argv)
             int sx, sy;
             int tapped = have_touch ? touch_poll(&tp, &fb, &sx, &sy) : 0;
             if (tapped) {
-                if (confirm > 0) {
+                g_last_activity = now;
+                /* Horizontal swipe in the content area (above button zone) switches
+                 * screens without needing the button; a tap (|dx|<40) falls through
+                 * to normal button handling. */
+                int dx = sx - tp.press_x;
+                int in_content = tp.press_y < fb.h - 52;
+                if (in_content && abs(dx) > 40 && confirm <= 0) {
+                    if (dx < 0 && ui_screen == 0) ui_screen = 1;       /* swipe left  → detail */
+                    else if (dx > 0 && ui_screen == 1) ui_screen = 0;  /* swipe right → glance */
+                    tick = 99;
+                } else if (confirm > 0) {
                     /* Confirm dialog: left+mid area executes, anything else cancels */
                     rect_t cfm = { btn_left.x, btn_left.y,
                                    btn_mid.x + btn_mid.w - btn_left.x, btn_left.h };
