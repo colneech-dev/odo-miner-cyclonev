@@ -1,3 +1,7 @@
+# PUBLIC REPO — do NOT commit personal/environment data: real names, emails,
+# SSH keys, real wallet addresses, LAN IPs, absolute user paths, WiFi secrets,
+# or image EXIF. See the policy note at the top of CLAUDE.md.
+
 # HPS build artifacts
 hps/*.o
 hps/odod

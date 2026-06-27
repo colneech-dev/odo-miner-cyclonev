@@ -2,6 +2,17 @@
 
 This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoCrypt FPGA miner, based on the upstream source tree in `third_party/odo-miner/`.
 
+> **⚠️ PUBLIC REPO — NO PERSONAL INFORMATION IN COMMITS.** This is a public,
+> GPL-3.0-or-later project. Never commit personal or environment-specific data:
+> real names, emails, SSH **private or public** keys, real wallet/payout
+> addresses, home/LAN IP addresses, absolute user paths (`C:\Users\<name>\…`,
+> `/mnt/c/Users/<name>/…`), `wpa_supplicant` WiFi secrets, or device metadata
+> (strip EXIF from any committed image — `git ls-files '*.png' '*.jpg'`).
+> Use placeholders, relative paths, and env vars (`${REPO}`, `${BOARD_IP}`)
+> instead. `linux/overlay/root/.ssh/authorized_keys` ships as an empty template
+> and the rootfs default root password must be changed on first boot (see the
+> README Security section). When in doubt, keep it out of git.
+
 ## Purpose
 
 `CLAUDE.md` is the top-level project brief for an AI or engineer to understand the repository intent, the target architecture, and where to find the detailed design artifacts.
