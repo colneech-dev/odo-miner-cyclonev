@@ -6,7 +6,9 @@ appliance. Each stage links to the detailed doc; this page is the spine.
 What you end up with: a QMTECH Cyclone V SoC board that boots from SD,
 loads the miner bitstream, joins your network (Ethernet or WiFi), mines
 DigiByte OdoCrypt against your pool, shows status on a touch TFT, and is
-managed from a web browser. No PC attached, no per-epoch rebuilds.
+managed from a web browser. No PC attached for day-to-day operation; epoch
+rollovers are handled with zero manual steps (a per-epoch bitstream is
+precompiled off-board and auto-staged + applied — see §9).
 
 ---
 
@@ -63,7 +65,7 @@ tar xzf buildroot-2025.11.3.tar.gz
 wget -O oss-cad.tgz https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-06-09/oss-cad-suite-linux-x64-20260609.tgz
 tar xzf oss-cad.tgz && rm oss-cad.tgz
 ~/oss-cad-suite/bin/iverilog -V | head -1   # sanity check
-# hdl/tb/run_tb.sh finds ~/oss-cad-suite/bin automatically
+# hdl/tb/run_tb_pipe.sh finds ~/oss-cad-suite/bin automatically
 ```
 
 ## 4. Get the source
@@ -73,7 +75,7 @@ tar xzf oss-cad.tgz && rm oss-cad.tgz
 # upstream/odo-miner provides the reference implementation that the
 # algorithm tests and the testbench vector generator compile against.
 git clone --recurse-submodules https://github.com/colneech-dev/odo-miner-cyclonev.git
-cd odo-miner-cyclonev && git checkout Fabel
+cd odo-miner-cyclonev   # clone lands on the default 'main' branch (what to build)
 # If you forgot --recurse-submodules:  git submodule update --init
 ```
 
@@ -86,7 +88,7 @@ make all           # builds miner + tools, zero warnings expected
 make test_units    # 12 unit checks
 make check         # C port vs upstream C++ — must print MATCH
 cd ../hdl/tb
-./run_tb.sh        # RTL known-answer testbench — must print ALL VECTORS PASS
+./run_tb_pipe.sh   # pipelined-core known-answer TB — must print "PIPE TB: PASS"
 ```
 
 If all four pass, every tool is correctly installed.
@@ -140,7 +142,7 @@ the module.
 | Kernel config, DTS, packages, overlay | `scripts/build-buildroot.sh` | WSL |
 | Miner / UI / web app C code | `make` in `hps/` or `sw/*` (the buildroot script also rebuilds them) | WSL |
 | Pool, WiFi, watchdog settings | nothing — web dashboard or `/etc/odod.conf` | board |
-| **OdoCrypt epoch (every 10 days)** | **nothing — automatic at runtime** | — |
+| **OdoCrypt epoch (every 10 days)** | off-board recompile (`scripts/epoch_build_deploy.ps1`), auto-staged + applied by the board's `epoch-update.sh` cron — no manual step if `epoch_autorenew.ps1` is scheduled | Windows + board |
 
 ## 10. Troubleshooting entry points
 
