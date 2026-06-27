@@ -1044,23 +1044,23 @@ static void draw_detail(fb_t *fb, const status_t *st, time_t now,
 typedef struct {
     rect_t timeout_dec, timeout_inc;
     rect_t level_dec,   level_inc;
-    rect_t wifi;
 } settings_rects_t;
 
 /* ---- Action sheet (MENU): one modal list of system actions, opened from the
    consistent MENU button on every info screen so actions + settings + WiFi live
    in one predictable place rather than scattered/duplicated across screens. ---- */
-enum { AS_RESTART, AS_REBOOT, AS_SETTINGS, AS_CANCEL, AS_N };
+enum { AS_GLANCE, AS_DETAIL, AS_SETUP, AS_WIFI, AS_RESTART, AS_REBOOT, AS_CANCEL, AS_N };
 static rect_t action_rect(const fb_t *fb, int i)
 {
-    int w = 220, h = 30, gap = 6;
+    int w = 220, h = 26, gap = 3;
     int total = AS_N * h + (AS_N - 1) * gap;
     rect_t r = { (fb->w - w) / 2, (fb->h - total) / 2 + i * (h + gap), w, h };
     return r;
 }
 static void draw_action_sheet(fb_t *fb)
 {
-    static const char *lbl[AS_N] = { "RESTART", "REBOOT", "SETUP", "CANCEL" };
+    static const char *lbl[AS_N] = { "GLANCE", "DETAIL", "SETUP", "WIFI SETUP",
+                                     "RESTART", "REBOOT", "CANCEL" };
     /* modal panel behind the list */
     rect_t top = action_rect(fb, 0), bot = action_rect(fb, AS_N - 1);
     int pad = 12;
@@ -1119,14 +1119,6 @@ static settings_rects_t draw_settings(fb_t *fb, int dim_timeout, int dim_level)
     const char *hint = dim_level == 0
         ? "0=blank off  1-100=dim to %" : "1-100=dim to % brightness";
     fb_text(fb, 8, y, hint, 1, C_DIM);
-    y += 16;
-
-    /* WIFI SETUP button (opens the network scan/join flow) */
-    r.wifi = (rect_t){ 8, y, cw - 16, 26 };
-    fb_rect(fb, r.wifi.x, r.wifi.y, r.wifi.w, r.wifi.h, C_ACCENT);
-    fb_rect(fb, r.wifi.x + 1, r.wifi.y + 1, r.wifi.w - 2, r.wifi.h - 2, C_PANEL);
-    fb_text(fb, r.wifi.x + (r.wifi.w - fb_text_w(1, "WIFI SETUP")) / 2, y + 8,
-            "WIFI SETUP", 1, C_ACCENT);
 
     return r;
 }
@@ -1230,7 +1222,7 @@ int main(int argc, char **argv)
     rect_t btn_left  = { 6,   fb.h - 42, 148, 34 };  /* confirm-dialog layout */
     rect_t btn_mid   = { 160, fb.h - 42,  74, 34 };
     rect_t btn_right = { 240, fb.h - 42,  74, 34 };
-    rect_t menu_btn  = { 6,   fb.h - 42,  56, 34 };  /* compact hamburger (info screens) */
+    rect_t menu_btn  = { fb.w - 62, fb.h - 42, 56, 34 };  /* compact hamburger, bottom-right */
 
     /* WiFi setup keyboard layout */
     kbkey_t keys[64];
@@ -1396,9 +1388,12 @@ int main(int argc, char **argv)
                         rect_t r = action_rect(&fb, i);
                         if (!hit(&r, sx, sy)) continue;
                         handled = 1;
-                        if      (i == AS_RESTART)  { confirm = 1; confirm_at = now; }
-                        else if (i == AS_REBOOT)   { confirm = 2; confirm_at = now; }
-                        else if (i == AS_SETTINGS) { ui_screen = 2; }
+                        if      (i == AS_GLANCE)  { ui_screen = 0; }
+                        else if (i == AS_DETAIL)  { ui_screen = 1; }
+                        else if (i == AS_SETUP)   { ui_screen = 2; }
+                        else if (i == AS_WIFI)    { run_wifi_setup(&fb, &tp, keys, nk, have_touch); }
+                        else if (i == AS_RESTART) { confirm = 1; confirm_at = now; }
+                        else if (i == AS_REBOOT)  { confirm = 2; confirm_at = now; }
                         /* AS_CANCEL: just close */
                         break;
                     }
@@ -1422,8 +1417,6 @@ int main(int argc, char **argv)
                         } else if (hit(&set_rects.level_inc, sx, sy)) {
                             g_dim_level += 5; if (g_dim_level > 100) g_dim_level = 100;
                             save_ui_conf();
-                        } else if (hit(&set_rects.wifi, sx, sy)) {
-                            run_wifi_setup(&fb, &tp, keys, nk, have_touch);
                         }
                     }
                 }
