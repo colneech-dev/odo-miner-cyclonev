@@ -884,35 +884,40 @@ static void draw_glance(fb_t *fb, const status_t *st, time_t now,
         fb_text(fb, 14, 122, "loading...", 1, C_DIM);
         fb_rect(fb, 14, 148, fb->w - 28, 7, C_PANEL);
     }
-    /* Epoch mismatch warning OR shares + accept-rate line */
+    /* Epoch mismatch warning OR compact summary (shares + best-diff, then health) */
     if (st->bitstream_epoch && st->epoch && st->bitstream_epoch != st->epoch) {
         fb_rect(fb, 6, 158, fb->w - 12, 18, C_BAD);
         const char *wt = "! WRONG EPOCH - REBOOT !";
         fb_text(fb, (fb->w - fb_text_w(1, wt)) / 2, 161, wt, 1, C_TEXT);
     } else {
-        char sline[80];
+        char val[40];
+        /* Line 1: accepted-share count + best difficulty (this session) */
+        char ds[20];
+        fmt_diff(st->best_diff_session, ds, sizeof(ds));
+        fb_text(fb, 14, 160, "SHARES", 1, C_DIM);
+        snprintf(val, sizeof(val), "%lld", st->shares_accepted);
+        fb_text(fb, 68, 160, val, 1, C_TEXT);
+        fb_text(fb, 168, 160, "BEST-S", 1, C_DIM);
+        fb_text(fb, 222, 160, ds, 1, C_ACCENT);
+        /* Line 2: compact health — temp, accept-rate, fan */
         long long total = st->shares_accepted + st->shares_rejected;
+        if (st->temp_c >= -50 && st->temp_c <= 150) {
+            snprintf(val, sizeof(val), "%ldC", st->temp_c);
+            fb_text(fb, 14, 176, "TEMP", 1, C_DIM);
+            fb_text(fb, 54, 176, val, 1, st->temp_c >= 65 ? C_WARN : C_TEXT);
+        }
         if (total > 0) {
             int pct = (int)(st->shares_accepted * 100LL / total);
-            snprintf(sline, sizeof(sline), "acc %lld / rej %lld  (%d%%)",
-                     st->shares_accepted, st->shares_rejected, pct);
-        } else {
-            char age[24];
-            long ls = st->last_share ? now - (time_t)st->last_share : -1L;
-            fmt_age(ls, age, sizeof(age));
-            snprintf(sline, sizeof(sline), "share %s  ep %ld", age, st->epoch);
+            snprintf(val, sizeof(val), "%d%%", pct);
+            fb_text(fb, 120, 176, "ACC", 1, C_DIM);
+            fb_text(fb, 150, 176, val, 1,
+                    pct >= 90 ? C_OK : pct >= 70 ? C_WARN : C_BAD);
         }
-        fb_text(fb, 14, 162, sline, 1, C_DIM);
-    }
-    /* Temp + fan — right-aligned, always shown when sensor available */
-    if (st->temp_c >= -50 && st->temp_c <= 150) {
-        char tf[32];
-        if (st->fan_rpm >= 0)
-            snprintf(tf, sizeof(tf), "%ldC  fan %ld%%", st->temp_c, st->fan_duty_pct);
-        else
-            snprintf(tf, sizeof(tf), "%ldC", st->temp_c);
-        int tw = fb_text_w(1, tf);
-        fb_text(fb, fb->w - 14 - tw, 180, tf, 1, C_DIM);
+        if (st->fan_rpm >= 0) {
+            snprintf(val, sizeof(val), "%ld%%", st->fan_duty_pct);
+            fb_text(fb, 220, 176, "FAN", 1, C_DIM);
+            fb_text(fb, 250, 176, val, 1, st->fan_duty_pct > 0 ? C_OK : C_DIM);
+        }
     }
 }
 
@@ -1040,6 +1045,37 @@ typedef struct {
     rect_t timeout_dec, timeout_inc;
     rect_t level_dec,   level_inc;
 } settings_rects_t;
+
+/* ---- Action sheet (MENU): one modal list of system actions, opened from the
+   consistent MENU button on every info screen so actions + settings + WiFi live
+   in one predictable place rather than scattered/duplicated across screens. ---- */
+enum { AS_RESTART, AS_REBOOT, AS_WIFI, AS_SCREEN, AS_CANCEL, AS_N };
+static rect_t action_rect(const fb_t *fb, int i)
+{
+    int w = 220, h = 30, gap = 6;
+    int total = AS_N * h + (AS_N - 1) * gap;
+    rect_t r = { (fb->w - w) / 2, (fb->h - total) / 2 + i * (h + gap), w, h };
+    return r;
+}
+static void draw_action_sheet(fb_t *fb)
+{
+    static const char *lbl[AS_N] = { "RESTART", "REBOOT", "WIFI SETUP", "SCREEN", "CANCEL" };
+    /* modal panel behind the list */
+    rect_t top = action_rect(fb, 0), bot = action_rect(fb, AS_N - 1);
+    int pad = 12;
+    fb_rect(fb, top.x - pad, top.y - pad, top.w + 2 * pad,
+            (bot.y + bot.h - top.y) + 2 * pad, C_ACCENT);
+    fb_rect(fb, top.x - pad + 1, top.y - pad + 1, top.w + 2 * pad - 2,
+            (bot.y + bot.h - top.y) + 2 * pad - 2, C_BG);
+    for (int i = 0; i < AS_N; i++) {
+        rect_t r = action_rect(fb, i);
+        uint16_t border = (i == AS_REBOOT) ? C_BAD : (i == AS_CANCEL) ? C_PANEL : C_ACCENT;
+        uint16_t tc     = (i == AS_REBOOT) ? C_BAD : (i == AS_CANCEL) ? C_TEXT  : C_ACCENT;
+        fb_rect(fb, r.x, r.y, r.w, r.h, border);
+        fb_rect(fb, r.x + 1, r.y + 1, r.w - 2, r.h - 2, C_PANEL);
+        fb_text(fb, r.x + (r.w - fb_text_w(1, lbl[i])) / 2, r.y + 10, lbl[i], 1, tc);
+    }
+}
 
 static settings_rects_t draw_settings(fb_t *fb, int dim_timeout, int dim_level)
 {
@@ -1195,15 +1231,14 @@ int main(int argc, char **argv)
 
     load_ui_conf();
 
-    int confirm = 0;            /* 0 none, 1 restart, 2 reboot */
+    int confirm = 0;            /* 0 none, 1 confirm-restart, 2 confirm-reboot */
+    int menu_open = 0;          /* action sheet (MENU) visible */
     int rebooting = 0;
     time_t confirm_at = 0;
     int ui_screen = 0;          /* 0 = glance, 1 = detail, 2 = screen settings */
     long long block_ack = -1;   /* -1 = not yet seeded from the first status read */
 
-    /* Screen-settings working copies (edited before Save commits them) */
-    int set_timeout = DIM_TIMEOUT_DEFAULT;
-    int set_level   = DIM_LEVEL_DEFAULT;
+    /* Screen-settings hit rects (the +/- controls edit g_dim_* live and auto-save) */
     settings_rects_t set_rects;
     memset(&set_rects, 0, sizeof(set_rects));
 
@@ -1275,15 +1310,16 @@ int main(int argc, char **argv)
         else if (ui_screen == 1)
             draw_detail(&fb, &st, now, wssid, wdbm);
         else
-            set_rects = draw_settings(&fb, set_timeout, set_level);
+            set_rects = draw_settings(&fb, g_dim_timeout, g_dim_level);
 
         /* ---- buttons ---- */
         if (confirm && now - confirm_at > 6)
             confirm = 0;
+        if (menu_open && now - confirm_at > 10)
+            menu_open = 0;
 
         if (confirm > 0) {
-            /* Confirm dialog (restart or reboot): spans left+mid, cancel right.
-             * Shown from either screen. */
+            /* Confirm dialog (restart or reboot): spans left+mid, cancel right. */
             int cw2 = btn_mid.x + btn_mid.w - btn_left.x;
             fb_rect(&fb, btn_left.x, btn_left.y, cw2, btn_left.h, C_BAD);
             fb_text(&fb, btn_left.x + 8, btn_left.y + 11,
@@ -1292,57 +1328,27 @@ int main(int argc, char **argv)
             fb_rect(&fb, btn_right.x+1, btn_right.y+1, btn_right.w-2, btn_right.h-2, C_PANEL);
             fb_text(&fb, btn_right.x + (btn_right.w - fb_text_w(1, "CANCEL")) / 2,
                     btn_right.y + 11, "CANCEL", 1, C_TEXT);
-        } else if (ui_screen == 0) {
-            if (confirm == -1) {
-                /* Glance quick-action menu: [CANCEL] [RESTART] [REBOOT] */
-                struct { rect_t r; const char *t; uint16_t border, fill, tc; } bm[3] = {
-                    { btn_left,  "CANCEL",  C_PANEL,  C_PANEL,  C_TEXT  },
-                    { btn_mid,   "RESTART", C_ACCENT, C_PANEL,  C_ACCENT },
-                    { btn_right, "REBOOT",  C_BAD,    C_PANEL,  C_BAD   },
-                };
-                for (int i = 0; i < 3; i++) {
-                    fb_rect(&fb, bm[i].r.x, bm[i].r.y, bm[i].r.w, bm[i].r.h, bm[i].border);
-                    fb_rect(&fb, bm[i].r.x+1, bm[i].r.y+1, bm[i].r.w-2, bm[i].r.h-2, bm[i].fill);
-                    fb_text(&fb, bm[i].r.x + (bm[i].r.w - fb_text_w(1, bm[i].t)) / 2,
-                            bm[i].r.y + 11, bm[i].t, 1, bm[i].tc);
-                }
-            } else {
-                /* Glance: [DETAILS (wide)] [WIFI] [MENU] */
-                struct { rect_t r; const char *t; uint16_t border, fill, tc; } b3[3] = {
-                    { btn_left,  "DETAILS", C_ACCENT, C_ACCENT, C_BG   },
-                    { btn_mid,   "WIFI",    C_ACCENT, C_PANEL,  C_TEXT  },
-                    { btn_right, "MENU",    C_ACCENT, C_PANEL,  C_TEXT  },
-                };
-                for (int i = 0; i < 3; i++) {
-                    fb_rect(&fb, b3[i].r.x, b3[i].r.y, b3[i].r.w, b3[i].r.h, b3[i].border);
-                    fb_rect(&fb, b3[i].r.x+1, b3[i].r.y+1, b3[i].r.w-2, b3[i].r.h-2, b3[i].fill);
-                    fb_text(&fb, b3[i].r.x + (b3[i].r.w - fb_text_w(1, b3[i].t)) / 2,
-                            b3[i].r.y + 13, b3[i].t, 1, b3[i].tc);
-                }
-            }
-        } else if (ui_screen == 1) {
-            /* Detail: [← BACK (wide)] [RESTART] [REBOOT] */
-            struct { rect_t r; const char *t; uint16_t border, fill, tc; } b3[3] = {
-                { btn_left,  "< BACK",  C_ACCENT, C_ACCENT, C_BG  },
-                { btn_mid,   "RESTART", C_ACCENT, C_PANEL,  C_TEXT },
-                { btn_right, "REBOOT",  C_BAD,    C_PANEL,  C_BAD  },
-            };
-            for (int i = 0; i < 3; i++) {
-                fb_rect(&fb, b3[i].r.x, b3[i].r.y, b3[i].r.w, b3[i].r.h, b3[i].border);
-                fb_rect(&fb, b3[i].r.x+1, b3[i].r.y+1, b3[i].r.w-2, b3[i].r.h-2, b3[i].fill);
-                fb_text(&fb, b3[i].r.x + (b3[i].r.w - fb_text_w(1, b3[i].t)) / 2,
-                        b3[i].r.y + 11, b3[i].t, 1, b3[i].tc);
-            }
         } else {
-            /* Screen settings: [< BACK (left+mid wide)] [SAVE] */
-            int back_w = btn_mid.x + btn_mid.w - btn_left.x;
-            fb_rect(&fb, btn_left.x,   btn_left.y, back_w,       btn_left.h,  C_ACCENT);
-            fb_rect(&fb, btn_left.x+1, btn_left.y+1, back_w-2,   btn_left.h-2, C_PANEL);
-            fb_text(&fb, btn_left.x + 8, btn_left.y + 11, "< BACK", 1, C_TEXT);
+            /* Consistent nav bar on EVERY info screen: [ MENU ] [ < ] [ > ].
+             * MENU opens the action sheet; < / > cycle glance/detail/settings
+             * (same as swipe). Page dots sit just above the bar. */
+            fb_rect(&fb, btn_left.x, btn_left.y, btn_left.w, btn_left.h, C_ACCENT);
+            fb_rect(&fb, btn_left.x+1, btn_left.y+1, btn_left.w-2, btn_left.h-2, C_PANEL);
+            fb_text(&fb, btn_left.x + (btn_left.w - fb_text_w(1, "MENU")) / 2,
+                    btn_left.y + 11, "MENU", 1, C_ACCENT);
+            fb_rect(&fb, btn_mid.x, btn_mid.y, btn_mid.w, btn_mid.h, C_ACCENT);
+            fb_rect(&fb, btn_mid.x+1, btn_mid.y+1, btn_mid.w-2, btn_mid.h-2, C_PANEL);
+            fb_text(&fb, btn_mid.x + (btn_mid.w - fb_text_w(1, "<")) / 2,
+                    btn_mid.y + 11, "<", 1, C_TEXT);
             fb_rect(&fb, btn_right.x, btn_right.y, btn_right.w, btn_right.h, C_ACCENT);
-            fb_text(&fb, btn_right.x + (btn_right.w - fb_text_w(1, "SAVE")) / 2,
-                    btn_right.y + 11, "SAVE", 1, C_BG);
+            fb_rect(&fb, btn_right.x+1, btn_right.y+1, btn_right.w-2, btn_right.h-2, C_PANEL);
+            fb_text(&fb, btn_right.x + (btn_right.w - fb_text_w(1, ">")) / 2,
+                    btn_right.y + 11, ">", 1, C_TEXT);
         }
+
+        /* Action sheet draws on top of the bar when open (but under confirm). */
+        if (menu_open && confirm == 0)
+            draw_action_sheet(&fb);
 
         /* ---- input ---- */
         for (int tick = 0; tick < 20 && !g_stop; tick++) {
@@ -1354,15 +1360,10 @@ int main(int argc, char **argv)
                  * screens without needing the button; a tap (|dx|<40) falls through
                  * to normal button handling. */
                 int dx = sx - tp.press_x;
-                if (abs(dx) > 40 && confirm <= 0) {
-                    if      (dx < 0 && ui_screen == 0) ui_screen = 1;  /* swipe left  → detail */
-                    else if (dx < 0 && ui_screen == 1) {               /* swipe left  → settings */
-                        ui_screen = 2;
-                        set_timeout = g_dim_timeout;
-                        set_level   = g_dim_level;
-                    }
-                    else if (dx > 0 && ui_screen == 2) ui_screen = 1;  /* swipe right → detail */
-                    else if (dx > 0 && ui_screen == 1) ui_screen = 0;  /* swipe right → glance */
+                if (abs(dx) > 40 && confirm == 0 && !menu_open) {
+                    /* swipe cycles glance/detail/settings (matches the < / > bar) */
+                    if      (dx < 0) ui_screen = (ui_screen + 1) % 3;
+                    else             ui_screen = (ui_screen + 2) % 3;
                     tick = 99;
                 } else if (confirm > 0) {
                     /* Confirm dialog: left+mid area executes, anything else cancels */
@@ -1382,58 +1383,46 @@ int main(int argc, char **argv)
                         }
                     }
                     confirm = 0;
-                } else if (ui_screen == 0) {
-                    if (confirm == -1) {
-                        /* Quick-action menu taps */
-                        if (hit(&btn_left, sx, sy)) {
-                            confirm = 0;
-                        } else if (hit(&btn_mid, sx, sy)) {
-                            confirm = 1; confirm_at = now;
-                        } else if (hit(&btn_right, sx, sy)) {
-                            confirm = 2; confirm_at = now;
-                        }
-                    } else {
-                        /* Normal glance taps */
-                        if (hit(&btn_left, sx, sy)) {
-                            ui_screen = 1;
-                        } else if (hit(&btn_mid, sx, sy)) {
-                            run_wifi_setup(&fb, &tp, keys, nk, have_touch);
-                        } else if (hit(&btn_right, sx, sy)) {
-                            confirm = -1; confirm_at = now;
-                        }
+                } else if (menu_open) {
+                    /* Action sheet taps (Restart / Reboot / WiFi / Screen / Cancel);
+                     * a tap outside any item dismisses the sheet. */
+                    int handled = 0;
+                    for (int i = 0; i < AS_N; i++) {
+                        rect_t r = action_rect(&fb, i);
+                        if (!hit(&r, sx, sy)) continue;
+                        handled = 1;
+                        if      (i == AS_RESTART) { confirm = 1; confirm_at = now; }
+                        else if (i == AS_REBOOT)  { confirm = 2; confirm_at = now; }
+                        else if (i == AS_WIFI)    { run_wifi_setup(&fb, &tp, keys, nk, have_touch); }
+                        else if (i == AS_SCREEN)  { ui_screen = 2; }
+                        /* AS_CANCEL: just close */
+                        break;
                     }
-                } else if (ui_screen == 1) {
-                    /* Detail taps */
-                    if (hit(&btn_left, sx, sy)) {
-                        ui_screen = 0;
-                    } else if (hit(&btn_mid, sx, sy)) {
-                        confirm = 1; confirm_at = now;
-                    } else if (hit(&btn_right, sx, sy)) {
-                        confirm = 2; confirm_at = now;
-                    }
+                    (void)handled;
+                    menu_open = 0;
                 } else {
-                    /* Screen settings taps */
-                    rect_t back_r = { btn_left.x, btn_left.y,
-                                      btn_mid.x + btn_mid.w - btn_left.x, btn_left.h };
-                    if (hit(&back_r, sx, sy)) {
-                        ui_screen = 1;
+                    /* Consistent nav bar: MENU / prev / next — same on every screen. */
+                    if (hit(&btn_left, sx, sy)) {
+                        menu_open = 1; confirm_at = now;
+                    } else if (hit(&btn_mid, sx, sy)) {
+                        ui_screen = (ui_screen + 2) % 3;   /* < prev */
                     } else if (hit(&btn_right, sx, sy)) {
-                        g_dim_timeout = set_timeout;
-                        g_dim_level   = set_level;
-                        save_ui_conf();
-                        ui_screen = 1;
-                    } else if (hit(&set_rects.timeout_dec, sx, sy)) {
-                        set_timeout -= 30;
-                        if (set_timeout < 0) set_timeout = 0;
-                    } else if (hit(&set_rects.timeout_inc, sx, sy)) {
-                        set_timeout += 30;
-                        if (set_timeout > 3600) set_timeout = 3600;
-                    } else if (hit(&set_rects.level_dec, sx, sy)) {
-                        set_level -= 5;
-                        if (set_level < 0) set_level = 0;
-                    } else if (hit(&set_rects.level_inc, sx, sy)) {
-                        set_level += 5;
-                        if (set_level > 100) set_level = 100;
+                        ui_screen = (ui_screen + 1) % 3;   /* > next */
+                    } else if (ui_screen == 2) {
+                        /* Screen-settings +/- edit g_dim_* live and persist immediately */
+                        if (hit(&set_rects.timeout_dec, sx, sy)) {
+                            g_dim_timeout -= 30; if (g_dim_timeout < 0) g_dim_timeout = 0;
+                            save_ui_conf();
+                        } else if (hit(&set_rects.timeout_inc, sx, sy)) {
+                            g_dim_timeout += 30; if (g_dim_timeout > 3600) g_dim_timeout = 3600;
+                            save_ui_conf();
+                        } else if (hit(&set_rects.level_dec, sx, sy)) {
+                            g_dim_level -= 5; if (g_dim_level < 0) g_dim_level = 0;
+                            save_ui_conf();
+                        } else if (hit(&set_rects.level_inc, sx, sy)) {
+                            g_dim_level += 5; if (g_dim_level > 100) g_dim_level = 100;
+                            save_ui_conf();
+                        }
                     }
                 }
                 tick = 99;
