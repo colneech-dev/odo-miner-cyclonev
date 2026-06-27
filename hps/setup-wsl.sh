@@ -51,11 +51,11 @@ cat <<'EOF'
 Done. Next steps:
 
 1) Build the smoke test (native):
-   cd /mnt/c/Users/Colin/Documents/GitHub/odo-miner-cyclonev/hps
+   cd /path/to/odo-miner-cyclonev/hps
    make smoke_test
 
 2) Cross-build for ARM locally:
-   cd /mnt/c/Users/Colin/Documents/GitHub/odo-miner-cyclonev/hps
+   cd /path/to/odo-miner-cyclonev/hps
    CC=arm-linux-gnueabihf-gcc make smoke_test
 
 3) Copy the binary to your HPS board (use scp/rsync) and run as root:

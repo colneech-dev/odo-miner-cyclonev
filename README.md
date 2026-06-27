@@ -4,6 +4,21 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 
 The project targets an autonomous appliance that boots from SD card and mines DigiByte's OdoCrypt algorithm fully autonomously — no host PC required.
 
+## ⚠️ Security — read before flashing a build
+
+This image is built for a **trusted LAN**. Before exposing a board, you **must**:
+
+- **Change the default root password.** Buildroot ships the rootfs with root
+  password **`odo-miner`** (`linux/buildroot_cyclonev_defconfig`,
+  `BR2_TARGET_GENERIC_ROOT_PASSWD`). It is public and identical on every build —
+  log in and `passwd` immediately, or change the defconfig before building.
+- **Add your own SSH key.** `linux/overlay/root/.ssh/authorized_keys` ships as an
+  **empty template** — root SSH is key-only and disabled until you add a key
+  (use the serial console, or `deploy-staging/fix-ssh-key.ps1`). Do **not**
+  commit a personal key you don't want public.
+- **`odo-webd` (port 80) has no authentication** — it's a LAN-only dashboard.
+  Never port-forward it or expose the board to the internet.
+
 ## Key documentation
 
 - docs/architecture.md — main project architecture and execution plan

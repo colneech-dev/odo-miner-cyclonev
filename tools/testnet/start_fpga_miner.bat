@@ -15,7 +15,7 @@ setlocal enabledelayedexpansion
 title OdoCrypt FPGA Miner Test Bed
 
 REM ---- edit these paths if your layout differs ----
-set "PYTHON=C:\Users\Colin\AppData\Local\Python\pythoncore-3.14-64\python.exe"
+set "PYTHON=python"
 set "DGB_BIN=C:\digibyte\bin"
 set "ODOCRYPT_LIB=C:\digibyte\odocrypt.dll"
 set "HARNESS=%~dp0"

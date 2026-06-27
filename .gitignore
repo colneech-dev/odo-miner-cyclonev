@@ -97,3 +97,6 @@ hdl/tb/*.vvp
 hdl/tb/vec_*/
 hdl/tb/gen_vectors
 sw/odo-webd/odo-webd
+
+# personal deploy SSH key (private already ignored)
+tools/testnet/odo-miner.pub
