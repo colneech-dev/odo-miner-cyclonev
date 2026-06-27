@@ -3,7 +3,8 @@
 # NO AUTHENTICATION — trusted LAN only. Change the port here if 80 clashes.
 
 DAEMON=/usr/bin/odo-webd
-PIDFILE=/var/run/odowebd.pid
+# /var/run does not exist on this minimal rootfs; /run is the tmpfs.
+PIDFILE=/run/odowebd.pid
 PORT=80
 
 start() {

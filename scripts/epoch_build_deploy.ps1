@@ -22,7 +22,7 @@
        live fpga.rbf or reboot -- epoch-update.sh applies it at the boundary)
 
   Usage:
-    .\epoch_build_deploy.ps1 -Epoch 1781913600 -Throughput 6 -BoardIp 192.168.1.35
+    .\epoch_build_deploy.ps1 -Epoch 1781913600 -Throughput 6 -BoardIp 192.168.1.37
 
   Run from anywhere; paths are resolved relative to the repo root. The script
   writes its own log to hdl/quartus/build_epoch_<epoch>.log -- do NOT wrap the
@@ -34,8 +34,8 @@
 #>
 param(
     [Parameter(Mandatory=$true)][long]$Epoch,
-    [int]$Throughput = 6,   # T=6 @ 150 MHz is the safe deployed config; per-epoch Fmax varies so 150 MHz is the floor
-    [string]$BoardIp = "192.168.1.35",
+    [int]$Throughput = 6,   # T=6 @ 156.25 MHz is the deployed config; per-epoch Fmax varies, so the Fmax gate (step 5) checks each build against the actual miner clock
+    [string]$BoardIp = "192.168.1.37",
     [string]$SshKey = "tools/testnet/odo-miner",
     # Filename to stage the built .rbf as on the board's FAT boot partition.
     # Default "fpga_next.rbf" is the slot epoch-update.sh's cron job watches
@@ -65,8 +65,9 @@ try {
     # odo_encrypt" when wired into the wrapper -- caught the hard way on the
     # 1781913600 epoch build.
     # Always regenerate: the file may exist from a previous run with a different
-    # -Throughput value (e.g. epoch_autorenew.ps1 defaulting to T=8 while the
-    # QSF uses T=6). Regeneration is <1s so there is no reason to cache it.
+    # -Throughput value (a mismatch between the generated odo_<epoch>.v
+    # localparam THROUGHPUT and the QSF VERILOG_MACRO THROUGHPUT produces a
+    # wrong hash -> 0 shares). Regeneration is <1s so there is no reason to cache it.
     wsl bash -c "cd '$($repo -replace '\\','/' -replace '^C:','/mnt/c')' && upstream/odo-miner/src/verilog/odo_gen $Epoch $Throughput odo_ > $rtlFile"
     if (-not (Test-Path $rtlFile) -or (Get-Item $rtlFile).Length -eq 0) {
         throw "odo_gen produced an empty/missing $rtlFile"
@@ -135,7 +136,7 @@ try {
             $targetMhz = 50.0 * $mul / $div
             Write-Host "      Fmax=$fmax MHz  target=$targetMhz MHz  margin=$([math]::Round($fmax-$targetMhz,2)) MHz"
             if ($fmax -lt $targetMhz) {
-                throw "TIMING VIOLATION: Fmax $fmax MHz < target $targetMhz MHz for epoch $Epoch. Drop the miner clock to 150 MHz and rebuild."
+                throw "TIMING VIOLATION: Fmax $fmax MHz < target $targetMhz MHz for epoch $Epoch. Lower the miner clock (u_pll_miner clk0_multiply_by/divide_by in soc_top.v) and rebuild."
             }
         }
     }

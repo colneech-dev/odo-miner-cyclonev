@@ -26,14 +26,14 @@
        scheduled run retries) and append to the failure log.
 
   Usage:
-    .\epoch_autorenew.ps1 [-BoardIp 192.168.1.35] [-Throughput 6] [-LeadDays 2]
+    .\epoch_autorenew.ps1 [-BoardIp 192.168.1.37] [-Throughput 6] [-LeadDays 2]
 
   Exit code 0 on success-or-not-due-yet, non-zero on a real failure (so
   Task Scheduler's history/alerting reflects actual problems, not routine
   no-ops).
 #>
 param(
-    [string]$BoardIp = "192.168.1.35",
+    [string]$BoardIp = "192.168.1.37",
     [string]$SshKey = "tools/testnet/odo-miner",
     [int]$Throughput = 6,   # must match QSF VERILOG_MACRO THROUGHPUT
     [double]$LeadDays = 2.0
