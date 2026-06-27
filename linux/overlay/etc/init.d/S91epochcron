@@ -3,10 +3,13 @@
 # Runs after S90odod (the miner, which writes status.json) and assumes
 # S50crond is already started (lower-numbered init scripts run first).
 #
-# epoch-update.sh polls status.json's epoch_next; once the FPGA's baked
-# epoch is about to expire it swaps in a staged /boot/fpga_next.rbf and
-# reboots (see usr/sbin/epoch-update.sh and docs/pipelined-miner-scope.md
-# WS3 v1). The staged file is placed there by the build host ahead of time
+# epoch-update.sh compares status.json's "epoch" (the pool's current job
+# epoch) against "bitstream_epoch" (what's baked into the running FPGA); when
+# they diverge it swaps in a staged /boot/fpga_next.rbf and reboots (see
+# usr/sbin/epoch-update.sh and docs/pipelined-miner-scope.md WS3 v1). It does
+# NOT use a wall-clock epoch_next predictor — block time lags wall-clock on a
+# sparse chain, so the direct epoch!=bitstream_epoch compare is the reliable
+# trigger. The staged file is placed there by the build host ahead of time
 # (scripts/epoch_build_deploy.ps1) — this just applies it at the right moment.
 
 CRONTAB=/etc/cron/crontabs/root

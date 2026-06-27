@@ -1,9 +1,18 @@
 # Scope: Pipelined OdoCrypt Miner with Off-Board Precompile + Runtime Reconfigure
 
-Status: **scoping draft** (2026-06-16). Not started. This is the architecture
-project that would close the ~650× gap between this port's sequential FSM
-(~57 KH/s) and the upstream pipelined design (~tens of MH/s) **without giving
-up headless on-board operation.**
+Status: **SHIPPED** (scoped 2026-06-16; deployed 2026-06-22). This is the
+architecture project that closed the ~375× gap between this port's sequential
+FSM (~57 KH/s) and the upstream pipelined design — now running on the board at
+**THROUGHPUT=6 @ 156.25 MHz ≈ 26.0 MH/s** **without giving up headless on-board
+operation.** The text below is the original scoping draft, kept for design
+rationale; see CLAUDE.md "Current status" and `docs/TODO.md` for what shipped.
+
+> **Note on the autonomy mechanism:** the implemented design uses a **push**
+> model — the build host (`epoch_build_deploy.ps1`) compiles each epoch's `.rbf`
+> and scp-stages it on the board as `/boot/fpga_next.rbf`; the board's
+> `epoch-update.sh` cron swaps it in + reboots when `epoch != bitstream_epoch`.
+> The "board fetches `.rbf` from `.100`" pull model sketched in §"Chosen
+> infrastructure" below was NOT what shipped.
 
 ## 1. Why
 
