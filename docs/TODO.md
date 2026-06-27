@@ -193,7 +193,7 @@ cores). Bitstream: 3.3 MB, deployed to board 2026-06-14. ✅
 cd hps && make all && make test_units && make check
 
 # RTL: known-answer regression (WSL; needs ~/oss-cad-suite or iverilog)
-cd hdl/tb && ./run_tb.sh
+cd hdl/tb && ./run_tb_pipe.sh   # deployed pipelined core (run_tb.sh = retired FSM)
 
 # Qsys: regenerate after editing component RTL (the generate step COPIES
 # hdl/src into soc_system/synthesis/submodules — always regenerate first!)

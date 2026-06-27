@@ -1,5 +1,21 @@
 # Building the Quartus/Qsys Project for QMTECH Cyclone V SoC
 
+> ⚠️ **STALE — FSM-era manual walkthrough. Do not follow for a greenfield build.**
+> This page describes the *retired* sequential-FSM core (`odocrypt_top`, a
+> single 50 MHz clock, runtime-loaded epoch tables). The **deployed** design is
+> the pipelined core (`pipelined_miner_top`, 156.25 MHz miner PLL, epoch baked
+> into LUTs). For an actual build use the scripted flow, which handles the
+> epoch-RTL generation, the pipelined sim gate, and timing checks:
+>
+> - **One-command build:** `bash scripts/build-fpga.sh` (regenerates
+>   `odo_<ODOKEY>.v`, runs `run_tb_pipe.sh`, qsys-generate, compile, checks).
+> - **Per-epoch build + stage:** `scripts/epoch_build_deploy.ps1`.
+> - **Register/architecture contract:** `docs/register-map.md`.
+>
+> The Platform Designer system already exists (`hdl/qsys/soc_system.qsys`,
+> extended via `hdl/qsys/qsys_add_peripherals.tcl`) — do not rebuild it by hand
+> from the steps below. The content here is kept only for HPS/bridge background.
+
 ## Quick Summary
 
 This guide walks you through the Quartus/Platform Designer setup for the QMTECH Cyclone V SoC board.
