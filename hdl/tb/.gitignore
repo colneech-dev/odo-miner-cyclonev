@@ -2,3 +2,4 @@
 gen_vectors_pipe
 tb_pipe.vvp
 vecpipe_*/
+run_tb_pipe_lf.sh

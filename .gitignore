@@ -3,6 +3,7 @@ hps/*.o
 hps/odod
 hps/fpga_smoke_test
 hps/odo-miner-pipe
+hps/odo-miner-pipe-uio
 hps/smoke_pipe
 
 # SD card raw image output (large / generated)
