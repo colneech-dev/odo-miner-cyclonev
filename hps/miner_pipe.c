@@ -36,6 +36,7 @@
 #include <time.h>
 #include <math.h>
 #include <pthread.h>
+#include <unistd.h>
 
 static volatile sig_atomic_t g_term = 0;
 static void on_sig(int s) { (void)s; g_term = 1; }
@@ -104,7 +105,13 @@ static struct {
     int      temp_c;            /* DS18B20 reading, -1 = no sensor/no reading yet */
     int      fan_pct;           /* current commanded fan speed, 0-100 (%) */
     int      fan_rpm;           /* tach-measured RPM, -1 = no tach */
+    int      pool_slot;         /* active pool: 1 = primary, 2 = backup */
+    int      pool_count;        /* number of configured pools (1 or 2) */
 } g_st;
+
+/* UI control files (odo-ui touches these; the daemon polls them): */
+#define FAN_BOOST_PATH   "/run/odod/fan_boost"     /* present => force fan 100% */
+#define RESET_STATS_PATH "/run/odod/reset_stats"   /* present => reset session stats */
 
 /* -----------------------------------------------------------------------
  * Thermal monitoring runs on its own thread so a tach-sampling window
@@ -129,7 +136,10 @@ static void *thermal_thread(void *arg)
     while (!g_term) {
         int t;
         if (thermal_read_c(&t) == 0) {
-            thermal_fan_update(t);
+            if (access(FAN_BOOST_PATH, F_OK) == 0)
+                thermal_fan_set_pct(100);   /* UI-forced full speed (soak/stress) */
+            else
+                thermal_fan_update(t);       /* normal temperature ramp */
             int rpm = thermal_tach_rpm(200);
             pthread_mutex_lock(&g_therm_mu);
             g_st.temp_c  = t;
@@ -270,6 +280,8 @@ static void status_write(void)
         "  \"fan_duty_pct\": %d,\n"
         "  \"fan_rpm\": %d,\n"
         "  \"backend\": \"%s\",\n"
+        "  \"pool_slot\": %d,\n"
+        "  \"pool_count\": %d,\n"
         "  \"uptime\": %ld,\n"
         "  \"updated\": %ld\n"
         "}\n",
@@ -280,6 +292,7 @@ static void status_write(void)
         g_st.best_diff_session, g_st.best_diff_alltime,
         g_st.blocks_found, (long)g_st.last_block,
         temp_c, fan_pct, fan_rpm, miner_io_pipe_backend(),
+        g_st.pool_slot, g_st.pool_count,
         (long)up, (long)now);
     fclose(f);
     rename(tmp, path);
@@ -319,6 +332,8 @@ int main(int argc, char **argv)
 
     /* Seed the status struct: pool string, epoch params, start time. */
     snprintf(g_st.pool, sizeof(g_st.pool), "%s:%s", host, port);
+    g_st.pool_count      = n_pools;
+    g_st.pool_slot       = pool_idx + 1;
     g_st.epoch           = seed;   /* overwritten per job below */
     g_st.bitstream_epoch = seed;   /* fixed: what's actually baked into the FPGA */
     g_st.started = time(NULL);
@@ -354,6 +369,7 @@ int main(int argc, char **argv)
             status_write();
             if (n_pools > 1) {
                 pool_idx = (pool_idx + 1) % n_pools;
+                g_st.pool_slot = pool_idx + 1;
                 stratum_init(&st, hosts[pool_idx], ports[pool_idx], worker, pass);
                 g_st.epoch_interval = st.odo_interval;
                 snprintf(g_st.pool, sizeof(g_st.pool), "%s:%s",
@@ -451,6 +467,15 @@ int main(int argc, char **argv)
                 time_t now = time(NULL);
                 if (now - last_status >= 3) {
                     last_status = now;
+                    /* UI-requested session reset: clear best-diff + restart the
+                     * hashrate average. Pool-confirmed share counts are left
+                     * alone (they mirror the pool's authoritative view). */
+                    if (access(RESET_STATS_PATH, F_OK) == 0) {
+                        unlink(RESET_STATS_PATH);
+                        g_st.best_diff_session = 0.0;
+                        g_st.work_acc = 0.0;
+                        g_mono_start = mono_s();
+                    }
                     stratum_share_stats(&st, &g_st.shares_accepted,
                                         &g_st.shares_rejected);
                     status_write();

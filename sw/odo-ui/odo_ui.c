@@ -352,6 +352,8 @@ typedef struct {
     long long shares_rejected;
     long   bitstream_epoch;
     char   backend[16];
+    long   pool_slot;   /* active pool: 1 = primary, 2 = backup */
+    long   pool_count;  /* configured pools (1 or 2) */
 } status_t;
 
 static long json_long(const char *buf, const char *key, long def)
@@ -407,6 +409,8 @@ static int status_read(const char *path, status_t *s)
     s->blocks_found        = json_long(buf, "blocks_found", 0);
     s->last_block          = json_long(buf, "last_block", 0);
     s->temp_c              = json_long(buf, "temp_c", -1);
+    s->pool_slot           = json_long(buf, "pool_slot", 1);
+    s->pool_count          = json_long(buf, "pool_count", 1);
     s->fan_duty_pct        = json_long(buf, "fan_duty_pct", 0);
     s->fan_rpm             = json_long(buf, "fan_rpm", -1);
     s->shares_accepted     = json_long(buf, "shares_accepted", 0);
@@ -723,6 +727,9 @@ static void on_sig(int s) { (void)s; g_stop = 1; }
 /* Screen settings (dim timeout + dim level)                           */
 /* ------------------------------------------------------------------ */
 #define UI_CONF_PATH         "/etc/odo-ui.conf"
+/* Control files the miner daemon (miner_pipe.c) polls; the UI toggles them. */
+#define FAN_BOOST_PATH       "/run/odod/fan_boost"     /* present => fan 100% */
+#define RESET_STATS_PATH     "/run/odod/reset_stats"   /* present => reset session */
 #define DIM_TIMEOUT_DEFAULT  300  /* seconds; 0 = never */
 #define DIM_LEVEL_DEFAULT    0    /* 0 = full blank, 1-100 = dim to % */
 
@@ -939,6 +946,12 @@ static void draw_detail(fb_t *fb, const status_t *st, time_t now,
 
     fb_text(fb, xL, y, "POOL",   1, C_DIM);
     fb_text(fb, xLv, y, st->pool[0] ? st->pool : "?", 1, C_TEXT);
+    if (st->pool_count > 1) {   /* failover configured: show active slot */
+        char ps[16];
+        snprintf(ps, sizeof(ps), "%ld/%ld", st->pool_slot, st->pool_count);
+        fb_text(fb, fb->w - fb_text_w(1, ps) - 6, y, ps, 1,
+                st->pool_slot > 1 ? C_WARN : C_OK);
+    }
     y += 14;
 
     fb_text(fb, xL, y, "JOB",    1, C_DIM);
@@ -1044,6 +1057,7 @@ static void draw_detail(fb_t *fb, const status_t *st, time_t now,
 typedef struct {
     rect_t timeout_dec, timeout_inc;
     rect_t level_dec,   level_inc;
+    rect_t fan, reset;
 } settings_rects_t;
 
 /* ---- Action sheet (MENU): one modal list of system actions, opened from the
@@ -1137,33 +1151,46 @@ static settings_rects_t draw_settings(fb_t *fb, int dim_timeout, int dim_level)
 
     /* DIM TIMEOUT row */
     fb_text(fb, 8, y, "DIM TIMEOUT", 1, C_DIM);
-    y += 16;
+    y += 15;
     snprintf(buf, sizeof(buf), dim_timeout == 0 ? "NEVER" : "%ds", dim_timeout);
-    r.timeout_dec = (rect_t){ 8,       y, 36, 26 };
-    r.timeout_inc = (rect_t){ cw - 44, y, 36, 26 };
-    fb_rect(fb, r.timeout_dec.x, r.timeout_dec.y, r.timeout_dec.w, r.timeout_dec.h, C_ACCENT);
-    fb_text(fb, r.timeout_dec.x + (36 - fb_text_w(1, "-")) / 2, y + 8, "-", 1, C_BG);
+    r.timeout_dec = (rect_t){ 8,       y, 36, 24 };
+    r.timeout_inc = (rect_t){ cw - 44, y, 36, 24 };
+    fb_rect(fb, r.timeout_dec.x, r.timeout_dec.y, 36, 24, C_ACCENT);
+    fb_text(fb, r.timeout_dec.x + 15, y + 8, "-", 1, C_BG);
     fb_text(fb, (cw - fb_text_w(1, buf)) / 2, y + 8, buf, 1, C_TEXT);
-    fb_rect(fb, r.timeout_inc.x, r.timeout_inc.y, r.timeout_inc.w, r.timeout_inc.h, C_ACCENT);
-    fb_text(fb, r.timeout_inc.x + (36 - fb_text_w(1, "+")) / 2, y + 8, "+", 1, C_BG);
-    y += 38;
+    fb_rect(fb, r.timeout_inc.x, r.timeout_inc.y, 36, 24, C_ACCENT);
+    fb_text(fb, r.timeout_inc.x + 15, y + 8, "+", 1, C_BG);
+    y += 30;
 
     /* DIM LEVEL row */
     fb_text(fb, 8, y, "DIM LEVEL", 1, C_DIM);
-    y += 16;
+    y += 15;
     snprintf(buf, sizeof(buf), dim_level == 0 ? "BLANK" : "%d%%", dim_level);
-    r.level_dec = (rect_t){ 8,       y, 36, 26 };
-    r.level_inc = (rect_t){ cw - 44, y, 36, 26 };
-    fb_rect(fb, r.level_dec.x, r.level_dec.y, r.level_dec.w, r.level_dec.h, C_ACCENT);
-    fb_text(fb, r.level_dec.x + (36 - fb_text_w(1, "-")) / 2, y + 8, "-", 1, C_BG);
+    r.level_dec = (rect_t){ 8,       y, 36, 24 };
+    r.level_inc = (rect_t){ cw - 44, y, 36, 24 };
+    fb_rect(fb, r.level_dec.x, r.level_dec.y, 36, 24, C_ACCENT);
+    fb_text(fb, r.level_dec.x + 15, y + 8, "-", 1, C_BG);
     fb_text(fb, (cw - fb_text_w(1, buf)) / 2, y + 8, buf, 1, C_TEXT);
-    fb_rect(fb, r.level_inc.x, r.level_inc.y, r.level_inc.w, r.level_inc.h, C_ACCENT);
-    fb_text(fb, r.level_inc.x + (36 - fb_text_w(1, "+")) / 2, y + 8, "+", 1, C_BG);
-    y += 36;
+    fb_rect(fb, r.level_inc.x, r.level_inc.y, 36, 24, C_ACCENT);
+    fb_text(fb, r.level_inc.x + 15, y + 8, "+", 1, C_BG);
+    y += 32;
 
-    const char *hint = dim_level == 0
-        ? "0=blank off  1-100=dim to %" : "1-100=dim to % brightness";
-    fb_text(fb, 8, y, hint, 1, C_DIM);
+    /* FAN: AUTO / BOOST toggle (writes /run/odod/fan_boost the daemon polls) */
+    int boost = (access(FAN_BOOST_PATH, F_OK) == 0);
+    r.fan = (rect_t){ 8, y, cw - 16, 24 };
+    fb_rect(fb, r.fan.x, r.fan.y, r.fan.w, r.fan.h, boost ? C_WARN : C_ACCENT);
+    fb_rect(fb, r.fan.x + 1, r.fan.y + 1, r.fan.w - 2, r.fan.h - 2, C_PANEL);
+    snprintf(buf, sizeof(buf), boost ? "FAN: BOOST (100%%)" : "FAN: AUTO");
+    fb_text(fb, r.fan.x + (r.fan.w - fb_text_w(1, buf)) / 2, y + 8, buf, 1,
+            boost ? C_WARN : C_ACCENT);
+    y += 32;
+
+    /* RESET SESSION STATS button (best-diff + hashrate average) */
+    r.reset = (rect_t){ 8, y, cw - 16, 24 };
+    fb_rect(fb, r.reset.x, r.reset.y, r.reset.w, r.reset.h, C_ACCENT);
+    fb_rect(fb, r.reset.x + 1, r.reset.y + 1, r.reset.w - 2, r.reset.h - 2, C_PANEL);
+    fb_text(fb, r.reset.x + (r.reset.w - fb_text_w(1, "RESET STATS")) / 2, y + 8,
+            "RESET STATS", 1, C_ACCENT);
 
     return r;
 }
@@ -1502,6 +1529,22 @@ int main(int argc, char **argv)
                         } else if (hit(&set_rects.level_inc, sx, sy)) {
                             g_dim_level += 5; if (g_dim_level > 100) g_dim_level = 100;
                             save_ui_conf();
+                        } else if (hit(&set_rects.fan, sx, sy)) {
+                            /* toggle the fan-boost flag the daemon polls */
+                            if (access(FAN_BOOST_PATH, F_OK) == 0) {
+                                unlink(FAN_BOOST_PATH);
+                                snprintf(toast, sizeof(toast), "Fan: AUTO");
+                            } else {
+                                FILE *bf = fopen(FAN_BOOST_PATH, "w");
+                                if (bf) fclose(bf);
+                                snprintf(toast, sizeof(toast), "Fan: BOOST 100%%");
+                            }
+                            toast_at = now;
+                        } else if (hit(&set_rects.reset, sx, sy)) {
+                            FILE *rf = fopen(RESET_STATS_PATH, "w");
+                            if (rf) fclose(rf);
+                            snprintf(toast, sizeof(toast), "Stats reset");
+                            toast_at = now;
                         }
                     }
                 }
