@@ -1227,9 +1227,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "odo-ui: no ADS7846 touch device found; display-only mode\n");
 
     /* button row — wide left (DETAILS / ← BACK), two narrow (WIFI/RESTART, MENU/REBOOT) */
-    rect_t btn_left  = { 6,   fb.h - 42, 148, 34 };
+    rect_t btn_left  = { 6,   fb.h - 42, 148, 34 };  /* confirm-dialog layout */
     rect_t btn_mid   = { 160, fb.h - 42,  74, 34 };
     rect_t btn_right = { 240, fb.h - 42,  74, 34 };
+    rect_t menu_btn  = { 6,   fb.h - 42,  56, 34 };  /* compact hamburger (info screens) */
 
     /* WiFi setup keyboard layout */
     kbkey_t keys[64];
@@ -1338,25 +1339,16 @@ int main(int argc, char **argv)
             fb_text(&fb, btn_right.x + (btn_right.w - fb_text_w(1, "CANCEL")) / 2,
                     btn_right.y + 11, "CANCEL", 1, C_TEXT);
         } else {
-            /* Consistent nav bar on EVERY info screen: [ MENU ] [ < ] [ > ].
-             * MENU opens the action sheet; < / > cycle glance/detail/settings
-             * (same as swipe). Page dots sit just above the bar. */
-            fb_rect(&fb, btn_left.x, btn_left.y, btn_left.w, btn_left.h, C_ACCENT);
-            fb_rect(&fb, btn_left.x+1, btn_left.y+1, btn_left.w-2, btn_left.h-2, C_PANEL);
-            {   /* hamburger (menu) icon centered in the button */
-                int hx = btn_left.x + btn_left.w / 2 - 11;
-                int hy = btn_left.y + 10;
+            /* Single compact hamburger; everything else is in the menu, and
+             * glance/detail/setup are reached by swiping (see input handler). */
+            fb_rect(&fb, menu_btn.x, menu_btn.y, menu_btn.w, menu_btn.h, C_ACCENT);
+            fb_rect(&fb, menu_btn.x+1, menu_btn.y+1, menu_btn.w-2, menu_btn.h-2, C_PANEL);
+            {   /* hamburger icon centered in the button */
+                int hx = menu_btn.x + menu_btn.w / 2 - 10;
+                int hy = menu_btn.y + 10;
                 for (int k = 0; k < 3; k++)
-                    fb_rect(&fb, hx, hy + k * 6, 22, 3, C_ACCENT);
+                    fb_rect(&fb, hx, hy + k * 6, 20, 3, C_ACCENT);
             }
-            fb_rect(&fb, btn_mid.x, btn_mid.y, btn_mid.w, btn_mid.h, C_ACCENT);
-            fb_rect(&fb, btn_mid.x+1, btn_mid.y+1, btn_mid.w-2, btn_mid.h-2, C_PANEL);
-            fb_text(&fb, btn_mid.x + (btn_mid.w - fb_text_w(1, "<")) / 2,
-                    btn_mid.y + 11, "<", 1, C_TEXT);
-            fb_rect(&fb, btn_right.x, btn_right.y, btn_right.w, btn_right.h, C_ACCENT);
-            fb_rect(&fb, btn_right.x+1, btn_right.y+1, btn_right.w-2, btn_right.h-2, C_PANEL);
-            fb_text(&fb, btn_right.x + (btn_right.w - fb_text_w(1, ">")) / 2,
-                    btn_right.y + 11, ">", 1, C_TEXT);
         }
 
         /* Action sheet draws on top of the bar when open (but under confirm). */
@@ -1413,13 +1405,9 @@ int main(int argc, char **argv)
                     (void)handled;
                     menu_open = 0;
                 } else {
-                    /* Consistent nav bar: MENU / prev / next — same on every screen. */
-                    if (hit(&btn_left, sx, sy)) {
+                    /* Just the hamburger; pages are reached by swiping. */
+                    if (hit(&menu_btn, sx, sy)) {
                         menu_open = 1; confirm_at = now;
-                    } else if (hit(&btn_mid, sx, sy)) {
-                        ui_screen = (ui_screen + 2) % 3;   /* < prev */
-                    } else if (hit(&btn_right, sx, sy)) {
-                        ui_screen = (ui_screen + 1) % 3;   /* > next */
                     } else if (ui_screen == 2) {
                         /* Screen-settings +/- edit g_dim_* live and persist immediately */
                         if (hit(&set_rects.timeout_dec, sx, sy)) {
