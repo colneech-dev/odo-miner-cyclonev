@@ -1343,8 +1343,12 @@ int main(int argc, char **argv)
              * (same as swipe). Page dots sit just above the bar. */
             fb_rect(&fb, btn_left.x, btn_left.y, btn_left.w, btn_left.h, C_ACCENT);
             fb_rect(&fb, btn_left.x+1, btn_left.y+1, btn_left.w-2, btn_left.h-2, C_PANEL);
-            fb_text(&fb, btn_left.x + (btn_left.w - fb_text_w(1, "MENU")) / 2,
-                    btn_left.y + 11, "MENU", 1, C_ACCENT);
+            {   /* hamburger (menu) icon centered in the button */
+                int hx = btn_left.x + btn_left.w / 2 - 11;
+                int hy = btn_left.y + 10;
+                for (int k = 0; k < 3; k++)
+                    fb_rect(&fb, hx, hy + k * 6, 22, 3, C_ACCENT);
+            }
             fb_rect(&fb, btn_mid.x, btn_mid.y, btn_mid.w, btn_mid.h, C_ACCENT);
             fb_rect(&fb, btn_mid.x+1, btn_mid.y+1, btn_mid.w-2, btn_mid.h-2, C_PANEL);
             fb_text(&fb, btn_mid.x + (btn_mid.w - fb_text_w(1, "<")) / 2,
