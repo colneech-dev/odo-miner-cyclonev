@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-REPO="/mnt/c/Users/builder/Documents/GitHub/odo-miner-cyclonev"
+REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
 BOARD="root@${BOARD_IP:-192.168.1.37}"
 cp "$REPO/tools/testnet/odo-miner" /tmp/dk && chmod 600 /tmp/dk
 SSH="ssh -i /tmp/dk -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $BOARD"

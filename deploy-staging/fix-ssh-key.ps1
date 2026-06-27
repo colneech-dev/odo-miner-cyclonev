@@ -1,13 +1,13 @@
 <#
-  fix-ssh-key.ps1 — append the working "user@host" public key to the board's
-  authorized_keys via usbipd (rootfs partition), without removing the existing
-  "odo-miner" key. RUN ELEVATED.
+  fix-ssh-key.ps1 — append your public key (default ~/.ssh/id_ed25519.pub, or
+  pass -PubKey) to the board's root authorized_keys via usbipd (rootfs
+  partition), without removing any existing key. RUN ELEVATED.
 
-  Root cause: linux/overlay/etc/ssh/sshd_config is key-only (PasswordAuthentication
-  no), and linux/overlay/root/.ssh/authorized_keys only ever tracked the original
-  "odo-miner" keypair. Actual day-to-day access has been using a personal key
-  that was added directly to the live board and never reflected back into the
-  repo, so any rootfs redeploy from the repo's overlay silently locks SSH out.
+  Use this when sshd is key-only (PasswordAuthentication no in
+  linux/overlay/etc/ssh/sshd_config) and the rootfs you flashed doesn't yet
+  trust your key — e.g. after a fresh build where linux/overlay/root/.ssh/
+  authorized_keys is the empty template. Mounts the SD card's rootfs over USB
+  and appends your key so SSH works without a serial-console round trip.
 #>
 param([string]$BusId, [string]$PubKey = "$env:USERPROFILE\.ssh\id_ed25519.pub")
 

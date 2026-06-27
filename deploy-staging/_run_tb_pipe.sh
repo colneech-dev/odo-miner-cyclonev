@@ -1,5 +1,5 @@
 #!/bin/bash
-REPO="/mnt/c/Users/builder/Documents/GitHub/odo-miner-cyclonev"
+REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$REPO/hdl/tb"
 sed 's/\r//' run_tb_pipe.sh > run_tb_pipe_lf.sh
 chmod +x run_tb_pipe_lf.sh

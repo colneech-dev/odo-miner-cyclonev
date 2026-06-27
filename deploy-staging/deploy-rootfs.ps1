@@ -18,8 +18,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "wsl --mount failed" }
 
     $mnt  = "/mnt/wsl/PHYSICALDRIVE${disk}p${part}"
-    $bin  = wsl wslpath -a "C:/Users/builder/Documents/GitHub/odo-miner-cyclonev/deploy-staging/odo-miner-pipe"
-    $init = wsl wslpath -a "C:/Users/builder/Documents/GitHub/odo-miner-cyclonev/deploy-staging/S90odod"
+    # Resolve paths relative to this script's location (works on any checkout).
+    $hereWin = $here -replace '\\','/'
+    $bin  = wsl wslpath -a "$hereWin/odo-miner-pipe"
+    $init = wsl wslpath -a "$hereWin/S90odod"
 
     $script = @"
 set -e

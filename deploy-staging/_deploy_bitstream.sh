@@ -2,7 +2,7 @@
 # Deploy corrected bitstream (T=6 epoch 1782432000) to the board.
 # Run from WSL after Quartus compile completes successfully.
 set -e
-REPO="/mnt/c/Users/builder/Documents/GitHub/odo-miner-cyclonev"
+REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
 BOARD="root@${BOARD_IP:-192.168.1.37}"
 RBF="$REPO/hdl/quartus/output_files/odo_miner.rbf"
 
