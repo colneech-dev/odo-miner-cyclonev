@@ -1060,7 +1060,7 @@ static rect_t action_rect(const fb_t *fb, int i)
 }
 static void draw_action_sheet(fb_t *fb)
 {
-    static const char *lbl[AS_N] = { "RESTART", "REBOOT", "SETTINGS", "CANCEL" };
+    static const char *lbl[AS_N] = { "RESTART", "REBOOT", "SETUP", "CANCEL" };
     /* modal panel behind the list */
     rect_t top = action_rect(fb, 0), bot = action_rect(fb, AS_N - 1);
     int pad = 12;
@@ -1086,7 +1086,7 @@ static settings_rects_t draw_settings(fb_t *fb, int dim_timeout, int dim_level)
     int cw = fb->w;
 
     int y = 10;
-    const char *title = "SETTINGS";
+    const char *title = "SETUP";
     fb_text(fb, (cw - fb_text_w(1, title)) / 2, y, title, 1, C_ACCENT);
     y += 22;
 
