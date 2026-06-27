@@ -16,9 +16,9 @@
  * Header bytes + hash math mirror gen_vectors.c, so a VERIFY_OK proves the
  * pipelined RTL == the oracle the FSM was validated against.
  *
- * Build: gcc -I../../hps -I../../upstream/odo-miner/src/crypto -o gen_vectors_pipe \
+ * Build: gcc -I../../hps -I../../third_party/odo-miner/src/crypto -o gen_vectors_pipe \
  *        gen_vectors_pipe.c ../../hps/odocrypt_state.c \
- *        ../../upstream/odo-miner/src/crypto/KeccakP-800-reference.c
+ *        ../../third_party/odo-miner/src/crypto/KeccakP-800-reference.c
  */
 
 #include <stdio.h>

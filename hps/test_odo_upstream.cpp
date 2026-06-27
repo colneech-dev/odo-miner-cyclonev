@@ -13,9 +13,9 @@
  *   → no output means our implementation matches the upstream.
  */
 
-#include "../upstream/odo-miner/src/crypto/odocrypt.h"
+#include "../third_party/odo-miner/src/crypto/odocrypt.h"
 extern "C" {
-#include "../upstream/odo-miner/src/crypto/KeccakP-800-SnP.h"
+#include "../third_party/odo-miner/src/crypto/KeccakP-800-SnP.h"
 }
 
 #include <cstdio>

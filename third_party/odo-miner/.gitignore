@@ -1,0 +1,3 @@
+# build artifacts from odo_gen / crypto makefiles
+odo_gen
+*.o

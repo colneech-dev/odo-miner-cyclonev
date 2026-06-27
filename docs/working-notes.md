@@ -7,8 +7,8 @@
 ### What was inspected
 
 Every file in `hdl/src/`, `hps/`, `docs/`, and `hdl/constraints/` was read.
-The upstream submodule at `upstream/odo-miner/` was noted as the reference for
-the actual algorithm. Findings are categorised below and tracked in `docs/TODO.md`.
+The vendored upstream subset at `third_party/odo-miner/` was noted as the reference
+for the actual algorithm. Findings are categorised below and tracked in `docs/TODO.md`.
 
 ---
 
@@ -110,7 +110,7 @@ internal API (`ctx->on_job`, `ctx->cb_arg`) that does not match the
 **RTL redesign required:**
 1. Replace `odocrypt_epoch_mutator.v` with S-box and P-box BRAM write interface
 2. Rewrite `odocrypt_round.v` to implement Pbox→Sbox→Pbox→Rotations→RoundKey
-3. Add Keccak-800 stage after the 84-round pipeline (port `upstream/odo-miner/src/verilog/keccak800.v`)
+3. Add Keccak-800 stage after the 84-round pipeline (port `third_party/odo-miner/src/verilog/keccak800.v`)
 4. Register map extension for BRAM write port and epoch load strobe
 
 **`hps/odocrypt_state.c` is now implemented** — faithful C port of `odocrypt.cpp`.
@@ -200,7 +200,7 @@ most pools expect big-endian representation of the nonce field.
 ### OdoCrypt epoch mutation model (approximate — not real algorithm)
 
 The real OdoCrypt mutation is Keccak-800-based, seeded from epoch number.
-See `upstream/odo-miner/src/crypto/odocrypt.cpp` for the authoritative
+See `third_party/odo-miner/src/crypto/odocrypt.cpp` for the authoritative
 C++ implementation before writing any RTL.
 
 ### Block header layout (80 bytes → 20 words)

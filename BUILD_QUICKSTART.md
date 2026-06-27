@@ -268,7 +268,7 @@ sdcard-output/
 - **Build issues?** Check docs/BUILD_*.md
 - **Hardware issues?** See BRINGUP.md (hardware validation sequence)
 - **Code issues?** See CODE_REVIEW.md
-- **Upstream context?** Check upstream/odo-miner (reference)
+- **Upstream context?** Check third_party/odo-miner (reference)
 
 ---
 

@@ -1,7 +1,7 @@
 /*
  * odocrypt_state.c - OdoCrypt epoch table generator
  *
- * Faithful C port of upstream/odo-miner/src/crypto/odocrypt.cpp.
+ * Faithful C port of third_party/odo-miner/src/crypto/odocrypt.cpp.
  * Generates the complete per-epoch state (S-boxes, P-boxes, rotations,
  * round keys) from a 32-bit epoch key using the OdoRandom LCG.
  */

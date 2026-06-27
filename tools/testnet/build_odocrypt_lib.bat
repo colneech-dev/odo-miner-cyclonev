@@ -7,9 +7,9 @@ REM Output: tools\testnet\odocrypt.dll
 setlocal
 cd /d "%~dp0"
 
-set "CRYPTO=..\..\upstream\odo-miner\src\crypto"
+set "CRYPTO=..\..\third_party\odo-miner\src\crypto"
 if not exist "%CRYPTO%\odocrypt.cpp" (
-    echo upstream submodule missing - run: git submodule update --init
+    echo vendored OdoCrypt sources missing at %CRYPTO% (expected third_party\odo-miner\src\crypto\)
     exit /b 1
 )
 

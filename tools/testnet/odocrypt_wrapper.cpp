@@ -2,7 +2,7 @@
 // OdoCrypt PoW hash, for the Python test harness (ctypes).
 //
 // Builds on Linux/WSL (libodocrypt.so) and Windows/MSVC (odocrypt.dll) from
-// the repo's upstream/odo-miner/src/crypto sources — see build_odocrypt_lib.*.
+// the repo's third_party/odo-miner/src/crypto sources — see build_odocrypt_lib.*.
 //
 // Replicates DigiByte's HashOdo without pulling in DigiByte's uint256:
 //   cipher = header(80) + 0x01 + zeros;  OdoCrypt(key).Encrypt;

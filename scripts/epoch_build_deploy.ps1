@@ -68,7 +68,7 @@ try {
     # -Throughput value (a mismatch between the generated odo_<epoch>.v
     # localparam THROUGHPUT and the QSF VERILOG_MACRO THROUGHPUT produces a
     # wrong hash -> 0 shares). Regeneration is <1s so there is no reason to cache it.
-    wsl bash -c "cd '$($repo -replace '\\','/' -replace '^C:','/mnt/c')' && upstream/odo-miner/src/verilog/odo_gen $Epoch $Throughput odo_ > $rtlFile"
+    wsl bash -c "cd '$($repo -replace '\\','/' -replace '^C:','/mnt/c')' && third_party/odo-miner/src/verilog/odo_gen $Epoch $Throughput odo_ > $rtlFile"
     if (-not (Test-Path $rtlFile) -or (Get-Item $rtlFile).Length -eq 0) {
         throw "odo_gen produced an empty/missing $rtlFile"
     }

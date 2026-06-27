@@ -119,7 +119,7 @@ odo-miner-cyclonev/
 │   ├── bringup-plan.md             # §9 staged validation, M1–M8
 │   └── bringup-logs/               # Per-milestone test logs (M2…M8 artifacts)
 │
-├── upstream/                       # git submodule → MentalCollatz/odo-miner (pinned SHA)
+├── third_party/odo-miner/          # vendored upstream subset (crypto/ + verilog/odo_gen), GPLv3 — see NOTICE
 │
 ├── hdl/
 │   ├── src/

@@ -1,0 +1,35 @@
+# Vendored third-party source: odo-miner
+
+These files are a vendored subset of the upstream `odo-miner` project, which is
+the basis for this Cyclone V SoC port's OdoCrypt algorithm and per-epoch RTL.
+
+- Upstream:       https://github.com/MentalCollatz/odo-miner
+- Pinned commit:  fb1bd94892e3b1893bfc2439ebec877b25856b18 (heads/master)
+- Vendored on:    2026-06-27
+- Scope:          only the subset this repo builds against — `src/crypto/`
+                  (the OdoCrypt + Keccak reference) and `src/verilog/`
+                  (`odo_gen`, the per-epoch RTL generator). The rest of upstream
+                  (other board projects, the pool/miner host code) is NOT vendored.
+
+## Per-file licensing
+
+The upstream project as a whole is **GPL-3.0-or-later** (see LICENSE in this
+directory). Individual files carry their own headers, which govern:
+
+| File(s)                                   | License            | Copyright |
+|-------------------------------------------|--------------------|-----------|
+| `src/verilog/odo_gen.cpp`                 | GPL-3.0-or-later   | MentalCollatz 2019 |
+| `src/verilog/keccak800.v`                 | GPL-3.0-or-later   | MentalCollatz 2019 |
+| `src/verilog/miner.v`, `checksum.v`, `alt_probe.v` | GPL-3.0-or-later | MentalCollatz 2019 |
+| `src/crypto/odocrypt.cpp`, `odocrypt.h`   | MIT/X11            | Satoshi Nakamoto; The DigiByte developers |
+| `src/crypto/KeccakP-800-reference.c`, `KeccakP-800-SnP.h`, `brg_endian.h` | CC0 / public domain | The Keccak Team |
+| `src/crypto/hashodo.h`                    | MIT/X11            | The DigiByte developers |
+
+`odo_gen` is a build-time tool: it emits Verilog (`odo_<epoch>.v`) consumed by
+the FPGA build. The MIT and CC0 files are vendored under their permissive terms;
+the GPL files are vendored under the GPL, and this repository as a whole is
+distributed under GPL-3.0-or-later (see the top-level LICENSE) to remain
+compliant, since the FPGA core is derived from upstream's GPL RTL.
+
+Original license headers in each file are preserved verbatim and must not be
+removed. `src/crypto/COPYING` is the upstream MIT text for the crypto subtree.

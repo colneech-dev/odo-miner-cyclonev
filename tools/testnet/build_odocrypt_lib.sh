@@ -1,6 +1,6 @@
 #!/bin/bash
 # build_odocrypt_lib.sh — build the OdoCrypt PoW hash as a shared library
-# (libodocrypt.so) from the repo's upstream submodule, so the Python test
+# (libodocrypt.so) from the vendored upstream sources, so the Python test
 # harness needs no external DigiByte build.
 #
 # Output: tools/testnet/libodocrypt.so  (loaded automatically by lib/odo_node.py)
@@ -8,10 +8,10 @@
 
 set -e
 cd "$(dirname "$0")"
-CRYPTO="../../upstream/odo-miner/src/crypto"
+CRYPTO="../../third_party/odo-miner/src/crypto"
 
 if [ ! -f "$CRYPTO/odocrypt.cpp" ]; then
-    echo "upstream submodule missing — run: git submodule update --init" >&2
+    echo "vendored OdoCrypt sources missing at $CRYPTO (expected third_party/odo-miner/src/crypto/)" >&2
     exit 1
 fi
 
