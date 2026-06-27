@@ -14,8 +14,8 @@
  *   hash = cipher[0..31]
  *
  * Build (see Makefile target gen_vectors):
- *   gcc -I. -I../upstream/odo-miner/src/crypto -o gen_vectors gen_vectors.c \
- *       odocrypt_state.c ../upstream/odo-miner/src/crypto/KeccakP-800-reference.c
+ *   gcc -I. -I../third_party/odo-miner/src/crypto -o gen_vectors gen_vectors.c \
+ *       odocrypt_state.c ../third_party/odo-miner/src/crypto/KeccakP-800-reference.c
  *
  * Usage: gen_vectors <epoch_key> <nonce> <outdir>
  */

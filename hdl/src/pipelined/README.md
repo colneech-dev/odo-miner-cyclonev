@@ -17,7 +17,7 @@ Avalon-MM integration of the upstream pipelined `odo_encrypt` (~37.5 MH/s on our
 The epoch is baked into `odo_<seed>.v` (`seed = ntime - ntime % 864000`):
 
 ```sh
-cd upstream/odo-miner/src/verilog && make odo_gen
+cd third_party/odo-miner/src/verilog && make odo_gen
 ./odo_gen <seed> 4 "odo_" > ../../../../hdl/src/pipelined/odo_<seed>.v
 ```
 

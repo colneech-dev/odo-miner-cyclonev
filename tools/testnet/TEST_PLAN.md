@@ -33,7 +33,7 @@ Gate: all three agree on the digest for a fixed (key, header).
 ## Stage 2 — full consensus loop in software (node, no FPGA)
 
 ```
-bash build_odocrypt_lib.sh        # once, builds libodocrypt.so from the submodule
+bash build_odocrypt_lib.sh        # once, builds libodocrypt.so from vendored sources
 python3 regtest_selftest.py
 ```
 CPU-mines one regtest block end-to-end — getblocktemplate → assemble block →

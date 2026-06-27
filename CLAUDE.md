@@ -1,6 +1,6 @@
 # CLAUDE Project Brief
 
-This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoCrypt FPGA miner, based on the upstream source tree in `upstream/odo-miner/`.
+This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoCrypt FPGA miner, based on the upstream source tree in `third_party/odo-miner/`.
 
 ## Purpose
 

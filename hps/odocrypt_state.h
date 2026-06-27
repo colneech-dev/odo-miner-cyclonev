@@ -2,7 +2,7 @@
  * odocrypt_state.h - OdoCrypt epoch table generator (HPS side)
  *
  * Faithfully replicates the OdoRandom LCG and all table-generation logic from
- * upstream/odo-miner/src/crypto/odocrypt.cpp so the HPS can compute the correct
+ * third_party/odo-miner/src/crypto/odocrypt.cpp so the HPS can compute the correct
  * epoch-dependent S-boxes, P-boxes, rotations, and round keys for any epoch key,
  * then load them into the FPGA over MMIO.
  *

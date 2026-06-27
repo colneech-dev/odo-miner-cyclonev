@@ -70,7 +70,7 @@ bash   tools/testnet/run_regtest_demo.sh          # Linux/WSL
 | `cpu_miner.py` | reference CPU miner over Stratum — the FPGA's stand-in |
 | `stratum/solo_stratum.py` | the bridge: GBT → Stratum v1 → submitblock, real OdoCrypt validation |
 | `lib/odo_node.py` | reusable core: RPC, OdoCrypt hash, segwit coinbase + block assembly |
-| `odocrypt_wrapper.cpp` + `build_odocrypt_lib.sh` | portable hash lib (`.so`/`.dll`) built from `upstream/odo-miner` |
+| `odocrypt_wrapper.cpp` + `build_odocrypt_lib.sh` | portable hash lib (`.so`/`.dll`) built from `third_party/odo-miner` |
 | `regtest_up.sh` | bring a node up by hand (encodes the conf/activation gotchas) |
 | `conf/digibyte.conf.{regtest,testnet}` | node config templates |
 

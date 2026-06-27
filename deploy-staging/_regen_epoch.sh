@@ -1,7 +1,7 @@
 #!/bin/bash
 # Regenerate odo_1782432000.v with THROUGHPUT=6 (matching hardware QSF)
 REPO="/mnt/c/Users/builder/Documents/GitHub/odo-miner-cyclonev"
-VERGEN="$REPO/upstream/odo-miner/src/verilog"
+VERGEN="$REPO/third_party/odo-miner/src/verilog"
 PIPE="$REPO/hdl/src/pipelined"
 KEY=1782432000
 THROUGHPUT=6

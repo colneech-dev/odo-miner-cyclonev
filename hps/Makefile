@@ -6,7 +6,7 @@ CFLAGS   ?= -std=c11   -O2 -Wall -Wextra -pedantic -pthread $(CPPFLAGS) \
 CXXFLAGS ?= -std=c++14 -O2 -Wall -Wextra -pthread $(CPPFLAGS)
 LDFLAGS  ?= -lpthread
 
-UPSTREAM_CRYPTO = ../upstream/odo-miner/src/crypto
+UPSTREAM_CRYPTO = ../third_party/odo-miner/src/crypto
 
 # -----------------------------------------------------------------------
 # Targets

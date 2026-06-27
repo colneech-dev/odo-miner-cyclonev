@@ -71,12 +71,11 @@ tar xzf oss-cad.tgz && rm oss-cad.tgz
 ## 4. Get the source
 
 ```bash
-# From Git Bash (Windows) or WSL — submodule is REQUIRED:
-# upstream/odo-miner provides the reference implementation that the
-# algorithm tests and the testbench vector generator compile against.
-git clone --recurse-submodules https://github.com/colneech-dev/odo-miner-cyclonev.git
+# From Git Bash (Windows) or WSL — a plain clone is enough:
+# the OdoCrypt reference (crypto/) and the per-epoch RTL generator (odo_gen)
+# are vendored in-tree under third_party/odo-miner/ — no submodule to init.
+git clone https://github.com/colneech-dev/odo-miner-cyclonev.git
 cd odo-miner-cyclonev   # clone lands on the default 'main' branch (what to build)
-# If you forgot --recurse-submodules:  git submodule update --init
 ```
 
 ## 5. Verify the toolchain before building anything big

@@ -8,9 +8,9 @@ cd "$(dirname "$0")"
 
 REPO=$(cd ../.. && pwd)
 HPS="$REPO/hps"
-CRYPTO="$REPO/upstream/odo-miner/src/crypto"
+CRYPTO="$REPO/third_party/odo-miner/src/crypto"
 PIPE="$REPO/hdl/src/pipelined"
-VERGEN="$REPO/upstream/odo-miner/src/verilog"
+VERGEN="$REPO/third_party/odo-miner/src/verilog"
 QSF="$REPO/hdl/quartus/odo_miner.qsf"
 
 # Read THROUGHPUT and ODOKEY from the QSF so testbench matches deployed config.

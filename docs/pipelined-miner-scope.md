@@ -123,7 +123,7 @@ cost, and is a clean go/no-go gate before committing to the integration.
 
 Compiled the upstream pipeline (epoch SEED 1748736000, THROUGHPUT=4) standalone
 for our `5CSXFC6C6U23I7` via the Windows Quartus 25.1 install. Project at
-`upstream/odo-miner/src/projects/qmtech_5csxfc6/` (untracked scratch).
+`third_party/odo-miner/src/projects/qmtech_5csxfc6/` (untracked scratch).
 
 - **Full compile clean** (A&S / Fit / Asm / STA all 0 errors).
 - **Fit: 65% ALM** (27,366 / 41,910) — ~35% headroom for HPS bridges + peripherals.

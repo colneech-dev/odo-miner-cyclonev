@@ -69,8 +69,8 @@ if [ -f "$EPOCH_RTL" ] && grep -q "localparam THROUGHPUT = ${THROUGHPUT};" "$EPO
     ok "Step 1: epoch RTL present (odo_${ODOKEY}.v, THROUGHPUT=${THROUGHPUT})"
 elif command -v wsl.exe > /dev/null 2>&1; then
     info "Step 1: generating epoch RTL odo_${ODOKEY}.v (T=${THROUGHPUT}) via odo_gen..."
-    wsl.exe -e bash -lc "cd '$REPO_WSL/upstream/odo-miner/src/verilog' && make odo_gen >/dev/null && ./odo_gen ${ODOKEY} ${THROUGHPUT} odo_ > '$REPO_WSL/hdl/src/pipelined/odo_${ODOKEY}.v'" \
-        || die "odo_gen failed (is the upstream/odo-miner submodule checked out? 'git submodule update --init')"
+    wsl.exe -e bash -lc "cd '$REPO_WSL/third_party/odo-miner/src/verilog' && make odo_gen >/dev/null && ./odo_gen ${ODOKEY} ${THROUGHPUT} odo_ > '$REPO_WSL/hdl/src/pipelined/odo_${ODOKEY}.v'" \
+        || die "odo_gen failed to build (check third_party/odo-miner/src/verilog/ is present and WSL has g++)"
     grep -q "localparam THROUGHPUT = ${THROUGHPUT};" "$EPOCH_RTL" \
         || die "generated $EPOCH_RTL has the wrong THROUGHPUT — odo_gen may have failed silently"
     ok "Generated odo_${ODOKEY}.v"

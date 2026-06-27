@@ -18,9 +18,9 @@ set -e
 cd "$(dirname "$0")"
 PYTHON="${PYTHON:-python3}"
 
-# Build the portable hash lib from the upstream submodule if no lib is set.
+# Build the portable hash lib from the vendored upstream sources if no lib is set.
 if [ -z "$ODOCRYPT_LIB" ] && [ ! -f libodocrypt.so ]; then
-    echo "[*] building libodocrypt.so from the upstream submodule ..."
+    echo "[*] building libodocrypt.so from the vendored upstream sources ..."
     bash build_odocrypt_lib.sh
 fi
 

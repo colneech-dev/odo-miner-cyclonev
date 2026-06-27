@@ -17,7 +17,7 @@ cd "$(dirname "$0")"
 
 REPO=$(cd ../.. && pwd)
 HPS="$REPO/hps"
-CRYPTO="$REPO/upstream/odo-miner/src/crypto"
+CRYPTO="$REPO/third_party/odo-miner/src/crypto"
 SRC="$REPO/hdl/src"
 
 IVERILOG=${IVERILOG:-iverilog}

@@ -17,8 +17,8 @@
 
 #include "odocrypt_state.h"
 
-/* Keccak-800 reference implementation from upstream submodule. */
-#include "../upstream/odo-miner/src/crypto/KeccakP-800-SnP.h"
+/* Keccak-800 reference implementation from vendored upstream (third_party/). */
+#include "../third_party/odo-miner/src/crypto/KeccakP-800-SnP.h"
 
 #include <stdio.h>
 #include <string.h>
