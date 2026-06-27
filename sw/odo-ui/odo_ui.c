@@ -1078,6 +1078,51 @@ static void draw_action_sheet(fb_t *fb)
     }
 }
 
+/* ---- small overlays drawn on top of the active screen ---- */
+
+/* Connected-line sparkline of recent hashrate samples (chronological order). */
+static void draw_sparkline(fb_t *fb, int x, int y, int w, int h,
+                           const double *buf, int n)
+{
+    if (n < 2) return;
+    double mx = 1e-9;
+    for (int i = 0; i < n; i++) if (buf[i] > mx) mx = buf[i];
+    int prevy = -1;
+    for (int i = 0; i < n; i++) {
+        int cx = x + i * (w - 1) / (n - 1);
+        int cy = y + h - 1 - (int)((h - 1) * buf[i] / mx);
+        if (prevy >= 0) {
+            int y0 = prevy < cy ? prevy : cy;
+            int y1 = prevy < cy ? cy : prevy;
+            fb_rect(fb, cx, y0, 2, (y1 - y0) + 1, C_ACCENT);
+        } else {
+            fb_rect(fb, cx, cy, 2, 2, C_ACCENT);
+        }
+        prevy = cy;
+    }
+}
+
+/* Current time HH:MM, top-right corner of the header. */
+static void draw_clock(fb_t *fb, time_t now)
+{
+    struct tm *t = localtime(&now);
+    if (!t) return;
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02d:%02d", t->tm_hour, t->tm_min);
+    fb_text(fb, fb->w - fb_text_w(1, buf) - 6, 3, buf, 1, C_DIM);
+}
+
+/* Transient confirmation banner near the bottom (set via toast_at). */
+static void draw_toast(fb_t *fb, const char *msg)
+{
+    int tw = fb_text_w(1, msg) + 16;
+    int x = (fb->w - tw) / 2;
+    int y = fb->h - 78;
+    fb_rect(fb, x, y, tw, 18, C_ACCENT);
+    fb_rect(fb, x + 1, y + 1, tw - 2, 16, C_BG);
+    fb_text(fb, x + 8, y + 5, msg, 1, C_ACCENT);
+}
+
 static settings_rects_t draw_settings(fb_t *fb, int dim_timeout, int dim_level)
 {
     bg_blit(fb);
@@ -1247,6 +1292,17 @@ int main(int argc, char **argv)
     /* Reload screen config from disk periodically (web UI may have changed it) */
     int conf_reload_tick = 0;
 
+    /* Hashrate trend ring buffer (chronological; one sample per HR_SAMPLE_S). */
+    #define HR_N 60
+    #define HR_SAMPLE_S 30
+    double hr_hist[HR_N];
+    int    hr_n = 0;
+    time_t hr_last = 0;
+
+    /* Transient toast banner */
+    char   toast[24] = {0};
+    time_t toast_at = 0;
+
     g_last_activity = time(NULL);
 
     while (!g_stop) {
@@ -1306,6 +1362,22 @@ int main(int argc, char **argv)
         char wssid[40]; int wdbm = 0;
         wifi_status(wssid, sizeof wssid, &wdbm);
 
+        /* Sample hashrate into the trend buffer once per HR_SAMPLE_S. */
+        if (now - hr_last >= HR_SAMPLE_S) {
+            hr_last = now;
+            if (hr_n < HR_N) {
+                hr_hist[hr_n++] = st.hashrate;
+            } else {
+                memmove(hr_hist, hr_hist + 1, (HR_N - 1) * sizeof(double));
+                hr_hist[HR_N - 1] = st.hashrate;
+            }
+        }
+
+        /* Auto-return to the glance dashboard after ~30s idle on another page. */
+        if (ui_screen != 0 && !menu_open && confirm == 0 &&
+            now - g_last_activity > 30)
+            ui_screen = 0;
+
         /* ---- draw active screen ---- */
         if (ui_screen == 0)
             draw_glance(&fb, &st, now, wssid, wdbm);
@@ -1313,6 +1385,11 @@ int main(int argc, char **argv)
             draw_detail(&fb, &st, now, wssid, wdbm);
         else
             set_rects = draw_settings(&fb, g_dim_timeout, g_dim_level);
+
+        /* ---- overlays (clock on all; sparkline on glance) ---- */
+        draw_clock(&fb, now);
+        if (ui_screen == 0)
+            draw_sparkline(&fb, 14, 84, fb.w - 28, 20, hr_hist, hr_n);
 
         /* ---- buttons ---- */
         if (confirm && now - confirm_at > 6)
@@ -1347,6 +1424,12 @@ int main(int argc, char **argv)
         if (menu_open && confirm == 0)
             draw_action_sheet(&fb);
 
+        /* Toast banner (auto-expires after ~2s) drawn on top of everything. */
+        if (toast[0] && now - toast_at <= 2)
+            draw_toast(&fb, toast);
+        else if (toast[0] && now - toast_at > 2)
+            toast[0] = '\0';
+
         /* ---- input ---- */
         for (int tick = 0; tick < 20 && !g_stop; tick++) {
             int sx, sy;
@@ -1368,6 +1451,8 @@ int main(int argc, char **argv)
                                    btn_mid.x + btn_mid.w - btn_left.x, btn_left.h };
                     if (hit(&cfm, sx, sy)) {
                         if (confirm == 1) {
+                            snprintf(toast, sizeof(toast), "Restarting miner...");
+                            toast_at = now;
                             int rc = system("/etc/init.d/S90odod restart >/dev/null 2>&1 || "
                                             "systemctl restart odod >/dev/null 2>&1");
                             (void)rc;
