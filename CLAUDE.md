@@ -179,6 +179,12 @@ Non-performance backlog:
    active-low ~2 s hold → reboot; polling driver in `thermal.c`).
 2. ~~Pool failover~~ — done; `ODOD_POOL_HOST2/PORT2` wired into the reconnect
    loop in both `hps/miner.c` and the active `hps/miner_pipe.c`.
-3. Deferred review items: `odo-webd` is unauthenticated on the LAN (accepted —
-   trusted-LAN model, documented in `odo_webd.c`); stratum `parse_hex_u32` /
-   oversized-line hardening (Bucket A M5/M1); async-FIFO the 1-deep found handoff.
+3. ~~async-FIFO the found handoff~~ — **DONE 2026-06-28**: depth-8 dual-clock
+   async FIFO (Gray-code CDC) in `pipelined_miner_top.v` replaces the 1-deep
+   handshake; sim bit-exact + hardware-verified (finds delivered + pool-accepted,
+   0 rejected). ~~`odo-webd` auth~~ — **DONE**: opt-in styled login (set
+   `PASSWORD=` in `/etc/odo-web.conf`), off by default. Web dashboard reached
+   touch-UI parity (fan boost / reset stats / pool-failover indicator).
+4. Remaining review item: stratum `parse_hex_u32` / oversized-line hardening
+   (Bucket A M5/M1). Throughput is power-bound at T=6 (T=4 ~37 MH/s browns the
+   core rail — deferred, needs an external 1.1 V supply / regulator change).

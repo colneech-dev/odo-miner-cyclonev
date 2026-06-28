@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y iverilog build-essential
+
+      - name: Algorithm oracle — C port vs upstream C++ (make check)
+        run: make -C hps check
+
+      - name: HPS unit tests (job/header/target math)
+        run: make -C hps test_units
+
+      - name: Pipelined RTL regression — bit-exact found vs oracle
+        run: cd hdl/tb && bash run_tb_pipe.sh
