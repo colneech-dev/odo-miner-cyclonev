@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <ctype.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
@@ -230,7 +231,12 @@ static int handle_subscribe_result(stratum_ctx_t *ctx, const char *body)
     while (*p && *p != '"' && hlen + 1 < sizeof(en1_hex))
         en1_hex[hlen++] = *p++;
     en1_hex[hlen] = '\0';
-    if (*p == '"') p++;
+    /* If we stopped on the buffer cap rather than the closing quote, the pool
+     * sent an overlong extranonce1 — reject the whole subscribe instead of
+     * mining with a silently-truncated (wrong) EN1 prefix. */
+    if (*p != '"')
+        return -1;
+    p++;
 
     size_t extranonce1_len = hex_to_bytes(en1_hex, ctx->extranonce1, sizeof(ctx->extranonce1));
     if (extranonce1_len == 0)
@@ -239,14 +245,17 @@ static int handle_subscribe_result(stratum_ctx_t *ctx, const char *body)
 
     /* Skip comma and whitespace, then parse EN2_SIZE integer */
     while (*p && (*p == ',' || *p == ' ' || *p == '\t')) p++;
-    ctx->extranonce2_size = (int)strtol(p, NULL, 10);
-    /* Clamp against the extranonce2 DESTINATION buffer (job_t.extranonce2,
-     * JOB_MAX_EXTRANONCE) — not extranonce1, which only happens to be the same
-     * size today. A pool advertising a larger EN2_SIZE would otherwise overflow
-     * job.extranonce2[] at submit time (stratum.c share build). */
-    if (ctx->extranonce2_size < 0 || ctx->extranonce2_size > JOB_MAX_EXTRANONCE)
-        ctx->extranonce2_size = 0;
-    else if (ctx->extranonce2_size > 0 && ctx->extranonce2_size < 4)
+    /* Parse as long and range-check BEFORE narrowing to int — a huge value
+     * would otherwise be (int)-truncated by implementation-defined UB into a
+     * possibly-valid-looking size. Clamp against the extranonce2 DESTINATION
+     * buffer (job_t.extranonce2, JOB_MAX_EXTRANONCE). */
+    char *en2_end = NULL;
+    long en2 = strtol(p, &en2_end, 10);
+    if (en2_end == p || en2 < 0 || en2 > JOB_MAX_EXTRANONCE)
+        ctx->extranonce2_size = 0;       /* missing / garbage / out-of-range */
+    else
+        ctx->extranonce2_size = (int)en2;
+    if (ctx->extranonce2_size > 0 && ctx->extranonce2_size < 4)
         /* H2: the per-job counter fills extranonce2's low bytes, so a tiny
          * EN2_SIZE repeats coinbases after 2^(8*size) jobs. Harmless at the
          * usual 4+, worth a heads-up if a pool advertises 1-3 bytes. */
@@ -325,6 +334,11 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
             p++;
         }
     }
+    /* If we hit the 32-branch cap with the array not yet closed by ']', the pool
+     * sent more branches than we can hold — truncating would compute a wrong
+     * merkle root and mine guaranteed-invalid shares, so reject the job. */
+    if (branch_count >= 32 && *p != ']')
+        return -1;
     while (*p && *p != ']') p++;
     if (*p == ']') p++;
 
@@ -400,6 +414,7 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
     coinbase_len += job.extranonce2_len;
 
     n = hex_to_bytes(coinb2_hex, coinbase + coinbase_len, sizeof(coinbase) - coinbase_len);
+    if (!n && coinb2_hex[0]) return -1;   /* malformed coinb2 (mirror coinb1) */
     coinbase_len += n;
 
     /* Compute merkle root from coinbase + branch list */
@@ -443,7 +458,9 @@ static void handle_set_difficulty(stratum_ctx_t *ctx, const char *params)
 
     char *end = NULL;
     double diff = strtod(p, &end);
-    if (end == p || diff <= 0.0)
+    /* Reject non-finite too: "nan" passes a bare `<= 0.0` test (all comparisons
+     * with NaN are false) and would poison the share target. */
+    if (end == p || !isfinite(diff) || diff <= 0.0)
         return;
 
     ctx->difficulty = diff;
@@ -638,8 +655,15 @@ int stratum_poll(stratum_ctx_t *ctx, int timeout_ms)
          * 4 KB recv always fits once rxlen is reset, so parsing continues below. */
         fprintf(stderr, "[stratum] oversized line >%zuB — dropping partial, resyncing\n",
                 sizeof(ctx->rxbuf));
-        ctx->rxlen  = 0;
-        ctx->resync = 1;   /* discard the dropped line's tail up to the next \n */
+        ctx->rxlen = 0;
+        /* resync also counts consecutive oversized resets with no recovering
+         * newline; a pool streaming endless garbage would otherwise spin here
+         * (progress-free) until the idle watchdog. Tear down and reconnect after
+         * a few. Recovery (a '\n' in the parse loop) resets the count to 0. */
+        if (++ctx->resync > 4) {
+            fprintf(stderr, "[stratum] no newline after repeated oversized lines — reconnecting\n");
+            return -1;
+        }
     }
 
     memcpy(ctx->rxbuf + ctx->rxlen, buffer, (size_t)n);
@@ -696,6 +720,8 @@ void stratum_disconnect(stratum_ctx_t *ctx)
     ctx->authorized = false;
     ctx->have_job = false;
     ctx->rxlen = 0;
+    ctx->resync = 0;   /* don't carry a mid-line resync into the next connection
+                        * (would silently eat the new session's first line) */
 }
 
 void stratum_destroy(stratum_ctx_t *ctx)

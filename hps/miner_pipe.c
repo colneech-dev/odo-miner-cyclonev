@@ -18,6 +18,7 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE          /* sync(), reboot() */
 
 #include "stratum.h"
 #include "job.h"
@@ -37,6 +38,8 @@
 #include <math.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/reboot.h>
 
 static volatile sig_atomic_t g_term = 0;
 static void on_sig(int s) { (void)s; g_term = 1; }
@@ -133,9 +136,11 @@ static void *thermal_thread(void *arg)
         fprintf(stderr, "[pipe] thermal_init failed; fan control disabled\n");
 
     int reset_held = 0;
+    int read_fail = 0;
     while (!g_term) {
         int t;
         if (thermal_read_c(&t) == 0) {
+            read_fail = 0;
             if (access(FAN_BOOST_PATH, F_OK) == 0)
                 thermal_fan_set_pct(100);   /* UI-forced full speed (soak/stress) */
             else
@@ -146,13 +151,27 @@ static void *thermal_thread(void *arg)
             g_st.fan_pct = thermal_fan_state();
             g_st.fan_rpm = rpm;
             pthread_mutex_unlock(&g_therm_mu);
+        } else if (++read_fail >= 3) {
+            /* Sustained sensor-read failure: force the fan to full as a
+             * thermal-safety default rather than holding the last duty — this
+             * board browns out at T=6 if it overheats. */
+            thermal_fan_set_pct(100);
+            pthread_mutex_lock(&g_therm_mu);
+            g_st.fan_pct = thermal_fan_state();
+            pthread_mutex_unlock(&g_therm_mu);
         }
         /* Idle window doubles as the reset-button poll (10 Hz). */
         for (int i = 0; i < 20 && !g_term; i++) {
             if (thermal_reset_pressed()) {
                 if (++reset_held >= RESET_HOLD_TICKS) {
+                    /* reboot() directly — NOT system("reboot"): fork() in this
+                     * worker thread while the main thread holds malloc/stdio
+                     * locks can deadlock the child before exec. sync()+reboot()
+                     * are bare syscalls, no fork. */
                     fprintf(stderr, "[pipe] reset button held -- rebooting\n");
-                    if (system("sync; reboot") != 0) { /* best effort */ }
+                    sync();
+                    reboot(RB_AUTOBOOT);
+                    fprintf(stderr, "[pipe] reboot() failed: %s\n", strerror(errno));
                     reset_held = 0;
                 }
             } else {
@@ -250,8 +269,10 @@ static void status_write(void)
     time_t now = time(NULL);
     double up = mono_s() - g_mono_start;          /* elapsed, clock-step safe */
     g_st.hashrate = (up > 0.0) ? g_st.work_acc / up : 0.0;
-    long enext = (g_st.epoch && g_st.epoch_interval)
-               ? (long)g_st.epoch + (long)g_st.epoch_interval : 0L;
+    /* long long, not long: on 32-bit ARM `long` is 32-bit and these Unix-time
+     * values truncate past 2038 (the epoch sum already sits near 1.78e9). */
+    long long enext = (g_st.epoch && g_st.epoch_interval)
+               ? (long long)g_st.epoch + (long long)g_st.epoch_interval : 0LL;
     pthread_mutex_lock(&g_therm_mu);
     int temp_c = g_st.temp_c, fan_pct = g_st.fan_pct, fan_rpm = g_st.fan_rpm;
     pthread_mutex_unlock(&g_therm_mu);
@@ -264,36 +285,36 @@ static void status_write(void)
         "  \"epoch\": %" PRIu32 ",\n"
         "  \"bitstream_epoch\": %" PRIu32 ",\n"
         "  \"epoch_interval\": %" PRIu32 ",\n"
-        "  \"epoch_next\": %ld,\n"
+        "  \"epoch_next\": %lld,\n"
         "  \"hashrate\": %.1f,\n"
         "  \"hashes_total\": 0,\n"
         "  \"shares_found\": %" PRIu64 ",\n"
         "  \"shares_submitted\": %" PRIu64 ",\n"
         "  \"shares_accepted\": %" PRIu64 ",\n"
         "  \"shares_rejected\": %" PRIu64 ",\n"
-        "  \"last_share\": %ld,\n"
+        "  \"last_share\": %lld,\n"
         "  \"best_diff_session\": %.6g,\n"
         "  \"best_diff_alltime\": %.6g,\n"
         "  \"blocks_found\": %" PRIu64 ",\n"
-        "  \"last_block\": %ld,\n"
+        "  \"last_block\": %lld,\n"
         "  \"temp_c\": %d,\n"
         "  \"fan_duty_pct\": %d,\n"
         "  \"fan_rpm\": %d,\n"
         "  \"backend\": \"%s\",\n"
         "  \"pool_slot\": %d,\n"
         "  \"pool_count\": %d,\n"
-        "  \"uptime\": %ld,\n"
-        "  \"updated\": %ld\n"
+        "  \"uptime\": %lld,\n"
+        "  \"updated\": %lld\n"
         "}\n",
         g_st.pool, g_st.connected ? "true" : "false", g_st.job_id,
         g_st.epoch, g_st.bitstream_epoch, g_st.epoch_interval, enext, g_st.hashrate,
         g_st.found, g_st.shares, g_st.shares_accepted, g_st.shares_rejected,
-        (long)g_st.last_share,
+        (long long)g_st.last_share,
         g_st.best_diff_session, g_st.best_diff_alltime,
-        g_st.blocks_found, (long)g_st.last_block,
+        g_st.blocks_found, (long long)g_st.last_block,
         temp_c, fan_pct, fan_rpm, miner_io_pipe_backend(),
         g_st.pool_slot, g_st.pool_count,
-        (long)up, (long)now);
+        (long long)up, (long long)now);
     fclose(f);
     rename(tmp, path);
 }

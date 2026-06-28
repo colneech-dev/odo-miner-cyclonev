@@ -62,8 +62,11 @@ typedef struct {
 
     char rxbuf[STRATUM_RECV_BUF];
     size_t rxlen;
-    int    resync;           /* 1 = an oversized line was dropped; skip the
-                              * remaining tail up to the next newline (M1) */
+    int    resync;           /* >0 = an oversized line was dropped; skip the
+                              * remaining tail up to the next newline (M1). Also
+                              * counts consecutive oversized resets so an endless
+                              * newline-less stream forces a reconnect, not a
+                              * silent stall. Cleared on the recovering newline. */
 
     time_t last_rx;          /* time() of the last bytes received from the pool;
                                 0 until the first successful connect. Drives the

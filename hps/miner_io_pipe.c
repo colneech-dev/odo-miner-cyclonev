@@ -84,7 +84,13 @@ int miner_io_pipe_dispatch(const uint8_t header[80], const uint8_t target[32])
     for (int i = 0; i < REG_PIPE_TARGET_WORDS; i++)
         reg_wr(&g_pio, REG_PIPE_TARGET_BASE + 4u * (uint32_t)i, le32(target + 4 * i));
 
-    /* Snapshot header+target into the 150 MHz domain (also arms the wrapper's
+    /* Ensure all header/target stores are globally visible before COMMIT — on
+     * the weakly-ordered Cortex-A9 the bare volatile writes above could
+     * otherwise be observed after the commit, snapshotting a half-written job.
+     * (The UIO backend already barriers every access; match it here.) */
+    __sync_synchronize();
+
+    /* Snapshot header+target into the 156.25 MHz domain (also arms the wrapper's
      * settle window, which drains stale old-header pipeline results). */
     reg_wr(&g_pio, REG_PIPE_COMMIT, 1u);
     return 0;
