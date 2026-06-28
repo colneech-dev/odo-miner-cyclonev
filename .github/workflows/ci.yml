@@ -50,10 +50,14 @@ jobs:
 
       - name: CRLF guard — scripts + rootfs overlay must be LF
         run: |
+          # Check the INDEX eol (i/crlf), not the working tree — platform-
+          # independent: flags anything committed with CRLF regardless of the
+          # checkout's autocrlf setting.
           bad=$(git ls-files --eol -- 'scripts/*.sh' 'hdl/tb/*.sh' \
                   'linux/overlay/etc/init.d/*' 'linux/overlay/usr/sbin/*' \
-                | grep -E 'w/crlf' || true)
+                  'sw/*/*.sh' \
+                | grep -E 'i/crlf' || true)
           if [ -n "$bad" ]; then
-            echo "CRLF line endings found (must be LF):"; echo "$bad"; exit 1
+            echo "CRLF line endings committed (must be LF):"; echo "$bad"; exit 1
           fi
-          echo "All scripts are LF."
+          echo "All scripts are LF in the index."
