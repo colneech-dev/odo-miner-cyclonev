@@ -1094,26 +1094,27 @@ static void draw_action_sheet(fb_t *fb)
 
 /* ---- small overlays drawn on top of the active screen ---- */
 
-/* Current time HH:MM, top-right corner of the header. */
+/* Current time HH:MM in the header. Sits left of the right-hand elements
+ * (glance status pill ~78px wide / detail signal icon) so it never overlaps. */
 static void draw_clock(fb_t *fb, time_t now)
 {
     struct tm *t = localtime(&now);
     if (!t) return;
     char buf[8];
     snprintf(buf, sizeof(buf), "%02d:%02d", t->tm_hour, t->tm_min);
-    fb_text(fb, fb->w - fb_text_w(1, buf) - 6, 3, buf, 1, C_DIM);
+    fb_text(fb, fb->w - 84 - fb_text_w(1, buf), 11, buf, 1, C_DIM);
 }
 
-/* Transient confirmation banner, floated in the vertical centre so it reads as
- * an overlay rather than belonging to any button (set via toast_at). */
+/* Transient confirmation banner across the header, where no screen has buttons,
+ * so it can never look like it belongs to a control (set via toast_at). */
 static void draw_toast(fb_t *fb, const char *msg)
 {
     int tw = fb_text_w(1, msg) + 24;
     int x = (fb->w - tw) / 2;
-    int y = fb->h / 2 - 12;
-    fb_rect(fb, x, y, tw, 24, C_ACCENT);
-    fb_rect(fb, x + 2, y + 2, tw - 4, 20, C_BG);
-    fb_text(fb, x + 12, y + 8, msg, 1, C_ACCENT);
+    int y = 2;
+    fb_rect(fb, x, y, tw, 22, C_ACCENT);
+    fb_rect(fb, x + 2, y + 2, tw - 4, 18, C_BG);
+    fb_text(fb, x + 12, y + 7, msg, 1, C_ACCENT);
 }
 
 static settings_rects_t draw_settings(fb_t *fb, int dim_timeout, int dim_level)
