@@ -11,8 +11,8 @@
 //   * snapshot header/target into the miner domain on a commit handshake
 //     (data-stable CDC: the HPS writes all words, then toggles COMMIT; only the
 //      1-bit toggle is synchronized, the data is stable when sampled), and
-//   * hand found nonces back through a 1-deep 2-phase handshake (read-to-consume;
-//     widen to an async FIFO before hardware soak — see plan, found-FIFO).
+//   * hand found nonces back through a dual-clock async FIFO (depth 8, Gray-code
+//     pointer CDC; read-to-consume), so bursts of finds buffer rather than drop.
 //
 // Requires `THROUGHPUT and `ODOKEY defined (VERILOG_MACRO in the qsf / -D in the
 // testbench), exactly like the upstream flow. The per-epoch odo_<seed>.v (module
@@ -121,48 +121,57 @@ module pipelined_miner_top (
     wire [31:0] found_nonce_m;
     miner u_miner (miner_clk, header_m, target_m, found_nonce_m);
 
-    // ----------------------------- Found handoff: miner (150 MHz) -> Avalon
-    // 1-deep 2-phase handshake. New finds while a previous one is unconsumed are
-    // dropped (replace with an async FIFO before hardware soak).
-    reg [31:0] prev_nonce_m;
-    reg [31:0] fnonce_hold_m;
-    reg        req_tgl_m;
-    reg        ackm_s1, ackm_s2;     // ack synced into miner domain
-    reg        reqa_s1, reqa_s2;     // req synced into Avalon domain
-    reg        ack_tgl_a;
-    reg [31:0] fnonce_a;
-    wire       found_valid = (reqa_s2 != ack_tgl_a);
-    assign     irq = found_valid;
+    // ----------------------------- Found handoff: miner domain -> Avalon domain
+    // Dual-clock async FIFO (Gray-code pointers, Cummings-style CDC), depth 8, so
+    // a burst of finds buffers instead of dropping while the HPS drains them.
+    // A new find pushes (nonce changed, past the settle window, FIFO not full);
+    // reading ADDR_FNONCE pops (read-to-consume). irq/FSTATUS = FIFO not empty.
+    localparam FIFO_AW = 3;                       // 8 entries (2**FIFO_AW)
+    reg  [31:0]      fifo_mem [0:(1<<FIFO_AW)-1];
+    // write side (miner_clk)
+    reg  [FIFO_AW:0] wbin, wgray;
+    reg  [FIFO_AW:0] rgray_wq1, rgray_wq2;        // read-gray synced into write domain
+    reg  [31:0]      prev_nonce_m;
+    // read side (Avalon clk)
+    reg  [FIFO_AW:0] rbin, rgray;
+    reg  [FIFO_AW:0] wgray_rq1, wgray_rq2;        // write-gray synced into read domain
+    // write-side combinational
+    wire [FIFO_AW:0] wbin_nxt  = wbin + 1'b1;
+    wire [FIFO_AW:0] wgray_nxt = (wbin_nxt >> 1) ^ wbin_nxt;
+    wire             wfull = (wgray_nxt == {~rgray_wq2[FIFO_AW:FIFO_AW-1],
+                                            rgray_wq2[FIFO_AW-2:0]});
+    wire             new_find = (found_nonce_m != prev_nonce_m) && (settle_cnt == 0);
+    wire             w_en = new_find && !wfull;
+    // read-side combinational
+    wire [FIFO_AW:0] rbin_nxt  = rbin + 1'b1;
+    wire [FIFO_AW:0] rgray_nxt = (rbin_nxt >> 1) ^ rbin_nxt;
+    wire             found_valid = (rgray != wgray_rq2);   // not empty
+    wire             r_en = avs_read && (avs_address == ADDR_FNONCE) && found_valid;
+    wire [31:0]      fnonce_a = fifo_mem[rbin[FIFO_AW-1:0]];
+    assign           irq = found_valid;
     initial begin
-        prev_nonce_m = 0; fnonce_hold_m = 0; req_tgl_m = 0;
-        ackm_s1 = 0; ackm_s2 = 0;
+        wbin = 0; wgray = 0; rgray_wq1 = 0; rgray_wq2 = 0; prev_nonce_m = 0;
     end
-
-    always @(posedge miner_clk) begin
-        ackm_s1 <= ack_tgl_a;
-        ackm_s2 <= ackm_s1;
+    always @(posedge miner_clk) begin            // write side
+        rgray_wq1    <= rgray;
+        rgray_wq2    <= rgray_wq1;
         prev_nonce_m <= found_nonce_m;
-        // new find (nonce changed), handshake idle, and past the settle window
-        if ((found_nonce_m != prev_nonce_m) && (req_tgl_m == ackm_s2)
-            && (settle_cnt == 0)) begin
-            fnonce_hold_m <= found_nonce_m;
-            req_tgl_m     <= ~req_tgl_m;
+        if (w_en) begin
+            fifo_mem[wbin[FIFO_AW-1:0]] <= found_nonce_m;
+            wbin  <= wbin_nxt;
+            wgray <= wgray_nxt;
         end
     end
-
-    always @(posedge clk or negedge reset_n) begin
+    always @(posedge clk or negedge reset_n) begin   // read side
         if (!reset_n) begin
-            reqa_s1 <= 1'b0; reqa_s2 <= 1'b0;
-            ack_tgl_a <= 1'b0; fnonce_a <= 32'h0;
+            rbin <= 0; rgray <= 0; wgray_rq1 <= 0; wgray_rq2 <= 0;
         end else begin
-            reqa_s1 <= req_tgl_m;
-            reqa_s2 <= reqa_s1;
-            // fnonce_hold_m is stable while the handshake is pending
-            if (found_valid)
-                fnonce_a <= fnonce_hold_m;
-            // reading the nonce consumes the entry
-            if (avs_read && (avs_address == ADDR_FNONCE) && found_valid)
-                ack_tgl_a <= ~ack_tgl_a;
+            wgray_rq1 <= wgray;
+            wgray_rq2 <= wgray_rq1;
+            if (r_en) begin
+                rbin  <= rbin_nxt;
+                rgray <= rgray_nxt;
+            end
         end
     end
 
