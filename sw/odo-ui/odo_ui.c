@@ -1104,15 +1104,16 @@ static void draw_clock(fb_t *fb, time_t now)
     fb_text(fb, fb->w - fb_text_w(1, buf) - 6, 3, buf, 1, C_DIM);
 }
 
-/* Transient confirmation banner near the bottom (set via toast_at). */
+/* Transient confirmation banner, floated in the vertical centre so it reads as
+ * an overlay rather than belonging to any button (set via toast_at). */
 static void draw_toast(fb_t *fb, const char *msg)
 {
-    int tw = fb_text_w(1, msg) + 16;
+    int tw = fb_text_w(1, msg) + 24;
     int x = (fb->w - tw) / 2;
-    int y = fb->h - 78;
-    fb_rect(fb, x, y, tw, 18, C_ACCENT);
-    fb_rect(fb, x + 1, y + 1, tw - 2, 16, C_BG);
-    fb_text(fb, x + 8, y + 5, msg, 1, C_ACCENT);
+    int y = fb->h / 2 - 12;
+    fb_rect(fb, x, y, tw, 24, C_ACCENT);
+    fb_rect(fb, x + 2, y + 2, tw - 4, 20, C_BG);
+    fb_text(fb, x + 12, y + 8, msg, 1, C_ACCENT);
 }
 
 static settings_rects_t draw_settings(fb_t *fb, int dim_timeout, int dim_level)
@@ -1488,16 +1489,14 @@ int main(int argc, char **argv)
                             g_dim_level += 5; if (g_dim_level > 100) g_dim_level = 100;
                             save_ui_conf();
                         } else if (hit(&set_rects.fan, sx, sy)) {
-                            /* toggle the fan-boost flag the daemon polls */
+                            /* toggle the fan-boost flag the daemon polls; the
+                             * button's own AUTO/BOOST label is the feedback. */
                             if (access(FAN_BOOST_PATH, F_OK) == 0) {
                                 unlink(FAN_BOOST_PATH);
-                                snprintf(toast, sizeof(toast), "Fan: AUTO");
                             } else {
                                 FILE *bf = fopen(FAN_BOOST_PATH, "w");
                                 if (bf) fclose(bf);
-                                snprintf(toast, sizeof(toast), "Fan: BOOST 100%%");
                             }
-                            toast_at = now;
                         } else if (hit(&set_rects.reset, sx, sy)) {
                             FILE *rf = fopen(RESET_STATS_PATH, "w");
                             if (rf) fclose(rf);
