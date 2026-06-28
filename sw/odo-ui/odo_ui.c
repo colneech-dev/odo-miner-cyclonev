@@ -1094,28 +1094,6 @@ static void draw_action_sheet(fb_t *fb)
 
 /* ---- small overlays drawn on top of the active screen ---- */
 
-/* Connected-line sparkline of recent hashrate samples (chronological order). */
-static void draw_sparkline(fb_t *fb, int x, int y, int w, int h,
-                           const double *buf, int n)
-{
-    if (n < 2) return;
-    double mx = 1e-9;
-    for (int i = 0; i < n; i++) if (buf[i] > mx) mx = buf[i];
-    int prevy = -1;
-    for (int i = 0; i < n; i++) {
-        int cx = x + i * (w - 1) / (n - 1);
-        int cy = y + h - 1 - (int)((h - 1) * buf[i] / mx);
-        if (prevy >= 0) {
-            int y0 = prevy < cy ? prevy : cy;
-            int y1 = prevy < cy ? cy : prevy;
-            fb_rect(fb, cx, y0, 2, (y1 - y0) + 1, C_ACCENT);
-        } else {
-            fb_rect(fb, cx, cy, 2, 2, C_ACCENT);
-        }
-        prevy = cy;
-    }
-}
-
 /* Current time HH:MM, top-right corner of the header. */
 static void draw_clock(fb_t *fb, time_t now)
 {
@@ -1319,13 +1297,6 @@ int main(int argc, char **argv)
     /* Reload screen config from disk periodically (web UI may have changed it) */
     int conf_reload_tick = 0;
 
-    /* Hashrate trend ring buffer (chronological; one sample per HR_SAMPLE_S). */
-    #define HR_N 60
-    #define HR_SAMPLE_S 30
-    double hr_hist[HR_N];
-    int    hr_n = 0;
-    time_t hr_last = 0;
-
     /* Transient toast banner */
     char   toast[24] = {0};
     time_t toast_at = 0;
@@ -1389,17 +1360,6 @@ int main(int argc, char **argv)
         char wssid[40]; int wdbm = 0;
         wifi_status(wssid, sizeof wssid, &wdbm);
 
-        /* Sample hashrate into the trend buffer once per HR_SAMPLE_S. */
-        if (now - hr_last >= HR_SAMPLE_S) {
-            hr_last = now;
-            if (hr_n < HR_N) {
-                hr_hist[hr_n++] = st.hashrate;
-            } else {
-                memmove(hr_hist, hr_hist + 1, (HR_N - 1) * sizeof(double));
-                hr_hist[HR_N - 1] = st.hashrate;
-            }
-        }
-
         /* Auto-return to the glance dashboard after ~30s idle on another page. */
         if (ui_screen != 0 && !menu_open && confirm == 0 &&
             now - g_last_activity > 30)
@@ -1413,10 +1373,8 @@ int main(int argc, char **argv)
         else
             set_rects = draw_settings(&fb, g_dim_timeout, g_dim_level);
 
-        /* ---- overlays (clock on all; sparkline on glance) ---- */
+        /* ---- overlays (clock on all screens) ---- */
         draw_clock(&fb, now);
-        if (ui_screen == 0)
-            draw_sparkline(&fb, 14, 84, fb.w - 28, 20, hr_hist, hr_n);
 
         /* ---- buttons ---- */
         if (confirm && now - confirm_at > 6)
