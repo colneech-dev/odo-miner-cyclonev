@@ -117,30 +117,50 @@ module pipelined_miner_top (
         end
     end
 
+    // ----------------------- Reset synchronizer into the miner_clk domain
+    // The async FIFO's write-side state lives in miner_clk; without a reset
+    // there it only ever cleared at power-on (FPGA config). Synchronize the
+    // Avalon reset into miner_clk so a runtime reset_n clears BOTH pointer sets
+    // coherently (async-assert, sync-deassert).
+    reg miner_rst_s1, miner_rst_s2;
+    always @(posedge miner_clk or negedge reset_n) begin
+        if (!reset_n) begin miner_rst_s1 <= 1'b1; miner_rst_s2 <= 1'b1; end
+        else          begin miner_rst_s1 <= 1'b0; miner_rst_s2 <= miner_rst_s1; end
+    end
+    wire miner_rst = miner_rst_s2;
+
     // ------------------------------------------- Free-running pipelined miner
     wire [31:0] found_nonce_m;
-    miner u_miner (miner_clk, header_m, target_m, found_nonce_m);
+    wire        found_strobe_m;
+    miner u_miner (miner_clk, header_m, target_m, found_nonce_m, found_strobe_m);
 
     // ----------------------------- Found handoff: miner domain -> Avalon domain
     // Dual-clock async FIFO (Gray-code pointers, Cummings-style CDC), depth 8, so
     // a burst of finds buffers instead of dropping while the HPS drains them.
-    // A new find pushes (nonce changed, past the settle window, FIFO not full);
-    // reading ADDR_FNONCE pops (read-to-consume). irq/FSTATUS = FIFO not empty.
+    // Each core `found` strobe (past the settle window, FIFO not full) pushes one
+    // nonce; reading ADDR_FNONCE pops (read-to-consume). irq/FSTATUS = not empty.
+    // A strobe that arrives while full is dropped and latches a sticky overflow
+    // flag (STATUS bit3) so the daemon can observe the loss.
     localparam FIFO_AW = 3;                       // 8 entries (2**FIFO_AW)
     reg  [31:0]      fifo_mem [0:(1<<FIFO_AW)-1];
     // write side (miner_clk)
     reg  [FIFO_AW:0] wbin, wgray;
     reg  [FIFO_AW:0] rgray_wq1, rgray_wq2;        // read-gray synced into write domain
-    reg  [31:0]      prev_nonce_m;
+    reg              fifo_ovf_m;                  // sticky: a find was dropped (full)
     // read side (Avalon clk)
     reg  [FIFO_AW:0] rbin, rgray;
     reg  [FIFO_AW:0] wgray_rq1, wgray_rq2;        // write-gray synced into read domain
+    reg              ovf_rq1, ovf_rq2;            // overflow flag synced into read domain
     // write-side combinational
     wire [FIFO_AW:0] wbin_nxt  = wbin + 1'b1;
     wire [FIFO_AW:0] wgray_nxt = (wbin_nxt >> 1) ^ wbin_nxt;
-    wire             wfull = (wgray_nxt == {~rgray_wq2[FIFO_AW:FIFO_AW-1],
-                                            rgray_wq2[FIFO_AW-2:0]});
-    wire             new_find = (found_nonce_m != prev_nonce_m) && (settle_cnt == 0);
+    // Full on the CURRENT write pointer (symmetric with the empty test, which
+    // uses the current read pointer): the FIFO is full when wptr has lapped rptr
+    // by 2**FIFO_AW, i.e. the two MSBs are inverted and the low bits match. Using
+    // wgray_nxt here instead asserts full one slot early (depth 7, not 8).
+    wire             wfull = (wgray == {~rgray_wq2[FIFO_AW:FIFO_AW-1],
+                                        rgray_wq2[FIFO_AW-2:0]});
+    wire             new_find = found_strobe_m && (settle_cnt == 0);
     wire             w_en = new_find && !wfull;
     // read-side combinational
     wire [FIFO_AW:0] rbin_nxt  = rbin + 1'b1;
@@ -150,24 +170,31 @@ module pipelined_miner_top (
     wire [31:0]      fnonce_a = fifo_mem[rbin[FIFO_AW-1:0]];
     assign           irq = found_valid;
     initial begin
-        wbin = 0; wgray = 0; rgray_wq1 = 0; rgray_wq2 = 0; prev_nonce_m = 0;
+        wbin = 0; wgray = 0; rgray_wq1 = 0; rgray_wq2 = 0; fifo_ovf_m = 0;
     end
     always @(posedge miner_clk) begin            // write side
-        rgray_wq1    <= rgray;
-        rgray_wq2    <= rgray_wq1;
-        prev_nonce_m <= found_nonce_m;
-        if (w_en) begin
-            fifo_mem[wbin[FIFO_AW-1:0]] <= found_nonce_m;
-            wbin  <= wbin_nxt;
-            wgray <= wgray_nxt;
+        if (miner_rst) begin
+            wbin <= 0; wgray <= 0; rgray_wq1 <= 0; rgray_wq2 <= 0; fifo_ovf_m <= 1'b0;
+        end else begin
+            rgray_wq1 <= rgray;
+            rgray_wq2 <= rgray_wq1;
+            if (new_find && wfull) fifo_ovf_m <= 1'b1;   // dropped a find (full)
+            if (w_en) begin
+                fifo_mem[wbin[FIFO_AW-1:0]] <= found_nonce_m;
+                wbin  <= wbin_nxt;
+                wgray <= wgray_nxt;
+            end
         end
     end
     always @(posedge clk or negedge reset_n) begin   // read side
         if (!reset_n) begin
             rbin <= 0; rgray <= 0; wgray_rq1 <= 0; wgray_rq2 <= 0;
+            ovf_rq1 <= 0; ovf_rq2 <= 0;
         end else begin
             wgray_rq1 <= wgray;
             wgray_rq2 <= wgray_rq1;
+            ovf_rq1   <= fifo_ovf_m;
+            ovf_rq2   <= ovf_rq1;
             if (r_en) begin
                 rbin  <= rbin_nxt;
                 rgray <= rgray_nxt;
@@ -185,7 +212,7 @@ module pipelined_miner_top (
             avs_readdata = header_reg[(avs_address - ADDR_HEADER) >> 2];
         else case (avs_address)
             ADDR_CONTROL: avs_readdata = {30'h0, soft_reset, 1'b0};
-            ADDR_STATUS:  avs_readdata = {29'h0, ~found_valid, 1'b1, 1'b1};
+            ADDR_STATUS:  avs_readdata = {28'h0, ovf_rq2, ~found_valid, 1'b1, 1'b1};
             ADDR_VERSION: avs_readdata = 32'h0002_0000;
             ADDR_SEED:    avs_readdata = `ODOKEY;
             ADDR_FNONCE:  avs_readdata = fnonce_a;

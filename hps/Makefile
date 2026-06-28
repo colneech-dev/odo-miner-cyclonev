@@ -89,11 +89,21 @@ odo-miner-pipe-uio: $(PIPE_MINER_UIO_SRCS)
 # -----------------------------------------------------------------------
 # Algorithm tests
 # -----------------------------------------------------------------------
-.PHONY: test test_upstream check test_units
+.PHONY: test test_upstream check test_units test_stratum_fuzz
 
 test_units: test_units.c job.c odocrypt_header.c
 	$(CC) $(CFLAGS) -o $@ $^
 	./test_units
+
+# Malformed-pool-input regression for the Stratum parser. #includes stratum.c to
+# reach the static handlers; links the real job/header/odocrypt deps + upstream
+# Keccak. Built with ASan/UBSan so any OOB read in the hand-rolled JSON fails.
+test_stratum_fuzz: test_stratum_fuzz.c job.c odocrypt_header.c odocrypt_state.c
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -I$(UPSTREAM_CRYPTO) -c \
+	      $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c -o /tmp/keccak800_fz.o
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -I$(UPSTREAM_CRYPTO) -o $@ \
+	      $^ /tmp/keccak800_fz.o $(LDFLAGS)
+	./test_stratum_fuzz
 
 # Loopback: drive the real stratum/job/header/odocrypt code against a running
 # solo Stratum bridge (tools/testnet). Needs the upstream Keccak reference for

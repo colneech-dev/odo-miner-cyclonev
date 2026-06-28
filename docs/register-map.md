@@ -78,7 +78,7 @@ Byte offsets relative to the slave base. Mirrors `hps/hps_regs_pipe.h` exactly.
 | Offset | Name | Dir | Description |
 |---|---|---|---|
 | 0x000 | `CONTROL` | W | bit1 = `soft_reset` (informational; the core free-runs). |
-| 0x004 | `STATUS` | R | bit0 `running` (1), bit1 `pll_ok` (1), bit2 `empty` (no found nonce pending). |
+| 0x004 | `STATUS` | R | bit0 `running` (1), bit1 `pll_ok` (1), bit2 `empty` (no found nonce pending), bit3 `fifo_overflow` (sticky: a found nonce was dropped because the FIFO was full; clears only on reset). |
 | 0x008 | `VERSION` | R | `0x0002_0000` — the high half (0x0002) marks the pipelined core. |
 | 0x00C | `SEED` | R | Baked-in epoch (`ODOKEY`) of this bitstream. Compare against the job's epoch; a mismatch means the FPGA must be reconfigured (epoch renewal). |
 | 0x020–0x03C | `TARGET[0..7]` | W | 256-bit share target, little-endian words (word 0 = LSW). |
@@ -115,8 +115,13 @@ continuously and latches any hash ≤ target.
 
 > Found nonces are buffered in a **depth-8 dual-clock async FIFO** (Gray-code
 > pointer CDC), so a burst of finds is held rather than dropped while the HPS
-> drains them. Hardware-verified (finds delivered + pool-accepted, 0 rejected).
-> At MH/s with sparse target hits this is low-risk but tracked.
+> drains them. The producer is a 1-cycle `found` strobe from the core (each find
+> pushed exactly once); a strobe arriving while the FIFO is full is dropped and
+> latches `STATUS.fifo_overflow` (bit3) for observability. Hardware-verified
+> (finds delivered + pool-accepted, 0 rejected). The FIFO holds the full 8
+> entries and drops the newest on overflow; regression: `hdl/tb/run_tb_fifo.sh`
+> (burst/overflow/in-order-drain/irq-level) alongside the bit-exact
+> `run_tb_pipe.sh`.
 
 ---
 

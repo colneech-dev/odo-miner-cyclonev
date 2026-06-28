@@ -91,6 +91,11 @@ elif command -v wsl.exe > /dev/null 2>&1; then
     else
         die "Testbench failed — fix the RTL before synthesizing (or SKIP_TB=1 to override)"
     fi
+    if wsl.exe -e bash -lc "cd '$TB_DIR_WSL' && ./run_tb_fifo.sh" 2>&1 | grep -q "FIFO TB: PASS"; then
+        ok "Found-handoff async FIFO: burst/overflow/in-order/irq-level OK"
+    else
+        die "FIFO testbench failed — fix the wrapper FIFO before synthesizing"
+    fi
 else
     warn "Step 2: WSL not available — skipping the simulation gate"
 fi

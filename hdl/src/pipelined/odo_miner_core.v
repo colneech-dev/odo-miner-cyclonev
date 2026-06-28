@@ -53,29 +53,35 @@ module odo_keccak(clk, in, read, target, out, write);
     cmp_256 compare(clk, pow_hash, has_hash, target, out, write);
 endmodule
 
-module miner(clk, header, target, nonce);
+module miner(clk, header, target, nonce, found);
     parameter INONCE = 0; // for testing
 
     input clk;
     input [607:0] header;
     input [255:0] target;
     output reg [31:0] nonce;
-    
+    // 1-cycle strobe, asserted on the same edge `nonce` latches a qualifying
+    // nonce. Lets the wrapper push EVERY find exactly once into the FIFO instead
+    // of inferring finds from a change in `nonce` (which loses a find whenever a
+    // new winner equals the value already latched, or when the FIFO is full).
+    output reg found;
+
     reg [31:0] nonce_in;
     reg [31:0] nonce_out;
     initial nonce_in = INONCE;
     initial nonce_out = INONCE;
-    
+
     reg [6:0] counter;
     reg advance;
     initial counter = `THROUGHPUT-1;
     initial advance = 0;
-    
+    initial found = 0;
+
     wire res;
     wire has_res;
-    
+
     odo_keccak worker(clk, {nonce_in, header}, advance, target, res, has_res);
-    
+
     always @(posedge clk)
     begin
         if (counter == `THROUGHPUT-1)
@@ -90,10 +96,14 @@ module miner(clk, header, target, nonce);
         end
         if (advance)
             nonce_in <= nonce_in + 1;
+        found <= 1'b0;            // default: one-cycle pulse
         if (has_res)
         begin
             if (res)
+            begin
                 nonce <= nonce_out;
+                found <= 1'b1;   // qualifying nonce latched this edge
+            end
             nonce_out <= nonce_out + 1;
         end
     end
