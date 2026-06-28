@@ -103,13 +103,14 @@ body{margin:0;background:#100F0B;color:#F2EFE6;font-family:system-ui,sans-serif;
       <div class='form-group'><label class='form-label'>Fan control <span id='fanState' style='font-size:11px;color:#888;'></span></label>
         <div style='display:flex;gap:10px;flex-wrap:wrap;'><button class='button secondary' type='button' onclick='setFan(0)'>Auto</button><button class='button secondary' type='button' onclick='setFan(1)'>Boost 100%</button></div></div>
       <div style='margin-top:12px;'><button class='button secondary' type='button' onclick='resetStats()'>Reset session stats</button></div>
+      <div id='signoutRow' style='display:none;margin-top:18px;border-top:1px solid #3a3830;padding-top:14px;'><form method='post' action='/logout' style='margin:0;'><button class='button secondary' type='submit'>Sign out</button></form></div>
     </div>
   </div>
 </div>
 <div class='toast' id='toast'><div class='toast-dot'>&#10003;</div><div id='toastText'>Saved — restarting…</div></div>
 <script>
 function showTab(tab){document.getElementById('tabMonitor').className='tab'+(tab==='monitor'?' active':'');document.getElementById('tabSettings').className='tab'+(tab==='settings'?' active':'');document.getElementById('monitorPanel').style.display=tab==='monitor'?'block':'none';document.getElementById('monitorTiles').style.display=tab==='monitor'?'grid':'none';document.getElementById('settingsPanel').style.display=tab==='settings'?'block':'none';if(tab==='settings'){loadConfig();loadScreen();loadControls();}}
-function loadControls(){fetch('/controls.json').then(function(r){return r.json();}).then(function(c){document.getElementById('fanState').textContent=c.fan_boost?'(boost 100%)':'(auto)';}).catch(function(){});}
+function loadControls(){fetch('/controls.json').then(function(r){return r.json();}).then(function(c){document.getElementById('fanState').textContent=c.fan_boost?'(boost 100%)':'(auto)';document.getElementById('signoutRow').style.display=c.auth?'block':'none';}).catch(function(){});}
 function setFan(b){xhrPost('/action','action='+(b?'fan_boost':'fan_auto'),(b?'Fan boost on':'Fan auto'),'Failed');setTimeout(loadControls,400);}
 function resetStats(){if(confirm('Reset session best-diff and hashrate average?'))xhrPost('/action','action=reset_stats','Session stats reset','Failed');}
 function loadConfig(){fetch('/config.json').then(function(r){return r.json();}).then(function(c){document.getElementById('c_host').value=c.host||'';document.getElementById('c_port').value=c.port||'';document.getElementById('c_worker').value=c.worker||'';document.getElementById('c_pass').value=c.pass||'';document.getElementById('c_testnet').checked=!!c.testnet;}).catch(function(){});}

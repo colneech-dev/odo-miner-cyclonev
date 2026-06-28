@@ -95,6 +95,133 @@ static void send_redirect(int fd, const char *loc)
     if (write(fd, hdr, (size_t)n) < 0) return;
 }
 
+/* ------------------------------------------------------------------ */
+/* Optional auth (opt-in): set PASSWORD= in /etc/odo-web.conf to enable a    */
+/* styled login page + session cookie. Empty/absent password = open (the     */
+/* documented trusted-LAN default).                                          */
+/* ------------------------------------------------------------------ */
+static void form_get(const char *body, const char *key, char *out, size_t out_sz);
+#define WEB_CONF_PATH "/etc/odo-web.conf"
+#define NSESS 4
+static char g_password[64] = "";
+static int  g_auth = 0;
+static char g_sessions[NSESS][33];
+static int  g_sess_next = 0;
+
+static void load_auth(void)
+{
+    FILE *f = fopen(WEB_CONF_PATH, "r");
+    if (!f) return;
+    char line[160];
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] == '#') continue;
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = 0;
+        char *v = eq + 1;
+        v[strcspn(v, "\r\n")] = 0;
+        if (strcmp(line, "PASSWORD") == 0 && v[0])
+            snprintf(g_password, sizeof(g_password), "%s", v);
+    }
+    fclose(f);
+    g_auth = (g_password[0] != 0);
+}
+
+/* constant-time string compare (avoid password timing leaks) */
+static int ct_eq(const char *a, const char *b)
+{
+    size_t la = strlen(a), lb = strlen(b), i;
+    unsigned char d = (unsigned char)(la ^ lb);
+    for (i = 0; i < la; i++) d |= (unsigned char)(a[i] ^ b[i % (lb ? lb : 1)]);
+    return d == 0 && la == lb;
+}
+
+static void gen_token(char *out33)
+{
+    unsigned char b[16];
+    FILE *u = fopen("/dev/urandom", "r");
+    if (u && fread(b, 1, sizeof(b), u) == sizeof(b)) { /* ok */ }
+    else { for (int i = 0; i < 16; i++) b[i] = (unsigned char)(rand() ^ (i * 31)); }
+    if (u) fclose(u);
+    for (int i = 0; i < 16; i++) snprintf(out33 + i * 2, 3, "%02x", b[i]);
+    out33[32] = 0;
+}
+
+static int request_authed(const char *req)
+{
+    if (!g_auth) return 1;                 /* auth disabled => everyone allowed */
+    const char *c = strstr(req, "odosession=");
+    if (!c) return 0;
+    c += 11;
+    char tok[33]; int i = 0;
+    while (i < 32 && c[i] && c[i] != ';' && c[i] != '\r' && c[i] != '\n' && c[i] != ' ')
+        { tok[i] = c[i]; i++; }
+    tok[i] = 0;
+    for (int s = 0; s < NSESS; s++)
+        if (g_sessions[s][0] && strcmp(g_sessions[s], tok) == 0) return 1;
+    return 0;
+}
+
+static void serve_login(int fd, int err)
+{
+    char body[2048];
+    int n = snprintf(body, sizeof(body),
+      "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+      "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+      "<title>ODO MINER &mdash; Sign in</title></head>"
+      "<body style='margin:0;background:#100F0B;color:#F2EFE6;font-family:system-ui,Segoe UI,Roboto,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center'>"
+      "<form method='post' action='/login' style='background:#16140E;border:1px solid #2E2A1F;border-radius:14px;padding:28px 26px;width:300px'>"
+      "<div style='font-size:20px;font-weight:600;color:#F0B23C;margin-bottom:4px'>ODO MINER</div>"
+      "<div style='font-size:13px;color:#888;margin-bottom:20px'>Sign in to the dashboard</div>"
+      "%s"
+      "<input name='password' type='password' placeholder='Password' autofocus "
+      "style='width:100%%;box-sizing:border-box;background:#0C0B08;color:#F2EFE6;border:1px solid #2E2A1F;border-radius:9px;padding:11px 12px;font-size:14px;margin-bottom:16px'>"
+      "<button type='submit' style='width:100%%;background:#F0B23C;color:#100F0B;border:0;border-radius:9px;padding:11px;font-size:14px;font-weight:600;cursor:pointer'>Sign in</button>"
+      "</form></body></html>",
+      err ? "<div style='background:#3a1a17;color:#E07B6A;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:16px'>Incorrect password</div>" : "");
+    send_response(fd, "200 OK", "text/html", body, (size_t)n);
+}
+
+static void handle_login(int fd, const char *body)
+{
+    char pw[64] = "";
+    form_get(body, "password", pw, sizeof(pw));
+    if (g_password[0] && ct_eq(pw, g_password)) {
+        char tok[33]; gen_token(tok);
+        snprintf(g_sessions[g_sess_next], 33, "%s", tok);
+        g_sess_next = (g_sess_next + 1) % NSESS;
+        char hdr[256];
+        int n = snprintf(hdr, sizeof(hdr),
+            "HTTP/1.1 303 See Other\r\nLocation: /\r\n"
+            "Set-Cookie: odosession=%s; Path=/; HttpOnly; Max-Age=604800\r\n"
+            "Content-Length: 0\r\nConnection: close\r\n\r\n", tok);
+        if (write(fd, hdr, (size_t)n) < 0) return;
+    } else {
+        serve_login(fd, 1);
+    }
+}
+
+static void handle_logout(int fd, const char *req)
+{
+    /* invalidate the presented session token */
+    const char *c = strstr(req, "odosession=");
+    if (c) {
+        c += 11;
+        char tok[33]; int i = 0;
+        while (i < 32 && c[i] && c[i] != ';' && c[i] != '\r' && c[i] != ' ')
+            { tok[i] = c[i]; i++; }
+        tok[i] = 0;
+        for (int s = 0; s < NSESS; s++)
+            if (strcmp(g_sessions[s], tok) == 0) g_sessions[s][0] = 0;
+    }
+    char hdr[256];
+    int n = snprintf(hdr, sizeof(hdr),
+        "HTTP/1.1 303 See Other\r\nLocation: /\r\n"
+        "Set-Cookie: odosession=; Path=/; Max-Age=0\r\n"
+        "Content-Length: 0\r\nConnection: close\r\n\r\n");
+    if (write(fd, hdr, (size_t)n) < 0) return;
+}
+
 static void serve_file(int fd, const char *path, const char *ctype)
 {
     char buf[4096];
@@ -527,7 +654,7 @@ static void serve_controls(int fd)
 {
     int boost = (access(FAN_BOOST_PATH, F_OK) == 0);
     char body[48];
-    int n = snprintf(body, sizeof(body), "{\"fan_boost\":%d}", boost);
+    int n = snprintf(body, sizeof(body), "{\"fan_boost\":%d,\"auth\":%d}", boost, g_auth);
     send_response(fd, "200 OK", "application/json", body, (size_t)n);
 }
 
@@ -538,6 +665,8 @@ int main(int argc, char **argv)
 {
     int port = argc > 1 ? atoi(argv[1]) : 80;
     signal(SIGPIPE, SIG_IGN);
+    load_auth();   /* opt-in: PASSWORD= in /etc/odo-web.conf enables login */
+    fprintf(stderr, "odo-webd: auth %s\n", g_auth ? "ENABLED" : "disabled (open)");
 
     int srv = socket(AF_INET, SOCK_STREAM, 0);
     if (srv < 0) { perror("socket"); return 1; }
@@ -602,6 +731,18 @@ int main(int argc, char **argv)
                     have = n - (body - req);
                 }
             }
+        }
+
+        /* Auth gate (no-op when PASSWORD is unset). /login is always reachable;
+         * everything else requires a valid session cookie. */
+        if (strncmp(req, "GET /login", 10) == 0) {
+            serve_login(fd, 0); close(fd); continue;
+        } else if (strncmp(req, "POST /login", 11) == 0 && body) {
+            handle_login(fd, body); close(fd); continue;
+        } else if (strncmp(req, "POST /logout", 12) == 0) {
+            handle_logout(fd, req); close(fd); continue;
+        } else if (!request_authed(req)) {
+            serve_login(fd, 0); close(fd); continue;
         }
 
         if (strncmp(req, "GET / ", 6) == 0) {
