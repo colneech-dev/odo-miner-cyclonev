@@ -113,7 +113,11 @@ static int  g_sess_next = 0;
 
 static void load_auth(void)
 {
-    FILE *f = fopen(WEB_CONF_PATH, "r");
+    /* ODO_WEB_CONF overrides the path (used by the auth test harness so it can
+     * run unprivileged; production always uses /etc/odo-web.conf). */
+    const char *path = getenv("ODO_WEB_CONF");
+    if (!path || !*path) path = WEB_CONF_PATH;
+    FILE *f = fopen(path, "r");
     if (!f) return;
     char line[160];
     while (fgets(line, sizeof(line), f)) {

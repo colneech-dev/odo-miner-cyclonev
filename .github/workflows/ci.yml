@@ -20,5 +20,37 @@ jobs:
       - name: HPS unit tests (job/header/target math)
         run: make -C hps test_units
 
+      - name: Stratum parser fuzz — malformed pool input (ASan/UBSan)
+        run: make -C hps test_stratum_fuzz
+
       - name: Pipelined RTL regression — bit-exact found vs oracle
         run: cd hdl/tb && bash run_tb_pipe.sh
+
+      - name: Found-handoff async FIFO — burst / overflow / drain / irq
+        run: cd hdl/tb && bash run_tb_fifo.sh
+
+      - name: odo-webd auth — gate / bypass / session
+        run: cd sw/odo-webd && bash test_webd_auth.sh
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Shell scripts lint (warnings, not fatal)
+        run: |
+          shellcheck -S warning scripts/*.sh hdl/tb/*.sh sw/odo-webd/*.sh \
+            linux/overlay/usr/sbin/*.sh || true
+
+      - name: CRLF guard — scripts + rootfs overlay must be LF
+        run: |
+          bad=$(git ls-files --eol -- 'scripts/*.sh' 'hdl/tb/*.sh' \
+                  'linux/overlay/etc/init.d/*' 'linux/overlay/usr/sbin/*' \
+                | grep -E 'w/crlf' || true)
+          if [ -n "$bad" ]; then
+            echo "CRLF line endings found (must be LF):"; echo "$bad"; exit 1
+          fi
+          echo "All scripts are LF."
