@@ -43,7 +43,7 @@
 | Read/write | Full 32-bit only | No byteenable; sub-word access unsupported. |
 | `waitrequest` | Tied 0 | Single-cycle access; the pipelined core never stalls the bus. |
 | Reset | Active-low `reset_n` | Synchronous deassert, Avalon (55 MHz) clock domain. |
-| CDC | Internal | Header/target cross 55→156.25 MHz via a commit-toggle handshake; found nonces cross 156.25→55 MHz via a 1-deep 2-phase handshake. See the wrapper header comment. |
+| CDC | Internal | Header/target cross 55→156.25 MHz via a commit-toggle handshake; found nonces cross 156.25→55 MHz via a depth-8 dual-clock async FIFO (Gray-code pointers). See the wrapper header comment. |
 
 The HPS reaches the slave through the **HPS-to-FPGA Lightweight (LWH2F) bridge**;
 base `0xFF20_0000`, miner slave at offset **0x0000** (`PIPE_MINER_BASE_OFFSET = 0`),
@@ -84,7 +84,7 @@ Byte offsets relative to the slave base. Mirrors `hps/hps_regs_pipe.h` exactly.
 | 0x020–0x03C | `TARGET[0..7]` | W | 256-bit share target, little-endian words (word 0 = LSW). |
 | 0x040–0x088 | `HEADER[0..18]` | W | 19 words = header bytes 0..75. Bytes 76..79 are swept internally as the nonce — do **not** write a nonce. |
 | 0x08C | `COMMIT` | W | Any write snapshots HEADER+TARGET into the 156.25 MHz domain and arms the settle window (drains stale pre-commit pipeline results). |
-| 0x090 | `FNONCE` | R | Pop one found nonce. **Read-to-consume**: the read itself frees the 1-deep found slot. |
+| 0x090 | `FNONCE` | R | Pop one found nonce. **Read-to-consume**: the read advances the found FIFO's read pointer. |
 | 0x094 | `FSTATUS` | R | bit0 = a found nonce is available (`PIPE_FSTAT_VALID`). |
 
 > **Header is 19 words, not 20.** The pipelined core owns the nonce field, so the
@@ -113,8 +113,9 @@ continuously and latches any hash ≤ target.
    submit if it meets the share target.
 3. Repeat until `FSTATUS` reads empty.
 
-> The found slot is **1-deep**: a new find while a previous one is unconsumed is
-> dropped (documented in the wrapper; widen to an async FIFO before heavier soak).
+> Found nonces are buffered in a **depth-8 dual-clock async FIFO** (Gray-code
+> pointer CDC), so a burst of finds is held rather than dropped while the HPS
+> drains them. Hardware-verified (finds delivered + pool-accepted, 0 rejected).
 > At MH/s with sparse target hits this is low-risk but tracked.
 
 ---
