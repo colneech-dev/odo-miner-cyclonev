@@ -121,12 +121,13 @@ static size_t hex_to_bytes(const char *hex, uint8_t *out, size_t max_out)
 }
 
 /* Parse a hex string to u32 (M5). Returns 0 on success and writes *out; -1 if
- * the string is empty or contains any non-hex char — so a malformed
- * version/nbits/ntime in a notify rejects the job instead of silently mining a
- * zeroed field. */
+ * the string is empty, contains any non-hex char, or has more than 8 hex digits
+ * (which would overflow a u32) — so a malformed version/nbits/ntime in a notify
+ * rejects the job instead of silently mining a zeroed or truncated field. */
 static int parse_hex_u32(const char *hex, uint32_t *out)
 {
     uint32_t value = 0;
+    int ndigits = 0;
     if (!hex || *hex == '\0')
         return -1;                         /* empty = malformed */
     while (*hex != '\0') {
@@ -140,6 +141,8 @@ static int parse_hex_u32(const char *hex, uint32_t *out)
             nibble = (uint32_t)(10 + c - 'A');
         else
             return -1;                     /* non-hex char = malformed */
+        if (++ndigits > 8)
+            return -1;                     /* > 32 bits = overflow/malformed */
         value = (value << 4) | nibble;
     }
     *out = value;
@@ -635,7 +638,8 @@ int stratum_poll(stratum_ctx_t *ctx, int timeout_ms)
          * 4 KB recv always fits once rxlen is reset, so parsing continues below. */
         fprintf(stderr, "[stratum] oversized line >%zuB — dropping partial, resyncing\n",
                 sizeof(ctx->rxbuf));
-        ctx->rxlen = 0;
+        ctx->rxlen  = 0;
+        ctx->resync = 1;   /* discard the dropped line's tail up to the next \n */
     }
 
     memcpy(ctx->rxbuf + ctx->rxlen, buffer, (size_t)n);
@@ -647,6 +651,13 @@ int stratum_poll(stratum_ctx_t *ctx, int timeout_ms)
         if (ctx->rxbuf[i] == '\n') {
             ctx->rxbuf[i] = '\0';
             const char *line = line_start;
+            if (ctx->resync) {
+                /* This newline ends the tail of a dropped oversized line —
+                 * discard the fragment and resume parsing clean lines. */
+                ctx->resync = 0;
+                line_start = ctx->rxbuf + i + 1;
+                continue;
+            }
             if (line[0] != '\0') {
                 const char *method = find_json_key(line, "method");
                 if (method && *method == '"' && strncmp(method, "\"mining.notify\"", 15) == 0) {
