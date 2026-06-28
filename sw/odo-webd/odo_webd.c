@@ -18,15 +18,17 @@
  *
  * Plain single-threaded HTTP/1.1, no dependencies.
  *
- * SECURITY MODEL: trusted LAN, NO authentication (accepted by design,
- * 2026-06-22). The mutating endpoints — POST /action (incl. reboot),
- * /config, /wifi — and the expensive GET /wifiscan are reachable by any
- * client that can reach this port. The control is network isolation: run
- * this only on a trusted home/lab LAN and NEVER expose the port to the
- * internet (no port-forward, no DMZ). The slow-loris / oversized-request /
- * scan-hammer hardening below bounds resource abuse, but does NOT add
- * authentication. To live on an untrusted network, front it with an
- * authenticating reverse proxy or add a shared-secret token here.
+ * SECURITY MODEL: trusted LAN by default, with OPT-IN authentication. Set
+ * PASSWORD= in /etc/odo-web.conf to gate every route behind a styled login +
+ * 128-bit session cookie (HttpOnly, SameSite=Lax); leave it unset for the open
+ * trusted-LAN default. When open, the mutating endpoints — POST /action (incl.
+ * reboot), /config, /wifi — and the expensive GET /wifiscan are reachable by any
+ * client that can reach this port, so the control is network isolation: run this
+ * only on a trusted home/lab LAN and NEVER expose the port to the internet (no
+ * port-forward, no DMZ). The slow-loris / oversized-request / scan-hammer
+ * hardening below bounds resource abuse. NOTE: even with auth enabled there is
+ * no CSRF token on the form-POST endpoints (SameSite=Lax is the mitigation); to
+ * live on an untrusted network, front it with an authenticating reverse proxy.
  *
  * Build: make           (cross-compile with CC=...-gcc)
  */
@@ -38,6 +40,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <strings.h>   /* strncasecmp */
 #include <unistd.h>
 #include <errno.h>
 #include <signal.h>
@@ -127,36 +130,82 @@ static void load_auth(void)
     g_auth = (g_password[0] != 0);
 }
 
-/* constant-time string compare (avoid password timing leaks) */
+/* Fixed-time compare over the secret length, independent of the attacker's
+ * input length: pad the guess to lb with a sentinel so timing depends only on
+ * the secret, then fold in the length difference. */
 static int ct_eq(const char *a, const char *b)
 {
     size_t la = strlen(a), lb = strlen(b), i;
     unsigned char d = (unsigned char)(la ^ lb);
-    for (i = 0; i < la; i++) d |= (unsigned char)(a[i] ^ b[i % (lb ? lb : 1)]);
+    for (i = 0; i < lb; i++) {
+        unsigned char ca = (i < la) ? (unsigned char)a[i] : 0;
+        d |= (unsigned char)(ca ^ (unsigned char)b[i]);
+    }
     return d == 0 && la == lb;
 }
 
-static void gen_token(char *out33)
+/* Generate a 128-bit session token as 32 hex chars. Returns 0 on success, -1 if
+ * the CSPRNG is unavailable — callers MUST fail closed rather than issue a
+ * guessable token (no rand() fallback). */
+static int gen_token(char *out33)
 {
     unsigned char b[16];
     FILE *u = fopen("/dev/urandom", "r");
-    if (u && fread(b, 1, sizeof(b), u) == sizeof(b)) { /* ok */ }
-    else { for (int i = 0; i < 16; i++) b[i] = (unsigned char)(rand() ^ (i * 31)); }
+    int ok = (u && fread(b, 1, sizeof(b), u) == sizeof(b));
     if (u) fclose(u);
+    if (!ok) return -1;
     for (int i = 0; i < 16; i++) snprintf(out33 + i * 2, 3, "%02x", b[i]);
     out33[32] = 0;
+    return 0;
+}
+
+/* case-insensitive substring (no _GNU_SOURCE strcasestr dependency) */
+static const char *ci_strstr(const char *hay, const char *needle)
+{
+    size_t nl = strlen(needle);
+    if (!nl) return hay;
+    for (; *hay; hay++)
+        if (strncasecmp(hay, needle, nl) == 0) return hay;
+    return NULL;
+}
+
+/* Extract the odosession token from the *Cookie header only* — never the
+ * request line or body (a token presented as a POST field must NOT authenticate).
+ * Returns 1 with a non-empty NUL-terminated tok33, else 0. */
+static int cookie_token(const char *req, char *tok33)
+{
+    tok33[0] = 0;
+    const char *p = req;
+    while (p && *p) {
+        const char *nl = strchr(p, '\n');
+        size_t linelen = nl ? (size_t)(nl - p) : strlen(p);
+        if (linelen == 0 || (linelen == 1 && p[0] == '\r'))
+            break;                           /* blank line: end of headers */
+        if (strncasecmp(p, "Cookie:", 7) == 0) {
+            const char *end = p + linelen;
+            for (const char *c = p + 7; c < end; c++) {
+                if ((size_t)(end - c) >= 11 && strncmp(c, "odosession=", 11) == 0) {
+                    c += 11;
+                    int i = 0;
+                    while (c < end && i < 32 &&
+                           *c != ';' && *c != ' ' && *c != '\t' && *c != '\r')
+                        tok33[i++] = *c++;
+                    tok33[i] = 0;
+                    return tok33[0] != 0;     /* reject empty token */
+                }
+            }
+        }
+        if (!nl) break;
+        p = nl + 1;
+    }
+    return 0;
 }
 
 static int request_authed(const char *req)
 {
     if (!g_auth) return 1;                 /* auth disabled => everyone allowed */
-    const char *c = strstr(req, "odosession=");
-    if (!c) return 0;
-    c += 11;
-    char tok[33]; int i = 0;
-    while (i < 32 && c[i] && c[i] != ';' && c[i] != '\r' && c[i] != '\n' && c[i] != ' ')
-        { tok[i] = c[i]; i++; }
-    tok[i] = 0;
+    char tok[33];
+    if (!cookie_token(req, tok)) return 0; /* no Cookie header / empty token */
     for (int s = 0; s < NSESS; s++)
         if (g_sessions[s][0] && strcmp(g_sessions[s], tok) == 0) return 1;
     return 0;
@@ -187,13 +236,18 @@ static void handle_login(int fd, const char *body)
     char pw[64] = "";
     form_get(body, "password", pw, sizeof(pw));
     if (g_password[0] && ct_eq(pw, g_password)) {
-        char tok[33]; gen_token(tok);
+        char tok[33];
+        if (gen_token(tok) != 0) {           /* CSPRNG unavailable — fail closed */
+            send_response(fd, "503 Service Unavailable", "text/plain",
+                          "auth temporarily unavailable\n", 29);
+            return;
+        }
         snprintf(g_sessions[g_sess_next], 33, "%s", tok);
         g_sess_next = (g_sess_next + 1) % NSESS;
         char hdr[256];
         int n = snprintf(hdr, sizeof(hdr),
             "HTTP/1.1 303 See Other\r\nLocation: /\r\n"
-            "Set-Cookie: odosession=%s; Path=/; HttpOnly; Max-Age=604800\r\n"
+            "Set-Cookie: odosession=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800\r\n"
             "Content-Length: 0\r\nConnection: close\r\n\r\n", tok);
         if (write(fd, hdr, (size_t)n) < 0) return;
     } else {
@@ -203,21 +257,18 @@ static void handle_login(int fd, const char *body)
 
 static void handle_logout(int fd, const char *req)
 {
-    /* invalidate the presented session token */
-    const char *c = strstr(req, "odosession=");
-    if (c) {
-        c += 11;
-        char tok[33]; int i = 0;
-        while (i < 32 && c[i] && c[i] != ';' && c[i] != '\r' && c[i] != ' ')
-            { tok[i] = c[i]; i++; }
-        tok[i] = 0;
+    /* Invalidate only the requester's own cookie token (gated behind auth in the
+     * router, so this can't clear a third party's session). */
+    char tok[33];
+    if (cookie_token(req, tok)) {
         for (int s = 0; s < NSESS; s++)
-            if (strcmp(g_sessions[s], tok) == 0) g_sessions[s][0] = 0;
+            if (g_sessions[s][0] && strcmp(g_sessions[s], tok) == 0)
+                g_sessions[s][0] = 0;
     }
     char hdr[256];
     int n = snprintf(hdr, sizeof(hdr),
         "HTTP/1.1 303 See Other\r\nLocation: /\r\n"
-        "Set-Cookie: odosession=; Path=/; Max-Age=0\r\n"
+        "Set-Cookie: odosession=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0\r\n"
         "Content-Length: 0\r\nConnection: close\r\n\r\n");
     if (write(fd, hdr, (size_t)n) < 0) return;
 }
@@ -710,7 +761,7 @@ int main(int argc, char **argv)
         if (!body) { body = strstr(req, "\n\n"); body_skip = 2; }
         if (body) {
             body += body_skip;
-            const char *cl = strstr(req, "Content-Length:");
+            const char *cl = ci_strstr(req, "Content-Length:");
             if (cl) {
                 long want = strtol(cl + 15, NULL, 10);
                 /* Reject bodies that can't fit the fixed buffer instead of
@@ -740,6 +791,7 @@ int main(int argc, char **argv)
         } else if (strncmp(req, "POST /login", 11) == 0 && body) {
             handle_login(fd, body); close(fd); continue;
         } else if (strncmp(req, "POST /logout", 12) == 0) {
+            if (!request_authed(req)) { serve_login(fd, 0); close(fd); continue; }
             handle_logout(fd, req); close(fd); continue;
         } else if (!request_authed(req)) {
             serve_login(fd, 0); close(fd); continue;

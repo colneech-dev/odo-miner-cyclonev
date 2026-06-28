@@ -662,8 +662,27 @@ static int wifi_tap(int sx, int sy, const kbkey_t *k, int nk,
     return 0;
 }
 
-static void wifi_save(const char *ssid, const char *psk)
+/* Drop anything that would break the quoted wpa_supplicant string — control
+ * chars, quote, backslash. A scanned SSID is attacker-controlled (a hostile AP
+ * can advertise a quote/newline), so without this a crafted SSID could inject
+ * extra config lines. */
+static void wpa_sanitize(const char *in, char *out, size_t out_sz)
 {
+    size_t o = 0;
+    for (size_t i = 0; in[i] && o + 1 < out_sz; i++) {
+        unsigned char c = (unsigned char)in[i];
+        if (c >= 0x20 && c <= 0x7E && c != '"' && c != '\\')
+            out[o++] = (char)c;
+    }
+    out[o] = 0;
+}
+
+static void wifi_save(const char *ssid_in, const char *psk_in)
+{
+    char ssid[64], psk[128];
+    wpa_sanitize(ssid_in, ssid, sizeof(ssid));
+    wpa_sanitize(psk_in,  psk,  sizeof(psk));
+    if (!ssid[0]) return;                 /* refuse an empty/garbage SSID */
     FILE *f = fopen(WPA_CONF, "w");
     if (!f) return;
     /* ctrl_interface in /tmp (not /var/run, which doesn't exist here) */
