@@ -32,6 +32,9 @@ jobs:
       - name: odo-webd auth — gate / bypass / session
         run: cd sw/odo-webd && bash test_webd_auth.sh
 
+      - name: Framebuffer clipping — gfx bounds (ASan/UBSan)
+        run: make -C sw/odo-ui test_gfx_bounds
+
   lint:
     runs-on: ubuntu-latest
     steps:
