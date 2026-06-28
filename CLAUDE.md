@@ -185,6 +185,7 @@ Non-performance backlog:
    0 rejected). ~~`odo-webd` auth~~ — **DONE**: opt-in styled login (set
    `PASSWORD=` in `/etc/odo-web.conf`), off by default. Web dashboard reached
    touch-UI parity (fan boost / reset stats / pool-failover indicator).
-4. Remaining review item: stratum `parse_hex_u32` / oversized-line hardening
-   (Bucket A M5/M1). Throughput is power-bound at T=6 (T=4 ~37 MH/s browns the
-   core rail — deferred, needs an external 1.1 V supply / regulator change).
+4. ~~stratum `parse_hex_u32` / oversized-line hardening~~ — **DONE 2026-06-28**
+   (M5: reject >8-digit hex overflow; M1: drop the oversized-line tail to the
+   next newline). Throughput is power-bound at T=6 (T=4 ~37 MH/s browns the core
+   rail — deferred, needs an external 1.1 V supply / regulator change).
