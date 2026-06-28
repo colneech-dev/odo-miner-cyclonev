@@ -9,3 +9,9 @@
 Makefile text eol=lf
 makefile text eol=lf
 *.mk     text eol=lf
+
+# Extension-less BusyBox init scripts + sbin helpers MUST stay LF — a CRLF
+# checkout (Windows clone w/ autocrlf) makes BusyBox fail them with
+# "bad interpreter: ^M" and the board boots to a dead miner/wifi/ssh.
+linux/overlay/etc/init.d/* text eol=lf
+linux/overlay/usr/sbin/*   text eol=lf

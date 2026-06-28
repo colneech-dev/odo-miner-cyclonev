@@ -9,7 +9,11 @@
 # The FPGA bitstream is built separately (Quartus is a Windows install):
 #   run `bash scripts/build-fpga.sh` from Git Bash on Windows first; the
 #   SD card step picks up hdl/quartus/output_files/odo_miner.rbf when it
-#   exists. Epoch changes never require an FPGA rebuild (runtime tables).
+#   exists. NOTE: the deployed pipelined core bakes the OdoCrypt epoch into the
+#   FPGA LUTs, so an epoch change DOES require a per-epoch bitstream rebuild
+#   (off-board precompile + reboot-reconfigure — see epoch-update.sh /
+#   epoch_build_deploy.ps1). The old "runtime tables, no rebuild" model applied
+#   only to the retired FSM core.
 #
 # Usage (on Linux/WSL with Buildroot installed):
 #   BUILDROOT_DIR=~/buildroot-2025.11.3 ./scripts/build-all.sh
@@ -113,11 +117,15 @@ done
 if [ "$all_built" = false ]; then
     echo
     echo "Note: Some binaries weren't built. This is OK if they're optional."
-    echo "The required ones (odod, odo-miner) should be present."
-    read -p "Continue? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
+    echo "The required ones (odo-miner-pipe / odo-miner-pipe-uio) should be present."
+    if [ -t 0 ]; then
+        read -p "Continue? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    else
+        echo "(non-interactive: continuing without prompt)"
     fi
 fi
 

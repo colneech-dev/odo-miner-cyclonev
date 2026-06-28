@@ -175,7 +175,7 @@ echo
 # parallelism comes from BR2_JLEVEL in the defconfig.
 start_time=$(date +%s)
 make 2>&1 | tee buildroot-build.log
-build_rc=$?
+build_rc=${PIPESTATUS[0]}   # exit of make, not tee (the pipeline's left side)
 end_time=$(date +%s)
 build_time=$((end_time - start_time))
 
@@ -241,7 +241,8 @@ export CXX="$CROSS_GXX"
 # The control-plane C code here isn't NEON/thumb-sensitive (the hot path is
 # the FPGA), so skipping arch-specific tuning costs nothing measurable.
 
-if make fpga_smoke_test odo-miner-pipe odo-miner-pipe-uio 2>&1 | tee hps-build-arm.log; then
+make fpga_smoke_test odo-miner-pipe odo-miner-pipe-uio 2>&1 | tee hps-build-arm.log
+if [ "${PIPESTATUS[0]}" -eq 0 ]; then   # exit of make, not tee
     log_info "  ✓ HPS software built for ARM"
     # Touch UI + web dashboard (sw/) with the same toolchain
     for app in odo-ui odo-webd; do

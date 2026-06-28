@@ -123,7 +123,7 @@ check: test_odo test_odo_upstream
 	@bash -c "diff <(./test_odo 2>/dev/null | grep '^key=') \
 	               <(./test_odo_upstream 2>/dev/null | grep '^key=') \
 	           && echo 'MATCH: our implementation agrees with upstream' \
-	           || echo 'MISMATCH: see diff above'"
+	           || { echo 'MISMATCH: see diff above'; exit 1; }"
 
 # -----------------------------------------------------------------------
 # Compilation rules

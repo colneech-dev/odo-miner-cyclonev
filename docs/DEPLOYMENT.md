@@ -2,6 +2,37 @@
 
 This guide covers post-build configuration, security hardening, and runtime setup for the odo-miner Cyclone V system.
 
+> ## ⚠️ Read first — what the deployed image actually is
+>
+> Much of this document predates the shipped rootfs and describes a
+> **systemd / supervisor / `odod`** model that **does not match the board**.
+> Where a section below uses `systemctl`, `supervisorctl`, or a daemon called
+> `odod` at `/usr/local/bin`, treat it as **aspirational, not the deployed
+> reality**. The actual system:
+>
+> - **Init is BusyBox**, not systemd. Services are `/etc/init.d/Sxx` scripts
+>   (`S90odod`, `S45wifi`, `S50sshd`, `S95odoui`, `S96odowebd`, `S91epochcron`).
+>   `systemctl enable/start …` are no-ops on this image.
+> - **The miner daemon is `/usr/bin/odo-miner-pipe-uio`** (UIO/IRQ backend; the
+>   `-pipe` non-UIO binary is the fallback), launched by `S90odod`. There is no
+>   `odod` binary. Runtime config is **`/etc/odod.conf`** (sourced as plain
+>   `KEY=value`), not `/etc/supervisor` or a systemd unit.
+> - **wpa_supplicant `ctrl_interface` is `/tmp/wpa_supplicant`**, not
+>   `/var/run/wpa_supplicant` — `/var/run` does not exist on this rootfs
+>   (see `S45wifi`). The same `/var/run` path is wrong wherever it appears below.
+> - **FPGA epoch updates are reboot-reconfigure, not runtime.** The
+>   `/sys/class/fpga_manager/.../firmware` runtime-reload recipe **does not work**
+>   on this kernel (no `fpga_bridge` sysfs). The real mechanism stages the new
+>   `.rbf` on the FAT boot partition and reboots — see
+>   `linux/overlay/usr/sbin/epoch-update.sh` and `docs/register-map.md` §5.
+> - **Web dashboard auth** (`odo-webd`) is opt-in: set `PASSWORD=` in
+>   `/etc/odo-web.conf`; default is open on the trusted LAN.
+> - Found-nonce handoff is a **depth-8 async FIFO + UIO IRQ** (`backend: "uio"`
+>   in `status.json`).
+>
+> The authoritative status/plan doc is `docs/TODO.md`; the register contract is
+> `docs/register-map.md` (current). Use those two over any conflict here.
+
 ---
 
 ## Serial Console Access
