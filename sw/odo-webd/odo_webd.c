@@ -51,6 +51,9 @@
 #include <time.h>
 
 #define STATUS_PATH "/run/odod/status.json"
+/* Control files the miner daemon polls (same as the touch UI uses). */
+#define FAN_BOOST_PATH   "/run/odod/fan_boost"
+#define RESET_STATS_PATH "/run/odod/reset_stats"
 #define CONF_PATH   "/etc/odod.conf"
 #define WPA_CONF    "/etc/wpa_supplicant.conf"
 #define CUSTOM_PAGE "/etc/odo-web/index.html"   /* overrides the built-in page */
@@ -505,9 +508,27 @@ static void handle_action(int fd, const char *body)
         send_redirect(fd, "/");
         sync();
         if (system("(sleep 1; reboot) >/dev/null 2>&1 &") != 0) { }
+    } else if (strcmp(action, "fan_boost") == 0) {
+        FILE *f = fopen(FAN_BOOST_PATH, "w"); if (f) fclose(f);
+        send_redirect(fd, "/");
+    } else if (strcmp(action, "fan_auto") == 0) {
+        unlink(FAN_BOOST_PATH);
+        send_redirect(fd, "/");
+    } else if (strcmp(action, "reset_stats") == 0) {
+        FILE *f = fopen(RESET_STATS_PATH, "w"); if (f) fclose(f);
+        send_redirect(fd, "/");
     } else {
         send_response(fd, "400 Bad Request", "text/plain", "unknown action\n", 15);
     }
+}
+
+/* Current control state (fan boost) for the dashboard to reflect. */
+static void serve_controls(int fd)
+{
+    int boost = (access(FAN_BOOST_PATH, F_OK) == 0);
+    char body[48];
+    int n = snprintf(body, sizeof(body), "{\"fan_boost\":%d}", boost);
+    send_response(fd, "200 OK", "application/json", body, (size_t)n);
 }
 
 /* ------------------------------------------------------------------ */
@@ -610,6 +631,8 @@ int main(int argc, char **argv)
             serve_file(fd, STATUS_PATH, "application/json");
         } else if (strncmp(req, "GET /sysinfo.json", 17) == 0) {
             serve_sysinfo(fd);
+        } else if (strncmp(req, "GET /controls.json", 18) == 0) {
+            serve_controls(fd);
         } else if (strncmp(req, "GET /wifi.json", 14) == 0) {
             serve_wifi_status(fd);
         } else if (strncmp(req, "GET /wifiscan.json", 18) == 0) {
