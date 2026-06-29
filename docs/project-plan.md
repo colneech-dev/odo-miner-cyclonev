@@ -262,11 +262,16 @@ Can this miner reasonably operate as a **static bitstream + changing job data** 
 ---
 
 ## Current status
+
+> **⚠️ NOTE (2026-06-29): This document was the early-phase execution plan.**
+> The project is **fully deployed and mining on mainnet**. For current state see
+> `docs/TODO.md` and `CLAUDE.md`. The snapshot below is from early bring-up
+> (2026-06-02) and is kept for historical reference only.
+
 - HPS software now builds cleanly in WSL; `odod` is produced successfully.
 - `hps/fpga_smoke_test` compiles and runs, and `/dev/mem` access succeeds on the target.
-- The smoke test currently reads `0xFFFFFFFF` for all expected registers at `0xFF200000`.
-- This means the HPS MMIO region can be reached, but the FPGA peripheral is not responding at the expected LWH2F address or the bitstream/interface is not loaded.
-- Next step: verify the LWH2F base address and FPGA configuration state before continuing software/RAM integration.
+- ~~The smoke test currently reads `0xFFFFFFFF` for all expected registers~~ — **RESOLVED**:
+  board mines mainnet at ~26 MH/s (THROUGHPUT=6 @ 156.25 MHz, UIO backend, 2026-06-25+).
 
 ### Related docs
 - continue tracking task progress in `docs/TODO.md`

@@ -2,7 +2,12 @@
 
 **Date:** 2026-06-02  
 **Reviewer:** Claude  
-**Status:** ✅ READY FOR HARDWARE TESTING
+**Status:** ✅ READY FOR HARDWARE TESTING (original verdict — hardware testing is long since complete)
+
+> **⚠️ NOTE (2026-06-29):** This is the pre-hardware-bringup code review (early
+> June 2026). The code has since gone through a full independent security/
+> correctness sweep (`fix/review-hardening`, merged 2026-06-29). See
+> `docs/review-action-plan.md` for the findings and disposition of all items.
 
 ---
 
