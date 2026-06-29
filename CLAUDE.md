@@ -42,7 +42,7 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 - `scripts/` — build and deployment helpers
 - `services/` — init/service unit files
 
-## Current status (2026-06-22)
+## Current status (2026-06-29)
 
 - **DEPLOYED: pipelined core** (`feat/pipelined-miner`, merged to `main`). The
   upstream pipelined `odo_encrypt` (epoch baked into LUTs, free-running nonce
@@ -172,6 +172,23 @@ interrupt-driven register access. WS1 (found-nonce IRQ RTL), WS2 (kernel UIO
 all **DONE and deployed**. `/dev/uio0` present; `backend: "uio"` confirmed in
 `status.json`; daemon runs as `odo-miner-pipe-uio` from `/usr/bin/`.
 
+Merged to `main` (2026-06-29): **`fix/review-hardening`** — full independent
+code-review sweep. Key fixes: RTL async-FIFO `wfull` off-by-one (depth-7 →
+depth-8 via `wgray` not `wgray_nxt`); strobe-based FIFO producer (value-compare
+→ found-strobe, plus reset sync into miner domain); overflow flag (STATUS bit3);
+stratum NaN/overflow/EN1-overlong/EN2-oversized hardening + resync counter;
+daemon fork-in-thread fixed (`sync()+reboot()` replaces `system("reboot")`),
+Y2038 `%lld`/`(long long)` for time fields, barrier before Avalon COMMIT,
+thermal read-fail fan-full fallback; `odo-webd` cookie-header anchoring (C1
+bypass fixed), fail-closed token gen, `SameSite=Lax`, `ci_strstr` for
+case-insensitive header scan, `ODO_WEB_CONF` env override for tests; wpa SSID
+sanitize; BusyBox init script EOL (`eol=lf` in `.gitattributes`); build scripts
+`PIPESTATUS[0]` fix; DEPLOYMENT.md banner correcting stale info. New tests:
+`test_stratum_fuzz` (ASan/UBSan), `test_webd_auth.sh` (10 assertions),
+`test_gfx_bounds` (ASan/UBSan), `tb_pipe_fifo.v`/`run_tb_fifo.sh` (FIFO burst/
+overflow/drain/irq); CI lint job (shellcheck + CRLF `i/crlf` guard). Bitstream
+refit: **22,160/41,910 ALM (53%), timing met**, deployed to board.
+
 Non-performance backlog:
 1. ~~Fan/thermal~~ — done + **hardware-verified 2026-06-22** (PWM fan, DS18B20,
    tach, 50/45 °C hysteresis; see `docs/FAN_SENSOR_WIRING.md`).
@@ -187,5 +204,6 @@ Non-performance backlog:
    touch-UI parity (fan boost / reset stats / pool-failover indicator).
 4. ~~stratum `parse_hex_u32` / oversized-line hardening~~ — **DONE 2026-06-28**
    (M5: reject >8-digit hex overflow; M1: drop the oversized-line tail to the
-   next newline). Throughput is power-bound at T=6 (T=4 ~37 MH/s browns the core
-   rail — deferred, needs an external 1.1 V supply / regulator change).
+   next newline). ~~Full review hardening~~ — **DONE 2026-06-29** (see above).
+   Throughput is power-bound at T=6 (T=4 ~37 MH/s browns the core rail —
+   deferred, needs an external 1.1 V supply / regulator change).
