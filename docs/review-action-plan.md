@@ -1,9 +1,11 @@
 # Review Action Plan (2026-06-22)
 
-> **Status as of 2026-06-26:** Buckets A (stratum hardening), B (docs
-> reconciliation), D (UIO — WS1–WS4 + WS3b), and E (fan/thermal + reset
-> button) have all **shipped to `main`**. Bucket C (async-FIFO found handoff,
-> `odo-webd` auth) remains deferred per accepted-risk decisions below.
+> **Status as of 2026-06-29 — ALL BUCKETS DONE, merged to `main`.**
+> Buckets A (stratum hardening), B (docs reconciliation), C (webd/FIFO/RTL
+> hardening + full test suite P0-P2), D (UIO — WS1–WS4 + WS3b), and E
+> (fan/thermal + reset button) all **shipped in `fix/review-hardening`** on
+> 2026-06-29. Bitstream refit: 22,160/41,910 ALM (53%), timing met, deployed
+> to board and hardware-verified (shares found, pool-accepted, 0 rejected).
 
 Consolidated next-steps plan from a three-pass code + documentation review:
 1. **Docs + RTL/register layer** (inline pass)

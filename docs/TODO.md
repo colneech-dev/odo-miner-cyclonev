@@ -1,6 +1,6 @@
 # Project TODO — odo-miner-cyclonev
 
-**Last updated:** 2026-06-26
+**Last updated:** 2026-06-29
 **Owner:** colneech-dev / Claude
 **Device:** `5CSXFC6C6U23I7` — Cyclone V SX, 41,910 ALMs, 553 M10K, QMTECH KFB
 dual-SDRAM board (DE10-Nano-compatible ball-out, MiSTer-style).
@@ -43,6 +43,21 @@ with zero manual intervention, deploys go over SSH.
    + PWM fan (2026-06-22), reset-button polling driver (2026-06-24). UIO
    non-root + IRQ daemon (`odo-miner-pipe-uio`) — **DONE 2026-06-25**. See
    `docs/FAN_SENSOR_WIRING.md` and `docs/uio-miner-io-scope.md`.
+5. ✅ **Full security/correctness review hardening** (`fix/review-hardening`,
+   merged 2026-06-29). RTL: strobe-based FIFO producer; `wfull` off-by-one
+   fixed (depth-8 not 7); reset sync into miner_clk; overflow flag
+   (STATUS bit3). Stratum: NaN/overflow diff rejected; EN1 overlong + EN2
+   size guards; ≥32 branch cap; `resync` counter (not flag). Daemon:
+   fork-in-thread fixed (`sync()+reboot()`); Y2038 `%lld`; Avalon COMMIT
+   barrier; thermal read-fail fan-full fallback. Webd: cookie-header
+   anchoring (C1 bypass closed); fail-closed token gen; SameSite=Lax;
+   `ci_strstr` case-insensitive header scan; `ODO_WEB_CONF` env override.
+   Ops: `.gitattributes` `eol=lf` for BusyBox init scripts; `PIPESTATUS[0]`
+   in build scripts; DEPLOYMENT.md banner. Test suite: `test_stratum_fuzz`
+   (ASan/UBSan), `test_webd_auth.sh` (10 assertions), `test_gfx_bounds`
+   (ASan/UBSan), `tb_pipe_fifo.v`/`run_tb_fifo.sh` (FIFO burst/overflow/
+   drain/irq). CI: lint job (shellcheck + `i/crlf` CRLF guard).
+   Bitstream: 22,160/41,910 ALM (53%), timing met. Deployed and verified.
 
 ---
 
