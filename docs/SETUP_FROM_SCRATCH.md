@@ -94,23 +94,57 @@ If all four pass, every tool is correctly installed.
 
 ## 6. Build (three commands, in order)
 
+Commands 1 and 2 are independent and can run in parallel in separate terminals.
+Command 3 requires both to have finished first.
+
 ```bash
 # 1. FPGA bitstream — Git Bash on WINDOWS (~30-60 min)
+#    Runs odo_gen (epoch RTL), testbench gate, qsys-generate, Quartus compile.
 bash scripts/build-fpga.sh
 #    -> hdl/quartus/output_files/odo_miner.rbf
 
-# 2. Linux image — WSL (~60-90 min first time; prompts about full clean,
-#    auto-continues incremental after 30 s)
+# 2. Linux image — WSL (~60-90 min first time, faster on incremental)
+#    Rebuilds kernel + DTB + rootfs; cross-compiles HPS daemon binaries.
 BUILDROOT_DIR=~/buildroot-2025.11.3 bash scripts/build-buildroot.sh
 
-# 3. SD card image — WSL (needs sudo for loop devices)
+# 3. SD card image — WSL (needs sudo for loop devices; run after 1 and 2)
 BUILDROOT_DIR=~/buildroot-2025.11.3 bash scripts/build-sdcard.sh
-#    -> output/odo-miner-cyclonev-<date>.img
+#    -> sdcard-output/odo-miner-cyclonev-<date>.img
 ```
 
-Flash the image: Rufus / balenaEtcher on Windows, or in WSL
-`sudo dd if=output/odo-miner-....img of=/dev/sdX bs=4M status=progress`
-(double-check the device letter!).
+## 6b. Flash the SD card
+
+**Option A — Rufus (Windows GUI, easiest):**
+1. Download Rufus from rufus.ie
+2. Insert SD card; select it in Rufus
+3. Set Image option to **DD Image**
+4. Browse to `sdcard-output/odo-miner-cyclonev-<date>.img`
+5. Click START → write
+
+**Option B — balenaEtcher (Windows GUI):**
+Works identically; supports sparse images. Available at etcher.balena.io.
+
+**Option C — `dd` in WSL (command line):**
+
+The SD card reader must be passed through to WSL via `usbipd`:
+
+```powershell
+# In PowerShell (admin) — find and attach the card reader
+usbipd list
+usbipd bind --busid <X-Y>      # only needed once per device
+usbipd attach --wsl --busid <X-Y>
+```
+
+```bash
+# In WSL — confirm the device appeared, then flash
+lsblk                          # find the SD card — typically /dev/sdX
+# DOUBLE-CHECK: dd destroys the target device with no undo
+sudo dd if=sdcard-output/odo-miner-cyclonev-*.img \
+        of=/dev/sdX bs=4M status=progress conv=sparse
+sync
+```
+
+After flashing, eject the card and insert it into the board's microSD slot.
 
 ## 7. Wire the display
 
@@ -145,7 +179,7 @@ the module.
 
 ## 10. Troubleshooting entry points
 
-- Build details: [BUILD_QUARTUS.md](BUILD_QUARTUS.md), [BUILD_LINUX.md](BUILD_LINUX.md), [BUILD_QUICKSTART.md](../BUILD_QUICKSTART.md)
+- Build details: [BUILD_QUARTUS.md](BUILD_QUARTUS.md), [BUILD_LINUX.md](BUILD_LINUX.md)
 - Board facts and headers: [BOARD_REFERENCE.md](BOARD_REFERENCE.md)
 - Register interface: [register-map.md](register-map.md)
 - Current status / known soft spots: [TODO.md](TODO.md)

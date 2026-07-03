@@ -1,549 +1,277 @@
 # Deployment & Runtime Configuration
 
-This guide covers post-build configuration, security hardening, and runtime setup for the odo-miner Cyclone V system.
+Post-build configuration, pool setup, runtime management, and troubleshooting for the
+odo-miner Cyclone V board.
 
-> ## ⚠️ Read first — what the deployed image actually is
->
-> Much of this document predates the shipped rootfs and describes a
-> **systemd / supervisor / `odod`** model that **does not match the board**.
-> Where a section below uses `systemctl`, `supervisorctl`, or a daemon called
-> `odod` at `/usr/local/bin`, treat it as **aspirational, not the deployed
-> reality**. The actual system:
->
-> - **Init is BusyBox**, not systemd. Services are `/etc/init.d/Sxx` scripts
->   (`S90odod`, `S45wifi`, `S50sshd`, `S95odoui`, `S96odowebd`, `S91epochcron`).
->   `systemctl enable/start …` are no-ops on this image.
-> - **The miner daemon is `/usr/bin/odo-miner-pipe-uio`** (UIO/IRQ backend; the
->   `-pipe` non-UIO binary is the fallback), launched by `S90odod`. There is no
->   `odod` binary. Runtime config is **`/etc/odod.conf`** (sourced as plain
->   `KEY=value`), not `/etc/supervisor` or a systemd unit.
-> - **wpa_supplicant `ctrl_interface` is `/tmp/wpa_supplicant`**, not
->   `/var/run/wpa_supplicant` — `/var/run` does not exist on this rootfs
->   (see `S45wifi`). The same `/var/run` path is wrong wherever it appears below.
-> - **FPGA epoch updates are reboot-reconfigure, not runtime.** The
->   `/sys/class/fpga_manager/.../firmware` runtime-reload recipe **does not work**
->   on this kernel (no `fpga_bridge` sysfs). The real mechanism stages the new
->   `.rbf` on the FAT boot partition and reboots — see
->   `linux/overlay/usr/sbin/epoch-update.sh` and `docs/register-map.md` §5.
-> - **Web dashboard auth** (`odo-webd`) is opt-in: set `PASSWORD=` in
->   `/etc/odo-web.conf`; default is open on the trusted LAN.
-> - Found-nonce handoff is a **depth-8 async FIFO + UIO IRQ** (`backend: "uio"`
->   in `status.json`).
->
-> The authoritative status/plan doc is `docs/TODO.md`; the register contract is
-> `docs/register-map.md` (current). Use those two over any conflict here.
+> **Init system: BusyBox**, not systemd. `systemctl` / `supervisorctl` are not
+> available. Services are `/etc/init.d/Sxx` scripts started by BusyBox init. Do not
+> follow any systemd recipes below — they are from a superseded design.
 
 ---
 
-## Serial Console Access
-
-The kernel is configured with explicit serial console output:
+## SD Card Layout
 
 ```
-console=ttyS0,115200n8 earlycon=uart,mmio32,0xffc02000
+mmcblk0p1  FAT32  256 MiB   /mnt/fat — zImage, socfpga_cyclone5_qmtech_odo.dtb,
+                              boot.scr, fpga.rbf
+mmcblk0p2  ext4   ~8 GiB    rootfs (mounted as /)
+mmcblk0p3  0xA2   16 MiB    u-boot-with-spl.sfp (raw, no filesystem)
 ```
 
-**Setup:**
-1. Connect a USB-to-TTL serial adapter to the QMTECH board's UART header (typically pins 1-4)
-2. Set terminal to 115200 baud, 8N1
-3. Power on the board and watch bootloader/kernel output
-4. You'll see U-Boot SPL → U-Boot → Linux kernel → login prompt
-
-**Example (minicom):**
-```bash
-minicom -D /dev/ttyUSB0 -b 115200
-```
-
-This serial console is essential for:
-- Troubleshooting boot failures
-- Accessing the system if Ethernet/SSH fails
-- Monitoring early kernel panics
-- Changing root password at first boot
+U-Boot reads `fpga.rbf` from the FAT partition, programs the FPGA, enables HPS↔FPGA
+bridges, then boots Linux. **Never copy the bitstream to the ext4 partition** — U-Boot
+cannot reach it.
 
 ---
 
-## Root Password Management
+## Services (BusyBox init)
 
-### Lab/Testing (Initial Build)
+Init scripts in `/etc/init.d/`, started in alphabetical order:
 
-Default credentials (from defconfig):
-```
-Username: root
-Password: odo-miner
-```
+| Script | What it does |
+|---|---|
+| `S45wifi` | Brings up wlan0 via wpa_supplicant + dhcpcd (if `/etc/wpa_supplicant.conf` exists) |
+| `S50sshd` | Starts OpenSSH daemon |
+| `S90odod` | Starts the miner daemon — see below |
+| `S91epochcron` | Cron job that calls `epoch-update.sh` every hour to check for a staged epoch `.rbf` |
+| `S95odoui` | Starts `odo-ui` (framebuffer touch dashboard) |
+| `S96odowebd` | Starts `odo-webd` (local web dashboard on port 80) |
 
-Suitable for development and lab testing on isolated networks.
-
-### Production/Deployment
-
-**Never deploy with hardcoded passwords on an internet-connected appliance.** Choose one:
-
-#### Option A: Manual Password Change at First Boot
-
-After first serial login:
+To restart a service manually:
 
 ```bash
-login: root
-Password: odo-miner
-
-# Change password
-root@odo-miner:~# passwd
-Enter new UNIX password: <new_password>
-Retype new UNIX password: <confirm>
-passwd: password updated successfully
-```
-
-Store the new password securely (e.g., in a password manager or deployment docs).
-
-#### Option B: Disable Root SSH, Create Non-Root User
-
-Edit `linux/buildroot_cyclonev_defconfig`:
-
-```
-# Security: disable root login via SSH
-BR2_PACKAGE_OPENSSH_DISABLE_ROOT_LOGIN=y
-BR2_PACKAGE_SUDO=y
-
-# Add non-root user for mining operations
-# (Handled in post-build script or rootfs overlay)
-```
-
-Then add a post-build script that creates the non-root user:
-
-```bash
-#!/bin/bash
-# scripts/create-miner-user.sh
-
-ROOTFS=$1
-
-# Create 'miner' user in rootfs
-mkdir -p ${ROOTFS}/home/miner
-cat >> ${ROOTFS}/etc/passwd <<'EOF'
-miner:x:1000:1000:Mining User:/home/miner:/bin/sh
-EOF
-
-cat >> ${ROOTFS}/etc/shadow <<'EOF'
-miner:$6$<hashed_password>:19000:0:99999:7:::
-EOF
-
-# Allow 'miner' to run critical commands via sudo
-mkdir -p ${ROOTFS}/etc/sudoers.d
-cat > ${ROOTFS}/etc/sudoers.d/miner <<'EOF'
-miner ALL=(ALL) NOPASSWD: /usr/sbin/watchdog
-miner ALL=(ALL) NOPASSWD: /usr/sbin/supervisord
-EOF
-
-chmod 0440 ${ROOTFS}/etc/sudoers.d/miner
-```
-
-Then SSH as `miner` user and use `sudo` for privileged operations.
-
-#### Option C: Prompt for Password at First Boot (Systemd Service)
-
-Create a first-boot systemd service:
-
-```ini
-# /etc/systemd/system/firstboot-password.service
-[Unit]
-Description=First-boot root password prompt
-After=network-online.target
-Before=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/firstboot-password-prompt.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Script (`/usr/local/bin/firstboot-password-prompt.sh`):
-
-```bash
-#!/bin/bash
-# Prompt for new root password at first boot
-
-FLAG_FILE="/root/.password-changed"
-
-if [ ! -f "$FLAG_FILE" ]; then
-  echo "=========================================="
-  echo "First boot: Set root password"
-  echo "=========================================="
-  passwd root
-  touch "$FLAG_FILE"
-  echo "Password set. Disable this service:"
-  echo "  systemctl disable firstboot-password.service"
-fi
+/etc/init.d/S90odod stop
+/etc/init.d/S90odod start
 ```
 
 ---
 
-## System Time (NTP)
+## Miner Daemon (`S90odod`)
 
-ntpd is included in the rootfs but requires `/etc/ntp.conf`.
+The init script reads `/etc/odod.conf` (sourced as `KEY=value`), then launches
+`/usr/bin/odo-miner-pipe-uio` (UIO/IRQ backend) with fallback to
+`/usr/bin/odo-miner-pipe` if the UIO device is not present.
 
-### Basic Setup (Recommended)
+### `/etc/odod.conf` format
 
-Create `/etc/ntp.conf` before deploying:
+```sh
+# Mining pool
+ODOD_POOL_HOST=pool.example.com
+ODOD_POOL_PORT=3333
+ODOD_WORKER=your_dgb_address.worker_name
+ODOD_PASSWORD=x
+
+# Optional second pool (failover)
+ODOD_POOL_HOST2=pool2.example.com
+ODOD_POOL_PORT2=3333
+
+# Optional tuning
+ODOD_WATCHDOG=1          # set to 1 to enable reboot-on-hang watchdog
+```
+
+**Never put a real wallet address in the repo.** Keep `/etc/odod.conf` on the board
+only.
+
+### Runtime status
+
+The daemon writes `/run/odod/status.json` every ~5 s:
 
 ```bash
-# scripts/create-ntp-config.sh
-cat > /tmp/rootfs-mount/etc/ntp.conf <<'EOF'
-# NTP configuration for autonomous mining
-# Use public NTP pools as primary source
-
-# Public NTP servers
-server 0.pool.ntp.org iburst
-server 1.pool.ntp.org iburst
-server 2.pool.ntp.org iburst
-server 3.pool.ntp.org iburst
-
-# Drift file (stores long-term clock offset)
-driftfile /var/lib/ntp/drift
-
-# Statistics directory
-statsdir /var/log/ntpstats/
-
-# Restrict access to localhost only
-restrict 127.0.0.1
-restrict -6 ::1
-
-# Basic access control (allow local network)
-restrict default limited kod nomodify nopeer noquery notrap
-EOF
-
-chmod 644 /tmp/rootfs-mount/etc/ntp.conf
-mkdir -p /tmp/rootfs-mount/var/lib/ntp
+cat /run/odod/status.json
+# {
+#   "hashrate_mhs": 26.0,
+#   "shares_accepted": 42,
+#   "shares_rejected": 0,
+#   "epoch": 1782432000,
+#   "uptime_s": 3600,
+#   "temp_c": 45.2,
+#   "fan_duty_pct": 50,
+#   "backend": "uio",
+#   ...
+# }
 ```
 
-### Pool-Provided NTP (Optional)
+`backend: "uio"` confirms interrupt-driven found-nonce handoff is active.
 
-If your mining pool provides an NTP server, add it to `/etc/ntp.conf`:
+---
 
+## Pool Configuration
+
+Point the miner at a DGB OdoCrypt pool by editing `/etc/odod.conf`:
+
+```sh
+ODOD_POOL_HOST=<pool_host>
+ODOD_POOL_PORT=<port>
+ODOD_WORKER=<your_dgb_address>.<worker_label>
+ODOD_PASSWORD=x
 ```
-server mining-pool.example.com iburst prefer
-server 0.pool.ntp.org iburst
-server 1.pool.ntp.org iburst
-```
 
-The `prefer` flag prioritizes the pool's NTP.
-
-### Enable ntpd at Boot
+Restart the daemon after any change:
 
 ```bash
-systemctl enable ntpd.service
-systemctl start ntpd.service
+/etc/init.d/S90odod stop && /etc/init.d/S90odod start
+```
+
+For testnet validation (1-day epochs — fastest way to verify the full epoch-roll path):
+
+```sh
+ODOD_POOL_HOST=<testnet_pool>
+ODOD_POOL_PORT=<testnet_port>
+ODOD_WORKER=<testnet_address>.<worker>
+```
+
+---
+
+## WiFi Setup
+
+The board uses a USB RTL8xxx WiFi adapter (rtl8xxxu kernel module). USB autosuspend
+is disabled at boot to prevent the adapter from dropping.
+
+Configure via the web dashboard (recommended — handles wpa_supplicant correctly) or
+manually:
+
+```bash
+# Manual: wpa_supplicant ctrl socket is /tmp/wpa_supplicant (NOT /var/run)
+wpa_passphrase "YourSSID" "YourPassword" > /etc/wpa_supplicant.conf
+
+# Restart the wifi init script to apply
+/etc/init.d/S45wifi stop
+/etc/init.d/S45wifi start
 ```
 
 Verify:
 
 ```bash
-ntpq -p
-# Should show pool.ntp.org servers with refid asterisks (*) when synced
-```
-
-**Why NTP matters for mining:**
-- OdoCrypt epochs are time-based; clock skew = invalid shares
-- Stratum protocol uses timestamps for authentication
-- Long-term drift without NTP = mining downtime for recalibration
-
----
-
-## Watchdog Timer (Autonomous Reboot on Hang)
-
-The watchdog daemon uses the ARM Cortex-A9 built-in watchdog timer. If the system hangs (e.g., `odod` infinite loop), the watchdog fires and reboots automatically.
-
-### Enable at Boot
-
-```bash
-# Add to systemd startup
-systemctl enable watchdog.service
-systemctl start watchdog.service
-```
-
-Or add to init script:
-
-```bash
-# /etc/init.d/S95watchdog
-#!/bin/sh
-/usr/sbin/watchdog &
-```
-
-### Watchdog Configuration
-
-Default timeout is ~10 seconds. Tune via `/etc/watchdog.conf` if needed:
-
-```ini
-[watchdog]
-watchdog-device = /dev/watchdog
-watchdog-timeout = 10
-# Temperature check (optional, if board has temp sensor)
-# max-temperature = 85
-```
-
-**Critical for mining:** A hung `odod` daemon will automatically trigger a reboot, minimizing lost mining time.
-
----
-
-## Supervisor Process Management
-
-supervisor auto-restarts the `odod` daemon if it crashes. Configure post-build:
-
-```bash
-# scripts/setup-supervisor.sh
-mkdir -p /tmp/rootfs-mount/etc/supervisor/conf.d
-
-cat > /tmp/rootfs-mount/etc/supervisor/conf.d/odod.conf <<'EOF'
-[program:odod]
-command=/usr/local/bin/odod %(ENV_POOL_SERVER)s %(ENV_POOL_PORT)s
-autostart=true
-autorestart=true
-stdout_logfile=/var/log/odod.log
-stderr_logfile=/var/log/odod-err.log
-startsecs=2
-stopasgroup=true
-environment=PATH="/usr/local/bin:/usr/bin:/bin",POOL_SERVER="mining-pool.example.com",POOL_PORT="3333"
-EOF
-```
-
-Then start supervisor at boot:
-
-```bash
-systemctl enable supervisord.service
-systemctl start supervisord.service
-```
-
-Verify:
-
-```bash
-supervisorctl status
-# Should show: odod                           RUNNING
+ip addr show wlan0          # should have an inet address
+ping -c3 8.8.8.8 -I wlan0  # basic connectivity
 ```
 
 ---
 
-## Logrotate (Prevent Disk Fullness)
+## SSH Access
 
-logrotate prevents log files from consuming all disk space. Configure:
+SSH daemon starts at boot (`S50sshd`). Key-based login is configured in
+`linux/overlay/root/.ssh/authorized_keys` — this file ships as an empty template; add
+your public key before building the image, or copy it over after first boot:
 
 ```bash
-# /etc/logrotate.d/odod-mining
-/var/log/odod*.log {
-    size 10M
-    rotate 5
-    compress
-    delaycompress
-    missingok
-    notifempty
-    postrotate
-        supervisorctl reread odod
-        supervisorctl restart odod
-    endscript
-}
+# From the build machine (after first Ethernet boot):
+ssh-copy-id root@<board-ip>
 ```
 
-Verify logs are rotated:
+Default credentials: `root` / `odo-miner`. **Change the password on first boot:**
 
 ```bash
-logrotate -f /etc/logrotate.conf
-ls -lh /var/log/odod*.log*
+passwd
 ```
 
 ---
 
-## FPGA Bitstream Loading
+## FPGA Epoch Updates
 
-The FPGA bitstream (`.rbf` format) is loaded at boot via the Linux FPGA Manager.
+The pipelined core bakes the OdoCrypt epoch key into FPGA LUTs at compile time.
+Epoch changes (~every 10 days) require a new bitstream. The automated flow:
 
-### Placement on SD Card
+1. **Off-board** (Windows): `scripts/epoch_build_deploy.ps1 -EpochKey <new_key>`
+   compiles and stages the new `.rbf` on the board's FAT partition as
+   `fpga_staged.rbf`.
+2. **On-board**: `epoch-update.sh` (run hourly by `S91epochcron`) detects the staged
+   file, verifies the epoch is close enough to apply, copies it to `fpga.rbf`, and
+   reboots.
 
-```
-fpga.rbf  (on the FAT boot partition, mmcblk0p1)
-```
-
-The U-Boot boot script (`boot.scr`, generated by `scripts/build-sdcard.sh`) loads it with `fpga load 0` and enables the HPS↔FPGA bridges before booting Linux. The kernel's FPGA Manager (enabled via `linux/linux-fpga.fragment`: `CONFIG_FPGA_MGR_SOCFPGA` + bridge/region drivers) allows reloading at runtime.
-
-### Runtime Bitstream Updates (OdoCrypt Mutation Epochs)
-
-At mutation epochs, a new bitstream must be loaded. Two approaches:
-
-#### Manual Update (Lab)
+Manual apply (if automated staging fails):
 
 ```bash
-# Download or compile new .rbf
-wget https://your-repo/fpga-epoch-123.rbf -O /tmp/new.rbf
-
-# Validate checksum (optional)
-sha256sum /tmp/new.rbf
-
-# Load via FPGA Manager
-echo /tmp/new.rbf > /sys/class/fpga_manager/fpga0/firmware
-# Or reboot with new .rbf in /boot/fpga.rbf
+# On the board — mount FAT, copy new bitstream, reboot
+mount /dev/mmcblk0p1 /mnt/fat
+cp /tmp/new_epoch.rbf /mnt/fat/fpga.rbf
+sync && umount /mnt/fat && reboot
 ```
 
-#### Automated Update (Production)
-
-Create an update service:
-
-```bash
-# /usr/local/bin/odo-update-fpga
-#!/bin/bash
-
-EPOCH=$1
-BITSTREAM_URL="https://your-repo/fpga-epoch-${EPOCH}.rbf"
-
-cd /tmp
-wget "$BITSTREAM_URL" -O new.rbf
-sha256sum -c <(curl "$BITSTREAM_URL.sha256") || exit 1
-
-cp new.rbf /boot/fpga.rbf
-reboot
-```
-
-Schedule via cron or triggered by the `odod` daemon at mutation epoch.
+**Do NOT use `/sys/class/fpga_manager/fpga0/firmware` to reload at runtime** — the
+kernel bridge driver (`fpga_bridge`) is not compiled into this image. Runtime reload
+does not work; reboot is the only supported mechanism.
 
 ---
 
-## Networking & Remote Access
+## Web Dashboard (`odo-webd`)
 
-### Ethernet (Primary)
-
-DHCP is enabled by default. At boot:
-
-```bash
-root@odo-miner:~# ifconfig eth0
-eth0: flags=...
-  inet 192.168.1.100  netmask 255.255.255.0
-```
-
-To set a static IP:
+`odo-webd` serves a monitoring dashboard on port 80. Auth is **off by default**
+(trusted LAN model). To enable password protection:
 
 ```bash
-# /etc/network/interfaces
-auto eth0
-iface eth0 inet static
-  address 192.168.1.100
-  netmask 255.255.255.0
-  gateway 192.168.1.1
-  dns-nameservers 8.8.8.8 8.8.4.4
+# On the board
+echo "PASSWORD=your_password_here" >> /etc/odo-web.conf
+/etc/init.d/S96odowebd stop && /etc/init.d/S96odowebd start
 ```
 
-### WiFi (Optional, if USB adapter attached)
-
-WPA_SUPPLICANT is included. Configure:
-
-```bash
-cat > /etc/wpa_supplicant.conf <<'EOF'
-ctrl_interface=/var/run/wpa_supplicant
-update_config=1
-
-network={
-    ssid="YourSSID"
-    psk="YourPassword"
-    key_mgmt=WPA-PSK
-}
-EOF
-
-# Start WPA
-wpa_supplicant -B -i wlan0 -c /etc/wpa_supplicant.conf
-
-# Get DHCP
-dhclient wlan0
-```
-
-### SSH Access
-
-SSH is enabled. Recommended: use SSH keys instead of passwords:
-
-```bash
-# On deployment machine
-ssh-copy-id -i ~/.ssh/id_rsa.pub root@<board-ip>
-
-# Then disable password login
-cat >> /etc/ssh/sshd_config <<'EOF'
-PasswordAuthentication no
-PermitRootLogin without-password
-EOF
-
-systemctl restart ssh
-```
+Features: live hashrate, share counters, pool/failover status, temperature + fan
+speed, fan boost button, reset stats, pool failover indicator.
 
 ---
 
-## Monitoring & Debugging
+## Fan & Temperature
 
-### Check System Health
+`odo-webd` and `odo-ui` surface temperature and fan duty automatically from
+`status.json`. The thermal control loop is in the daemon:
 
-```bash
-# CPU/memory usage
-top
-free -h
+- < 38 °C: minimum duty (40%)
+- 38–48 °C: proportional
+- > 48 °C: full speed
 
-# Disk usage
-df -h
+Fan boost (temporary 100%) is available from both the web dashboard and the touch UI.
 
-# Temperature (if sensor exists)
-cat /sys/class/thermal/thermal_zone*/temp
-
-# Kernel logs
-dmesg | tail -20
-
-# ntpd status
-ntpq -p
-
-# Supervisor status
-supervisorctl status
-```
-
-### Watch Mining Output
-
-```bash
-# Real-time odod logs
-tail -f /var/log/odod.log
-
-# Supervisor logs
-tail -f /var/log/supervisord.log
-
-# System journal (if systemd available)
-journalctl -f -u odod
-```
+If the DS18B20 read fails (sensor disconnect), the daemon falls back to full fan
+speed to avoid thermal runaway.
 
 ---
 
-## Pre-Deployment Checklist
+## Serial Console (Recovery)
 
-- [ ] Root password changed from `odo-miner`
-- [ ] `/etc/ntp.conf` configured with NTP servers
-- [ ] Watchdog daemon enabled and tested (`systemctl status watchdog`)
-- [ ] Supervisor configured with `odod.conf` and running (`supervisorctl status`)
-- [ ] Logrotate configured and working
-- [ ] Serial console tested at 115200 baud
-- [ ] Ethernet connectivity verified (DHCP or static IP)
-- [ ] FPGA bitstream in `/boot/fpga.rbf` with correct permissions
-- [ ] `odod` daemon compiled and placed at `/usr/local/bin/odod`
-- [ ] SSH keys deployed (if password-less access desired)
-- [ ] System time synchronized to NTP pool (check `ntpq -p`)
+If SSH/network is unavailable, connect a USB-to-TTL adapter to the UART header:
+
+- **115200 baud, 8N1**, no flow control
+- U-Boot output begins ~1 s after power-on; Linux login prompt at ~30 s
+- Login: `root` / `odo-miner`
+
+Windows: use [serial-console.ps1](../scripts/serial-console.ps1) or PuTTY on the
+COM port assigned to the CH340 adapter.
+
+---
+
+## Watchdog
+
+Set `ODOD_WATCHDOG=1` in `/etc/odod.conf` to enable the daemon's dead-pool watchdog.
+After the soak period (≥ 24 h clean operation), this is recommended for autonomous
+deployment — it reboots the board if the daemon cannot reach either pool for an
+extended period.
+
+---
+
+## Deployment Checklist
+
+- [ ] `/etc/odod.conf` has correct pool host/port/worker (no placeholder addresses)
+- [ ] Root password changed from `odo-miner` (`passwd`)
+- [ ] SSH key added to `/root/.ssh/authorized_keys`
+- [ ] WiFi configured and tested (if wireless deployment)
+- [ ] `shares_accepted > 0` in `status.json` after 10 min
+- [ ] Temperature reading is plausible in `status.json`
+- [ ] Fan is spinning (audible; tach RPM in `status.json`)
+- [ ] `backend: "uio"` in `status.json` (interrupt-driven handoff active)
+- [ ] Epoch renewal tested: stage a known `.rbf`, confirm `epoch-update.sh` applies it
+- [ ] `ODOD_WATCHDOG=1` set after 24 h clean soak
 
 ---
 
 ## Troubleshooting
 
-| Issue | Symptom | Fix |
-|-------|---------|-----|
-| **No serial output** | USB adapter not showing ttyUSB0 | Check cable, try different port, verify baud rate 115200 |
-| **NTP not syncing** | `ntpq -p` shows no refid asterisks | Check `/etc/ntp.conf`, firewall blocks port 123 (UDP) |
-| **Watchdog reboot loop** | Board reboots every ~10s | System hanging; check `odod` logs before reboot |
-| **odod crashes repeatedly** | supervisor logs show rapid restarts | Check pool connectivity, FPGA register access, add debug logging |
-| **Disk full** | 8GB ext4 partition full | Check `/var/log/` size, enable logrotate, clean `/tmp/` |
-| **Ethernet down** | `ifconfig eth0` shows no IP | Check cable, try DHCP renewal: `dhclient eth0`, verify PHY in device tree |
-| **FPGA manager fails** | `echo /tmp/new.rbf > /sys/class/fpga_manager/fpga0/firmware` returns error | Verify `.rbf` is valid, check kernel FPGA Manager enabled, check permissions |
-
----
-
-## References
-
-- NTP: https://www.ntp.org/
-- Supervisor: http://supervisord.org/
-- Linux watchdog: https://www.kernel.org/doc/html/latest/watchdog/watchdog-api.html
-- U-Boot FPGA Manager: https://www.kernel.org/doc/html/latest/driver-api/fpga/fpga-mgr.html
+| Symptom | Cause | Fix |
+|---|---|---|
+| `shares_rejected: N` / 0 accepted | Wrong pool, bad worker addr, algorithm mismatch | Verify `/etc/odod.conf` worker is a valid DGB address; check pool logs |
+| FPGA registers read 0xFFFFFFFF | Bitstream not loaded / bridges not enabled | U-Boot log (serial) should show `fpga load` success; verify `fpga.rbf` is on FAT p1 |
+| `backend: "poll"` in status.json | `/dev/uio0` missing (DTS or kernel config) | Check `dmesg | grep uio`; UIO requires the device-tree `generic-uio` node |
+| Hashrate zero, no errors | Epoch key mismatch (ODOKEY in RTL ≠ current epoch) | Check `epoch` field in `status.json`; rebuild bitstream with correct ODOKEY |
+| WiFi drops every ~10 s | USB autosuspend not disabled | Check `dmesg | grep autosuspend`; `S45wifi` should disable it; verify overlay is current |
+| Fan not spinning | Thermal PIO not wired or binary mismatch | Check `fan_duty_pct` in `status.json`; verify bitstream includes `pwm_fan` instance |
+| Board reboots repeatedly | Watchdog firing | Disable `ODOD_WATCHDOG` temporarily; check `/run/odod/status.json` for pool connectivity |
+| No serial output | Wrong COM port or baud | Try each COM port at 115200 8N1; CH340 driver required on Windows |
