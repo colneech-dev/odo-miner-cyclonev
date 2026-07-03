@@ -1,6 +1,6 @@
 # OdoCrypt Miner — Avalon-MM Register Map
 
-**Status:** v1.1 (2026-06-26, matches `pipelined_miner_top.v` + `hps/hps_regs_pipe.h`; UIO IRQ added) · **Owner:** colneech-dev
+**Status:** v1.1 (2026-06-26, matches `pipelined_miner_top.v` + `hps/hps_regs_pipe.h`; UIO IRQ added)
 **Applies to:** the **deployed pipelined core** — `hdl/src/pipelined/pipelined_miner_top.v` (Avalon-MM slave) ↔ `hps/hps_regs_pipe.h` / `hps/miner_io_pipe.c`
 
 > **Single source of truth.** Any change here MUST be matched in

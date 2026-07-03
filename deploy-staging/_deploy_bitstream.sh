@@ -3,7 +3,7 @@
 # Run from WSL after Quartus compile completes successfully.
 set -e
 REPO="${REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
-BOARD="root@${BOARD_IP:-192.168.1.37}"
+BOARD="root@${BOARD_IP:-<board-ip>}"
 RBF="$REPO/hdl/quartus/output_files/odo_miner.rbf"
 
 # Quick pre-check: verify RBF is fresh (after the new compile)

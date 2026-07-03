@@ -74,7 +74,7 @@ tar xzf oss-cad.tgz && rm oss-cad.tgz
 # From Git Bash (Windows) or WSL — a plain clone is enough:
 # the OdoCrypt reference (crypto/) and the per-epoch RTL generator (odo_gen)
 # are vendored in-tree under third_party/odo-miner/ — no submodule to init.
-git clone https://github.com/colneech-dev/odo-miner-cyclonev.git
+git clone https://github.com/<your-github-user>/odo-miner-cyclonev.git
 cd odo-miner-cyclonev   # clone lands on the default 'main' branch (what to build)
 ```
 

@@ -1,7 +1,7 @@
 # Project TODO — odo-miner-cyclonev
 
 **Last updated:** 2026-06-29
-**Owner:** colneech-dev / Claude
+**Owner:** odo-miner-cyclonev maintainers
 **Device:** `5CSXFC6C6U23I7` — Cyclone V SX, 41,910 ALMs, 553 M10K, QMTECH KFB
 dual-SDRAM board (DE10-Nano-compatible ball-out, MiSTer-style).
 

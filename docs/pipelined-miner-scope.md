@@ -139,21 +139,21 @@ co-fit with display/touch/PIO) is feasible, possibly even keeping THROUGHPUT=4.
 
 ## Chosen infrastructure (2026-06-16)
 
-- **Compile/precompile host = the Miningcore PC, `192.168.1.100`.** Always-on
+- **Compile/precompile host = the Miningcore PC (`${COMPILE_HOST}`).** Always-on
   x86 already running the pool, on the same LAN the board fetches from — serves
   the per-epoch `.rbf` from a static dir. Resolves §6.1.
-- **Board** `192.168.1.35` fetches `miner_<epoch>.rbf` from `.100`.
-- **Pool stratum** is `192.168.1.19:3333` (confirm whether that's the same box
-  as `.100` or separate; the daemon already knows the pool host).
-- **Open spec to confirm:** `.100` needs **≥16 GB RAM** (compiles peak ~9.5 GB on
+- **Board (`${BOARD_IP}`)** fetches `miner_<epoch>.rbf` from the compile host.
+- **Pool stratum** is `${POOL_HOST}:3333` (confirm whether that's the same box
+  as the compile host or separate; the daemon already knows the pool host).
+- **Open spec to confirm:** compile host needs **≥16 GB RAM** (compiles peak ~9.5 GB on
   top of Miningcore + Postgres) and Quartus Lite installed (Linux per the linked
-  25.1 download, or reuse the Windows 25.1 install if `.100` is this dev machine).
+  25.1 download, or reuse the Windows 25.1 install if it is this dev machine).
   Throttle the build (fewer cores, low priority) — it has ~10 days lead, so it
   never must run at a busy moment.
 
 ## 6. Decisions needed before starting
 
-1. ~~**Compile host**~~ — decided: `192.168.1.100` (Miningcore PC). Pending only
+1. ~~**Compile host**~~ — decided: Miningcore PC (`${COMPILE_HOST}`). Pending only
    the RAM/OS confirmation noted above.
 2. **Reconfig style for v1:** is ~30 s reboot downtime per epoch fine (simple,
    robust), with live reconfig as a later nice-to-have?
