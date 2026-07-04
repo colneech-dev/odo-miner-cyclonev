@@ -457,17 +457,16 @@ static void wlan_ip(char *ip, size_t ip_sz)
 
 #define WIFI_STATUS_TTL 30  /* seconds — iw dev link is slow; cache it */
 
-static void serve_wifi_status(int fd)
-{
-    static char   cache[512];
-    static size_t cache_len = 0;
-    static time_t cache_at  = 0;
+/* File-scope so serve_poll() can share the same cache without a second popen */
+static char   g_wifi_cache[512];
+static size_t g_wifi_cache_len = 0;
+static time_t g_wifi_cache_at  = 0;
 
+static void refresh_wifi_cache(void)
+{
     time_t now = time(NULL);
-    if (cache_len > 0 && now - cache_at < WIFI_STATUS_TTL) {
-        send_response(fd, "200 OK", "application/json", cache, cache_len);
+    if (g_wifi_cache_len > 0 && now - g_wifi_cache_at < WIFI_STATUS_TTL)
         return;
-    }
 
     int present = access("/sys/class/net/wlan0", F_OK) == 0;
     char ssid[128] = "", ip[64] = "";
@@ -491,12 +490,97 @@ static void serve_wifi_status(int fd)
 
     char essid[256];
     json_escape(ssid, essid, sizeof(essid));
-    int n = snprintf(cache, sizeof(cache),
+    int n = snprintf(g_wifi_cache, sizeof(g_wifi_cache),
         "{\"present\":%s,\"ssid\":\"%s\",\"ip\":\"%s\"}",
         present ? "true" : "false", essid, ip);
-    cache_len = (size_t)n;
-    cache_at  = now;
-    send_response(fd, "200 OK", "application/json", cache, cache_len);
+    /* Clamp to what actually landed in the buffer: snprintf's return is what
+     * it WOULD have written, and an unclamped value here would let callers
+     * that trust g_wifi_cache_len (serve_poll's %.*s splice) read past the
+     * 512-byte cache on a long escaped SSID. */
+    g_wifi_cache_len = (n < 0) ? 0
+        : ((size_t)n < sizeof(g_wifi_cache) ? (size_t)n : sizeof(g_wifi_cache) - 1);
+    g_wifi_cache_at  = now;
+}
+
+static void serve_wifi_status(int fd)
+{
+    refresh_wifi_cache();
+    send_response(fd, "200 OK", "application/json", g_wifi_cache, g_wifi_cache_len);
+}
+
+/* Clamp an snprintf() return to the space actually available at `off` in a
+ * buffer of size `cap`, and return the new offset. snprintf's return value is
+ * how much it WOULD have written, not what it did — using it unclamped to
+ * advance a buffer offset lets a later, smaller write appear to have
+ * consumed more space than exists, pushing the final length past the buffer
+ * (an out-of-bounds read when that length is later handed to send_response). */
+static size_t off_after_snprintf(size_t off, size_t cap, int printed)
+{
+    if (printed < 0 || off >= cap) return off;
+    size_t avail = cap - off;                 /* room snprintf was given */
+    size_t written = (size_t)printed < avail ? (size_t)printed : avail - 1;
+    return off + written;
+}
+
+/* Combined poll endpoint: status + sysinfo + wifi in one round-trip.
+ * tick() calls this instead of three separate fetches, cutting TCP
+ * connection overhead by 2/3 on the single-threaded server. */
+static void serve_poll(int fd)
+{
+#define POLL_BUF 8192
+    static char poll_buf[POLL_BUF];
+    size_t off = 0;
+    int w;
+
+    w = snprintf(poll_buf + off, POLL_BUF - off, "{\"status\":");
+    off = off_after_snprintf(off, POLL_BUF, w);
+
+    /* embed status.json verbatim — it is already a JSON object */
+    FILE *sf = fopen(STATUS_PATH, "r");
+    if (sf) {
+        size_t room = POLL_BUF - off > 256 ? POLL_BUF - off - 256 : 0;
+        size_t n = fread(poll_buf + off, 1, room, sf);
+        fclose(sf);
+        if (n > 0) off += n;
+        else if (POLL_BUF - off >= 2) { memcpy(poll_buf + off, "{}", 2); off += 2; }
+    } else if (POLL_BUF - off >= 2) { memcpy(poll_buf + off, "{}", 2); off += 2; }
+
+    /* sysinfo inline */
+    double load1 = 0;
+    long mem_free_mb = 0, sys_up = 0;
+    char ip[64] = "";
+    FILE *lf = fopen("/proc/loadavg", "r");
+    if (lf) { if (fscanf(lf, "%lf", &load1) != 1) load1 = 0; fclose(lf); }
+    struct sysinfo si;
+    if (sysinfo(&si) == 0) {
+        mem_free_mb = (long)((uint64_t)si.freeram * si.mem_unit / (1024 * 1024));
+        sys_up = si.uptime;
+    }
+    struct ifaddrs *ifa0 = NULL;
+    if (getifaddrs(&ifa0) == 0) {
+        for (struct ifaddrs *ifa = ifa0; ifa; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) continue;
+            if (strcmp(ifa->ifa_name, "lo") == 0) continue;
+            inet_ntop(AF_INET, &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr,
+                      ip, sizeof(ip));
+            break;
+        }
+        freeifaddrs(ifa0);
+    }
+    w = snprintf(poll_buf + off, POLL_BUF - off,
+        ",\"sysinfo\":{\"ip\":\"%s\",\"load1\":%.2f,"
+        "\"mem_free_mb\":%ld,\"sys_uptime\":%ld}",
+        ip, load1, mem_free_mb, sys_up);
+    off = off_after_snprintf(off, POLL_BUF, w);
+
+    /* wifi — reuse the shared TTL cache */
+    refresh_wifi_cache();
+    w = snprintf(poll_buf + off, POLL_BUF - off,
+        ",\"wifi\":%.*s}", (int)g_wifi_cache_len, g_wifi_cache);
+    off = off_after_snprintf(off, POLL_BUF, w);
+
+    send_response(fd, "200 OK", "application/json", poll_buf, off);
+#undef POLL_BUF
 }
 
 /* A full `iw scan` takes seconds and briefly interrupts the live association
@@ -846,6 +930,8 @@ int main(int argc, char **argv)
             serve_sysinfo(fd);
         } else if (strncmp(req, "GET /controls.json", 18) == 0) {
             serve_controls(fd);
+        } else if (strncmp(req, "GET /poll.json", 14) == 0) {
+            serve_poll(fd);
         } else if (strncmp(req, "GET /wifi.json", 14) == 0) {
             serve_wifi_status(fd);
         } else if (strncmp(req, "GET /wifiscan.json", 18) == 0) {
