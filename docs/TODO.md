@@ -1,6 +1,6 @@
 # Project TODO — odo-miner-cyclonev
 
-**Last updated:** 2026-06-29
+**Last updated:** 2026-07-04
 **Owner:** odo-miner-cyclonev maintainers
 **Device:** `5CSXFC6C6U23I7` — Cyclone V SX, 41,910 ALMs, 553 M10K, QMTECH KFB
 dual-SDRAM board (DE10-Nano-compatible ball-out, MiSTer-style).
@@ -58,6 +58,28 @@ with zero manual intervention, deploys go over SSH.
    (ASan/UBSan), `tb_pipe_fifo.v`/`run_tb_fifo.sh` (FIFO burst/overflow/
    drain/irq). CI: lint job (shellcheck + `i/crlf` CRLF guard).
    Bitstream: 22,160/41,910 ALM (53%), timing met. Deployed and verified.
+6. ✅ **Second independent deep-review sweep** (2026-07-04, 7 commits
+   `9c440d2..9f30563`, merged to `main`). RTL: `pll_ok` STATUS bit wired to
+   the real `u_pll_miner.locked` (was hardcoded `1'b1` — invisible PLL lock
+   loss given this board's brownout history); `fabric_reset_n` gated by
+   both PLLs, not just the fabric one (closed a reset race); commit-toggle
+   synchronizer given a proper reset path. New `pll_lock` Qsys conduit;
+   full recompile — 0 errors, Fmax 160.93 MHz vs 156.25 MHz required,
+   22,066/41,910 ALM (53%, unchanged). Stratum/daemon: bounded
+   `send_line()`/`tcp_connect()` timeouts (a stalled pool could block the
+   daemon forever, bypassing the dead-pool watchdog); found-FIFO now drains
+   against the *old* job before a new job dispatch (previously every job
+   switch could silently drop a genuine find as "stale"); overlong
+   job_id/coinb1/coinb2 rejected instead of truncated; epoch-interval
+   constants de-duplicated. Webd: `/poll.json` consolidates 3 fetches/tick
+   into 1 (fixed a latent OOB-read introduced in the same change);
+   **`TCP_NODELAY` on accepted sockets** — turned out to be the actual fix
+   for persistent dashboard slowness (Nagle + delayed-ACK was stalling
+   every response ~40-200ms, independent of round-trip count). sshd:
+   ed25519-only host key (RSA blocked on boot entropy). Ops: no more
+   hardcoded board IP in deploy scripts; SSH host-key pinning instead of
+   disabled checking. **Deployed and hardware-verified**: ~25.7 MH/s,
+   123/123 shares accepted, `pll_ok` reads real lock, 0 FIFO overflow.
 
 ---
 

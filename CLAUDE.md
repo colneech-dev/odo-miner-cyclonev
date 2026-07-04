@@ -42,7 +42,7 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 - `scripts/` — build and deployment helpers
 - `services/` — init/service unit files
 
-## Current status (2026-06-29)
+## Current status (2026-07-04)
 
 - **DEPLOYED: pipelined core** (`feat/pipelined-miner`, merged to `main`). The
   upstream pipelined `odo_encrypt` (epoch baked into LUTs, free-running nonce
@@ -128,6 +128,51 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
   `linux/linux-display.fragment` + BusyBox init overlay in `linux/overlay/`.
 - Board identified as DE10-Nano ball-compatible (MiSTer-style); display
   wiring on the GPIO_0 header — see `docs/DISPLAY_WIRING.md`.
+
+Merged to `main` (2026-07-04): independent deep-review sweep (7 commits,
+`9c440d2..9f30563`) — **deployed and hardware-verified** (~25.7 MH/s,
+123/123 shares accepted, `pll_ok` STATUS bit reads real lock, 0 FIFO
+overflow). Key fixes:
+- **RTL**: `pipelined_miner_top.v` STATUS bit1 (`pll_ok`) now wired to the
+  real `u_pll_miner.locked` signal (was hardcoded `1'b1` — a PLL lock loss
+  was previously invisible given this board's brownout history); added a
+  2-flop synchronizer into the Avalon clk domain. `soc_top.v`'s
+  `fabric_reset_n` now gated by both PLLs' lock, not just the fabric one
+  (closed a reset-race where the miner-domain reset synchronizer could
+  sample against a not-yet-locked `clk_miner`). Commit-toggle synchronizer
+  now has a proper `miner_rst`-gated reset path instead of relying solely on
+  `initial` power-up state. New Qsys conduit `pll_lock` added to
+  `pipelined_miner_hw.tcl` + `soc_system.qsys`; full qsys-generate +
+  Quartus recompile done (0 errors, Fmax 160.93 MHz vs 156.25 MHz required,
+  22,066/41,910 ALM (53%) — unchanged from the prior build).
+- **HPS (`hps/stratum.c`, `hps/miner_pipe.c`, `hps/miner_io_pipe.c`)**:
+  bounded `send_line()`/`tcp_connect()` timeouts (a stalled pool could
+  previously block the daemon forever, bypassing the dead-pool watchdog);
+  found-FIFO now drains against the *old* job before a new job is
+  dispatched (previously a genuine find sitting in the FIFO at a job switch
+  was validated against the new header and silently counted as stale —
+  happened on every switch, not just a race window); bounded the drain
+  loop and back off on backend errors instead of busy-spinning; reject
+  overlong `job_id`/`coinb1`/`coinb2` instead of silently truncating;
+  `odo_interval` now shares `ODO_EPOCH_INTERVAL_MAINNET/TESTNET` instead of
+  duplicating the literal seconds.
+- **`sw/odo-webd/odo_webd.c`**: combined status/sysinfo/wifi into one
+  `/poll.json` round-trip (was 3 separate fetches every 3s against a
+  single-threaded, `Connection: close` server); fixed a latent OOB-read in
+  that new endpoint (unclamped `snprintf` return used to advance a shared
+  buffer offset); **`TCP_NODELAY` on accepted sockets** — `send_response()`
+  writes the header and body as two separate `write()` calls, and without
+  `TCP_NODELAY` this stalled every single response for the delayed-ACK
+  timeout (~40-200ms) regardless of round-trip count; this was the actual
+  fix for the "still very slow" dashboard complaint after the `/poll.json`
+  consolidation alone didn't resolve it.
+- **sshd**: generates only the ed25519 host key (not RSA/ECDSA too) — RSA
+  needs much more boot-time entropy than ed25519 and blocked for minutes
+  early in boot; the old script silenced stderr so this looked like a
+  clean but silent failure to start sshd.
+- **Ops**: `epoch_autorenew.ps1`/`epoch_build_deploy.ps1` no longer default
+  `-BoardIp` to the real LAN IP; SSH host-key checking is now `accept-new` +
+  a persistent pinned `known_hosts` instead of disabled outright.
 
 ## Notes
 
