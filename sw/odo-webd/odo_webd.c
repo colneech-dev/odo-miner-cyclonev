@@ -852,6 +852,15 @@ int main(int argc, char **argv)
          * LAN request and bounds the damage one idle peer can do. */
         struct timeval tv = { 2, 0 };
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        /* Disable Nagle's algorithm: send_response() below writes the header
+         * and body as two separate write() calls. Without TCP_NODELAY, Nagle
+         * holds the small header segment waiting for either more data to
+         * coalesce with or an ACK — and a client using delayed ACK (the
+         * common default) won't ACK a small segment immediately either, so
+         * every response stalls for the delayed-ACK timeout (commonly
+         * 40-200ms) before the body goes out. This penalty applies to EVERY
+         * request regardless of how few round-trips the page makes per tick. */
+        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
 
         char req[8192];
         ssize_t n = read(fd, req, sizeof(req) - 1);
