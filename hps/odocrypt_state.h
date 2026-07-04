@@ -42,7 +42,8 @@
 
 /* --- Epoch state: all tables for one epoch key --- */
 typedef struct {
-    uint32_t key;   /* epoch seed (block_height / ODO_KEY_PERIOD) */
+    uint32_t key;   /* epoch seed — ntime rounded down to the shapechange
+                       interval; see ODO_EPOCH_INTERVAL_MAINNET/TESTNET below */
 
     /* Substitution boxes */
     uint8_t  sbox1[ODO_SMALL_SBOX_COUNT][ODO_SMALL_SBOX_ENTRIES]; /* 40 × 64  bytes */

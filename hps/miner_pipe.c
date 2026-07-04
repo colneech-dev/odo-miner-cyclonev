@@ -391,7 +391,15 @@ int main(int argc, char **argv)
             if (n_pools > 1) {
                 pool_idx = (pool_idx + 1) % n_pools;
                 g_st.pool_slot = pool_idx + 1;
-                stratum_init(&st, hosts[pool_idx], ports[pool_idx], worker, pass);
+                if (stratum_init(&st, hosts[pool_idx], ports[pool_idx], worker, pass) != 0) {
+                    /* Only fails on NULL args, which can't happen here (all four
+                     * come from validated argv/env at startup) — but don't mine
+                     * blind against a zeroed ctx if that assumption ever breaks. */
+                    fprintf(stderr, "[pipe] stratum_init failed for backup pool %s:%s\n",
+                            hosts[pool_idx], ports[pool_idx]);
+                    sleep_ms(5000);
+                    continue;
+                }
                 g_st.epoch_interval = st.odo_interval;
                 snprintf(g_st.pool, sizeof(g_st.pool), "%s:%s",
                          hosts[pool_idx], ports[pool_idx]);
@@ -412,17 +420,81 @@ int main(int argc, char **argv)
              * the drain the instant a nonce lands); the /dev/mem backend does a
              * bounded ~5 ms nap (returning early if one is already pending), so
              * both keep the ~200/s drain that the 1-deep found-latch needs (a
-             * 50 ms cap previously dropped most finds, incl. potential blocks). */
-            miner_io_pipe_wait(5);
+             * 50 ms cap previously dropped most finds, incl. potential blocks).
+             *
+             * A negative return means the backend itself has faulted (mmap/fd
+             * gone bad) — spinning on that with no backoff would peg the single
+             * ARM core with no chance of recovery. Back off and let the loop's
+             * own connection-retry cadence apply; if the fault is permanent, the
+             * hardware watchdog (if enabled) or an operator restart recovers it. */
+            if (miner_io_pipe_wait(5) < 0) {
+                fprintf(stderr, "[pipe] miner_io backend error; backing off\n");
+                sleep_ms(1000);
+                continue;
+            }
             if (stratum_poll(&st, 0) < 0) {
                 fprintf(stderr, "[pipe] poll error; reconnecting\n");
                 break;
             }
 
+            /* Drain the found-FIFO FIRST, validating against whatever job is
+             * CURRENTLY live in `cur` — a nonce sitting in the FIFO was found
+             * for that job, not for a new job that might arrive this same
+             * iteration below. Doing this before a possible dispatch() of a new
+             * job (which used to happen first) prevents a genuine find from
+             * being checked against the wrong header and silently bucketed as
+             * stale — that was a guaranteed miss on every job switch, not just
+             * a race window, since dispatch() ran unconditionally before drain
+             * whenever a new job had already arrived in the same tick.
+             *
+             * Bounded to one FIFO depth's worth of iterations (the hardware FIFO
+             * is 8 deep) plus margin, so a stuck FSTATUS.VALID (hardware fault)
+             * can't turn this into an infinite loop. */
+            if (have_cur) {
+                uint32_t nonce;
+                int drained = 0;
+                while (drained++ < 64 && miner_io_pipe_poll(&nonce) == 0) {
+                    found++;
+                    g_st.found = found;
+                    uint8_t h[32];
+                    compute_pow(cur.header, nonce, h);
+                    if (target_met(h, cur.share_target)) {
+                        if (stratum_submit_share(&st, &cur, nonce) == 0) {
+                            shares++;
+                            g_st.shares     = shares;
+                            g_st.last_share = time(NULL);
+                            g_st.work_acc  += share_work(cur.share_target);
+                            double d = hash_to_difficulty(h);
+                            if (d > g_st.best_diff_session)
+                                g_st.best_diff_session = d;
+                            int new_best = (d > g_st.best_diff_alltime);
+                            if (new_best)
+                                g_st.best_diff_alltime = d;
+                            int is_block = target_met(h, cur.target);
+                            if (is_block) {
+                                g_st.blocks_found++;
+                                g_st.last_block = time(NULL);
+                                printf("[pipe] *** BLOCK FOUND *** job=%s nonce=0x%08"
+                                       PRIx32 " diff=%.6g (blocks_found=%" PRIu64 ")\n",
+                                       cur.job_id, nonce, d, g_st.blocks_found);
+                            }
+                            if (new_best || is_block)
+                                stats_save();
+                            printf("[pipe] SHARE job=%s nonce=0x%08" PRIx32
+                                   " diff=%.6g (found=%" PRIu64 " shares=%" PRIu64 ")\n",
+                                   cur.job_id, nonce, d, found, shares);
+                        } else {
+                            fprintf(stderr, "[pipe] stratum_submit_share failed\n");
+                        }
+                    } else {
+                        stale++;   /* old-header nonce past the settle window — drop */
+                    }
+                }
+            }
+
             job_t nj;
             if (stratum_get_job(&st, &nj)) {
-                int same = have_cur &&
-                    strncmp(nj.job_id, cur.job_id, sizeof(cur.job_id)) == 0;
+                int same = have_cur && job_same(&nj, &cur);
                 if (!same) {
                     cur = nj;
                     have_cur = 1;
@@ -441,46 +513,6 @@ int main(int argc, char **argv)
                 }
             }
             if (!have_cur) goto status_tick;
-
-            /* Drain the found-FIFO; validate each nonce against the current job. */
-            uint32_t nonce;
-            while (miner_io_pipe_poll(&nonce) == 0) {
-                found++;
-                g_st.found = found;
-                uint8_t h[32];
-                compute_pow(cur.header, nonce, h);
-                if (target_met(h, cur.share_target)) {
-                    if (stratum_submit_share(&st, &cur, nonce) == 0) {
-                        shares++;
-                        g_st.shares     = shares;
-                        g_st.last_share = time(NULL);
-                        g_st.work_acc  += share_work(cur.share_target);
-                        double d = hash_to_difficulty(h);
-                        if (d > g_st.best_diff_session)
-                            g_st.best_diff_session = d;
-                        int new_best = (d > g_st.best_diff_alltime);
-                        if (new_best)
-                            g_st.best_diff_alltime = d;
-                        int is_block = target_met(h, cur.target);
-                        if (is_block) {
-                            g_st.blocks_found++;
-                            g_st.last_block = time(NULL);
-                            printf("[pipe] *** BLOCK FOUND *** job=%s nonce=0x%08"
-                                   PRIx32 " diff=%.6g (blocks_found=%" PRIu64 ")\n",
-                                   cur.job_id, nonce, d, g_st.blocks_found);
-                        }
-                        if (new_best || is_block)
-                            stats_save();
-                        printf("[pipe] SHARE job=%s nonce=0x%08" PRIx32
-                               " diff=%.6g (found=%" PRIu64 " shares=%" PRIu64 ")\n",
-                               cur.job_id, nonce, d, found, shares);
-                    } else {
-                        fprintf(stderr, "[pipe] stratum_submit_share failed\n");
-                    }
-                } else {
-                    stale++;   /* old-header nonce past the settle window — drop */
-                }
-            }
 
         status_tick:
             /* Refresh status.json ~every 3 s for odo-ui / odo-webd. */

@@ -1,3 +1,12 @@
+/*
+ * RETIRED: this drives the sequential-FSM epoch-table-streaming API
+ * (miner_io_stop/start/load_epoch in miner_io.h), used only by the retired
+ * miner.c / miner_with_watcher.c FSM daemons — NOT the deployed pipelined
+ * daemon (miner_pipe.c), which has no runtime epoch tables to stream. The
+ * live epoch-rollover path is the external usr/sbin/epoch-update.sh script
+ * (hot-swaps a precompiled per-epoch bitstream + reboots). Kept for FSM-path
+ * history; do not treat this as the active epoch-renewal mechanism.
+ */
 #ifndef EPOCH_WATCHER_H
 #define EPOCH_WATCHER_H
 

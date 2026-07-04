@@ -101,6 +101,12 @@ int miner_io_pipe_poll(uint32_t *out_nonce)
     if (g_pio.regs == NULL) return -1;
     if (!(reg_rd(&g_pio, REG_PIPE_FSTATUS) & PIPE_FSTAT_VALID))
         return 1;                                   /* nothing pending */
+    /* hps_regs.h's reg_rd/reg_wr carry no barrier (unlike the UIO backend's,
+     * which wraps every access in __sync_synchronize()) — add one explicitly
+     * between the FSTATUS check and the FNONCE read that consumes it, so the
+     * two backends give the same ordering guarantee for this read-to-consume
+     * pair regardless of which one pick_daemon() selects. */
+    __sync_synchronize();
     uint32_t n = reg_rd(&g_pio, REG_PIPE_FNONCE);   /* read consumes the entry */
     if (out_nonce) *out_nonce = n;
     return 0;

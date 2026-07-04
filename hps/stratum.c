@@ -2,6 +2,7 @@
 
 #include "stratum.h"
 #include "odocrypt_header.h"
+#include "odocrypt_state.h"   /* ODO_EPOCH_INTERVAL_MAINNET/TESTNET */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +31,34 @@ static int set_nonblocking(int fd)
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
+/* Caps how long a single connect() attempt can stall the (single-threaded,
+ * no-host-PC) daemon on an unreachable/filtered pool. The OS default (up to
+ * ~2 minutes on Linux) is too long for an autonomous board to sit idle on. */
+#define TCP_CONNECT_TIMEOUT_MS  8000
+
+static int connect_with_timeout(int fd, const struct sockaddr *addr, socklen_t addrlen)
+{
+    if (set_nonblocking(fd) < 0)
+        return -1;
+
+    int rc = connect(fd, addr, addrlen);
+    if (rc == 0)
+        return 0;                      /* connected immediately (rare, e.g. loopback) */
+    if (errno != EINPROGRESS)
+        return -1;
+
+    struct pollfd pfd = { .fd = fd, .events = POLLOUT };
+    rc = poll(&pfd, 1, TCP_CONNECT_TIMEOUT_MS);
+    if (rc <= 0)
+        return -1;                     /* timeout or poll error */
+
+    int err = 0;
+    socklen_t elen = sizeof(err);
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &elen) < 0 || err != 0)
+        return -1;
+    return 0;
+}
+
 static int tcp_connect(const char *host, const char *port)
 {
     struct addrinfo hints;
@@ -47,7 +76,7 @@ static int tcp_connect(const char *host, const char *port)
         fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (fd < 0)
             continue;
-        if (connect(fd, rp->ai_addr, rp->ai_addrlen) == 0)
+        if (connect_with_timeout(fd, rp->ai_addr, rp->ai_addrlen) == 0)
             break;
         close(fd);
         fd = -1;
@@ -60,12 +89,18 @@ static int tcp_connect(const char *host, const char *port)
     int one = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
-    if (set_nonblocking(fd) < 0) {
-        close(fd);
-        return -1;
-    }
+    /* Socket is already non-blocking from connect_with_timeout(); the fd is
+     * fully set up for the rest of the client at this point. */
     return fd;
 }
+
+/* Bounds how long send_line() will retry against a socket that keeps
+ * returning EWOULDBLOCK. Without this, a pool that stops draining its
+ * receive buffer (congestion, slow-loris, or a hostile peer) freezes the
+ * daemon here forever — the single-threaded main loop never returns to
+ * stratum_poll(), so the STRATUM_IDLE_TIMEOUT dead-pool watchdog (which only
+ * fires from inside stratum_poll) can never trigger. */
+#define SEND_LINE_TIMEOUT_MS  5000
 
 static int send_line(stratum_ctx_t *ctx, const char *line)
 {
@@ -75,11 +110,23 @@ static int send_line(stratum_ctx_t *ctx, const char *line)
     if (ctx->fd < 0)
         return -1;
 
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_sec += SEND_LINE_TIMEOUT_MS / 1000;
+
     while (off < len) {
         ssize_t n = send(ctx->fd, line + off, len - off, MSG_NOSIGNAL);
         if (n > 0) {
             off += (size_t)n;
         } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            if (now.tv_sec > deadline.tv_sec ||
+                (now.tv_sec == deadline.tv_sec && now.tv_nsec > deadline.tv_nsec)) {
+                fprintf(stderr, "[stratum] send stalled >%dms — treating as dead\n",
+                        SEND_LINE_TIMEOUT_MS);
+                return -1;
+            }
             struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000 };
             nanosleep(&ts, NULL);
         } else {
@@ -285,7 +332,13 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
     /* Walk params character by character, extracting the structured fields. */
     const char *p = params;
 
-    /* helper: skip to and past the next '"', copy content, return ptr after closing '"' */
+    /* helper: skip to and past the next '"', copy content, return ptr after
+     * closing '"'. If the copy loop stops on the dst_sz cap rather than the
+     * closing quote, the value would otherwise be silently truncated — a
+     * truncated job_id/coinb1/coinb2/etc. computes a self-consistent but
+     * WRONG header/merkle-root, so reject the whole job instead (same
+     * pattern already used for an overlong extranonce1 in
+     * handle_subscribe_result). */
 #define NEXT_STR(dst, dst_sz) do { \
     while (*p && *p != '"') p++;   \
     if (!*p) return -1;            \
@@ -293,8 +346,8 @@ static int handle_notify(stratum_ctx_t *ctx, const char *params)
     size_t _len = 0;               \
     while (*p && *p != '"' && _len + 1 < (dst_sz)) { dst[_len++] = *p++; } \
     dst[_len] = '\0';              \
-    while (*p && *p != '"') p++;   \
-    if (*p == '"') p++;            \
+    if (*p != '"') return -1;      \
+    p++;                           \
 } while (0)
 
     char job_id_buf [JOB_MAX_JOBID_LEN] = {0};
@@ -564,14 +617,18 @@ int stratum_init(stratum_ctx_t *ctx,
     ctx->next_id = 1;
     ctx->difficulty = 0.0;
 
-    /* OdoCrypt shapechange interval: 10 days mainnet, 1 day testnet.
+    /* OdoCrypt shapechange interval: 10 days mainnet, 1 day testnet — these
+     * constants are the single source of truth (odocrypt_state.h), shared
+     * with the epoch-key derivation used everywhere else in the daemon, so
+     * the two can't silently drift apart (the class of bug that bit the
+     * THROUGHPUT mismatch earlier in this project).
      * Override with ODO_EPOCH_INTERVAL (seconds) or ODO_TESTNET=1. */
-    ctx->odo_interval = 10 * 24 * 60 * 60;
+    ctx->odo_interval = ODO_EPOCH_INTERVAL_MAINNET;
     {
         const char *tn = getenv("ODO_TESTNET");
         const char *iv = getenv("ODO_EPOCH_INTERVAL");
         if (tn && tn[0] == '1')
-            ctx->odo_interval = 24 * 60 * 60;
+            ctx->odo_interval = ODO_EPOCH_INTERVAL_TESTNET;
         if (iv && strtoul(iv, NULL, 10) > 0)
             ctx->odo_interval = (uint32_t)strtoul(iv, NULL, 10);
     }
