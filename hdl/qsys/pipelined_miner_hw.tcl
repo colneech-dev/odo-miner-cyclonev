@@ -95,3 +95,14 @@ add_interface_port s0 avs_waitrequest waitrequest Output 1
 add_interface irq interrupt end
 set_interface_property irq associatedAddressablePoint s0
 add_interface_port irq irq irq Output 1
+
+#
+# pll_lock: real lock status of the miner-domain PLL (u_pll_miner in
+# soc_top.v), synchronized internally into the Avalon clk domain and reported
+# as STATUS bit1 (pll_ok). Previously that bit was hardcoded to 1'b1 with no
+# actual PLL observability — a lock loss (e.g. a brownout at the core-rail
+# current ceiling this board already runs near) was invisible to the HPS.
+#
+add_interface pll_lock conduit end
+set_interface_property pll_lock associatedClock clk
+add_interface_port pll_lock miner_pll_locked pll_locked Input 1

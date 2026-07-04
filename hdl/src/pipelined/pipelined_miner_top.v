@@ -23,6 +23,9 @@ module pipelined_miner_top (
     input  wire        clk,         // Avalon / soc_system fabric clock (~55 MHz)
     input  wire        reset_n,
     input  wire        miner_clk,   // 150 MHz pipeline clock (PLL clk1)
+    input  wire        miner_pll_locked, // u_pll_miner.locked (soc_top.v), async
+                                          // to `clk` — synchronized below before
+                                          // use as STATUS bit1 (pll_ok)
 
     // Avalon-MM Lite slave
     input  wire [7:0]  avs_address,
@@ -104,16 +107,27 @@ module pipelined_miner_top (
         cmt_s1 = 0; cmt_s2 = 0; cmt_s3 = 0;
         header_m = 0; target_m = 0; settle_cnt = 0;
     end
+    // Gated by miner_rst (the synchronized reset below) so a runtime reset_n
+    // clears this state coherently instead of relying solely on the `initial`
+    // power-up values above — matches the FIFO write-side reset handling
+    // further down. Benign today (reset_n only pulses once at cold boot, no
+    // runtime soft-reset path is wired to hardware), but closes the gap for
+    // when one is added.
     always @(posedge miner_clk) begin
-        cmt_s1 <= commit_tgl;
-        cmt_s2 <= cmt_s1;
-        cmt_s3 <= cmt_s2;
-        if (cmt_s2 ^ cmt_s3) begin
-            header_m   <= header_flat;
-            target_m   <= target_flat;
-            settle_cnt <= SETTLE;
-        end else if (settle_cnt != 0) begin
-            settle_cnt <= settle_cnt - 1'b1;
+        if (miner_rst) begin
+            cmt_s1 <= 1'b0; cmt_s2 <= 1'b0; cmt_s3 <= 1'b0;
+            header_m <= {608{1'b0}}; target_m <= {256{1'b0}}; settle_cnt <= 13'd0;
+        end else begin
+            cmt_s1 <= commit_tgl;
+            cmt_s2 <= cmt_s1;
+            cmt_s3 <= cmt_s2;
+            if (cmt_s2 ^ cmt_s3) begin
+                header_m   <= header_flat;
+                target_m   <= target_flat;
+                settle_cnt <= SETTLE;
+            end else if (settle_cnt != 0) begin
+                settle_cnt <= settle_cnt - 1'b1;
+            end
         end
     end
 
@@ -128,6 +142,17 @@ module pipelined_miner_top (
         else          begin miner_rst_s1 <= 1'b0; miner_rst_s2 <= miner_rst_s1; end
     end
     wire miner_rst = miner_rst_s2;
+
+    // ------------------- PLL-lock synchronizer: miner PLL -> Avalon domain
+    // miner_pll_locked is a level signal from a different PLL's lock detector
+    // (asynchronous to `clk`), so a plain 2-flop synchronizer is sufficient —
+    // no Gray coding needed for a single bit. Read back as STATUS bit1
+    // (pll_ok); previously this was hardcoded 1'b1 with no real observability.
+    reg pll_lock_s1, pll_lock_s2;
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin pll_lock_s1 <= 1'b0; pll_lock_s2 <= 1'b0; end
+        else          begin pll_lock_s1 <= miner_pll_locked; pll_lock_s2 <= pll_lock_s1; end
+    end
 
     // ------------------------------------------- Free-running pipelined miner
     wire [31:0] found_nonce_m;
@@ -212,7 +237,7 @@ module pipelined_miner_top (
             avs_readdata = header_reg[(avs_address - ADDR_HEADER) >> 2];
         else case (avs_address)
             ADDR_CONTROL: avs_readdata = {30'h0, soft_reset, 1'b0};
-            ADDR_STATUS:  avs_readdata = {28'h0, ovf_rq2, ~found_valid, 1'b1, 1'b1};
+            ADDR_STATUS:  avs_readdata = {28'h0, ovf_rq2, ~found_valid, pll_lock_s2, 1'b1};
             ADDR_VERSION: avs_readdata = 32'h0002_0000;
             ADDR_SEED:    avs_readdata = `ODOKEY;
             ADDR_FNONCE:  avs_readdata = fnonce_a;

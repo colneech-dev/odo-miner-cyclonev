@@ -217,8 +217,16 @@ module soc_top (
             por_rst_n <= 1'b1;
         end
     end
-    // Hold fabric in reset until both the POR timer and PLL lock are satisfied.
-    wire fabric_reset_n = por_rst_n & pll_locked;
+    // Hold fabric in reset until the POR timer AND BOTH PLLs (fabric + miner)
+    // are locked. Previously only u_pll_fab's lock gated this reset; if
+    // u_pll_miner locked later, reset_n could deassert while clk_miner was
+    // still unstable/glitchy, and pipelined_miner_top's reset synchronizer
+    // (posedge miner_clk or negedge reset_n) would sample its first flop
+    // against that not-yet-settled clock. Self-correcting once the clock
+    // settles (level-sensitive input), but there's no reason to allow the
+    // race now that miner_pll_locked is wired through (see pll_lock_pll_locked
+    // above).
+    wire fabric_reset_n = por_rst_n & pll_locked & miner_pll_locked;
 
     // ---- LCD control PIO bit mapping (bit0=D/C, bit1=RESET_n, bit2=BL) ----
     wire [2:0] pio_lcd_export;
@@ -234,6 +242,9 @@ module soc_top (
 
         // 150 MHz pipelined-miner clock (exported by the pipelined component)
         .miner_clk_clk                         (clk_miner),
+        // Real miner-PLL lock status, synchronized inside the wrapper and
+        // reported as STATUS bit1 (pll_ok) — was dangling/unused before.
+        .pll_lock_pll_locked                   (miner_pll_locked),
 
         // SPI display
         .spi_lcd_SCLK                          (LCD_SCLK),

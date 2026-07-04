@@ -63,6 +63,7 @@ module tb_pipe_fifo;
 
     pipelined_miner_top dut (
         .clk(clk), .reset_n(reset_n), .miner_clk(miner_clk),
+        .miner_pll_locked(1'b1),   // sim has no real PLL; tie locked so pll_ok reads 1
         .avs_address(avs_address), .avs_read(avs_read), .avs_write(avs_write),
         .avs_writedata(avs_writedata), .avs_readdata(avs_readdata),
         .avs_waitrequest(avs_waitrequest), .irq(irq)
