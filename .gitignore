@@ -102,5 +102,11 @@ hdl/tb/vec_*/
 hdl/tb/gen_vectors
 sw/odo-webd/odo-webd
 
+# Groestl exploit-branch binaries (feat/groestl-miner MUST NEVER merge to
+# main — these must never be staged into a main-branch commit either)
+hps/odo-miner-groestl
+hps/odo-miner-groestl-new
+hps/test_stratum_fuzz
+
 # personal deploy SSH key (private already ignored)
 tools/testnet/odo-miner.pub

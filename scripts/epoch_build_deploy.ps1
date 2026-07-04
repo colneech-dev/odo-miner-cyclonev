@@ -22,7 +22,7 @@
        live fpga.rbf or reboot -- epoch-update.sh applies it at the boundary)
 
   Usage:
-    .\epoch_build_deploy.ps1 -Epoch 1781913600 -Throughput 6 -BoardIp 192.168.1.37
+    .\epoch_build_deploy.ps1 -Epoch 1781913600 -Throughput 6 -BoardIp <your-board-ip>
 
   Run from anywhere; paths are resolved relative to the repo root. The script
   writes its own log to hdl/quartus/build_epoch_<epoch>.log -- do NOT wrap the
@@ -35,7 +35,9 @@
 param(
     [Parameter(Mandatory=$true)][long]$Epoch,
     [int]$Throughput = 6,   # T=6 @ 156.25 MHz is the deployed config; per-epoch Fmax varies, so the Fmax gate (step 5) checks each build against the actual miner clock
-    [string]$BoardIp = "192.168.1.37",
+    # No default: this is a public repo (CLAUDE.md bans committing real LAN
+    # IPs) and the board's address is environment-specific. Always pass it.
+    [Parameter(Mandatory=$true)][string]$BoardIp,
     [string]$SshKey = "tools/testnet/odo-miner",
     # Filename to stage the built .rbf as on the board's FAT boot partition.
     # Default "fpga_next.rbf" is the slot epoch-update.sh's cron job watches
@@ -156,10 +158,24 @@ try {
     wsl bash -c "cp '$($SshKey -replace '\\','/')' $wslKeyTmp && chmod 600 $wslKeyTmp"
     if ($LASTEXITCODE -ne 0) { throw "failed to stage SSH key into WSL" }
 
-    wsl bash -c "scp -i $wslKeyTmp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '$($rbf -replace '\\','/')' root@${BoardIp}:/tmp/${StageAs}.staging"
+    # Pin the board's host key into a repo-local (gitignored) known_hosts file
+    # instead of disabling verification outright: StrictHostKeyChecking=no +
+    # UserKnownHostsFile=/dev/null accepts a DIFFERENT key on every single run,
+    # so it can't detect a key that legitimately changed vs. one substituted by
+    # a MITM on the LAN path. accept-new + a persistent file pins on first
+    # contact and then verifies on every run after. Relative path (like
+    # $SshKey above) so `wsl`'s automatic cwd translation resolves it under
+    # $repo without needing manual drive-letter handling.
+    $knownHostsRel = "scripts/.epoch_autorenew/known_hosts"
+    New-Item -ItemType Directory -Force -Path (Join-Path $repo "scripts/.epoch_autorenew") | Out-Null
+    $knownHostsWin = Join-Path $repo $knownHostsRel
+    if (-not (Test-Path $knownHostsWin)) { New-Item -ItemType File -Path $knownHostsWin | Out-Null }
+    $sshOpts = "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$knownHostsRel"
+
+    wsl bash -c "scp -i $wslKeyTmp $sshOpts '$($rbf -replace '\\','/')' root@${BoardIp}:/tmp/${StageAs}.staging"
     if ($LASTEXITCODE -ne 0) { throw "scp to board failed (rc=$LASTEXITCODE)" }
 
-    $remoteMd5 = wsl bash -c "ssh -i $wslKeyTmp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@$BoardIp 'mkdir -p /mnt/boot && mount -t vfat /dev/mmcblk0p1 /mnt/boot && mv /tmp/${StageAs}.staging /mnt/boot/$StageAs && sync && md5sum /mnt/boot/$StageAs && umount /mnt/boot'"
+    $remoteMd5 = wsl bash -c "ssh -i $wslKeyTmp $sshOpts root@$BoardIp 'mkdir -p /mnt/boot && mount -t vfat /dev/mmcblk0p1 /mnt/boot && mv /tmp/${StageAs}.staging /mnt/boot/$StageAs && sync && md5sum /mnt/boot/$StageAs && umount /mnt/boot'"
     if ($LASTEXITCODE -ne 0) { throw "staging on board failed (rc=$LASTEXITCODE): $remoteMd5" }
     if ($remoteMd5 -notmatch [regex]::Escape($md5.ToLower())) {
         throw "staged file md5 mismatch: local=$md5 remote-report=$remoteMd5"

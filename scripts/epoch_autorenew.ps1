@@ -26,14 +26,16 @@
        scheduled run retries) and append to the failure log.
 
   Usage:
-    .\epoch_autorenew.ps1 [-BoardIp 192.168.1.37] [-Throughput 6] [-LeadDays 2]
+    .\epoch_autorenew.ps1 -BoardIp <your-board-ip> [-Throughput 6] [-LeadDays 2]
 
   Exit code 0 on success-or-not-due-yet, non-zero on a real failure (so
   Task Scheduler's history/alerting reflects actual problems, not routine
   no-ops).
 #>
 param(
-    [string]$BoardIp = "192.168.1.37",
+    # No default: this is a public repo (CLAUDE.md bans committing real LAN
+    # IPs) and the board's address is environment-specific. Always pass it.
+    [Parameter(Mandatory=$true)][string]$BoardIp,
     [string]$SshKey = "tools/testnet/odo-miner",
     [int]$Throughput = 6,   # must match QSF VERILOG_MACRO THROUGHPUT
     [double]$LeadDays = 2.0
@@ -59,7 +61,18 @@ try {
     wsl bash -c "cp '$($SshKey -replace '\\','/')' $wslKeyTmp && chmod 600 $wslKeyTmp"
     if ($LASTEXITCODE -ne 0) { throw "failed to stage SSH key into WSL" }
 
-    $statusJson = wsl bash -c "ssh -i $wslKeyTmp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@$BoardIp 'cat /run/odod/status.json' 2>/dev/null"
+    # Pin the board's host key into a repo-local (gitignored) known_hosts file
+    # instead of disabling verification outright — see the matching comment in
+    # epoch_build_deploy.ps1. accept-new pins on first contact, then verifies
+    # on every run after (unlike StrictHostKeyChecking=no + /dev/null, which
+    # accepts a different key every single run and so never actually detects one).
+    $knownHostsRel = "scripts/.epoch_autorenew/known_hosts"
+    if (-not (Test-Path (Join-Path $repo $knownHostsRel))) {
+        New-Item -ItemType File -Path (Join-Path $repo $knownHostsRel) | Out-Null
+    }
+    $sshOpts = "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$knownHostsRel"
+
+    $statusJson = wsl bash -c "ssh -i $wslKeyTmp $sshOpts -o ConnectTimeout=10 root@$BoardIp 'cat /run/odod/status.json' 2>/dev/null"
     if ($LASTEXITCODE -ne 0 -or -not $statusJson) { throw "could not read status.json from the board (board unreachable or daemon not running)" }
 
     $status = $statusJson | ConvertFrom-Json
