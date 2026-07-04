@@ -388,7 +388,7 @@ static void handle_screen(int fd, const char *body)
 static void serve_config(int fd)
 {
     char host[128]="", port[16]="", worker[160]="", pass[64]="";
-    char testnet[8]="0";
+    char testnet[8]="0", host2[128]="", port2[16]="";
 
     FILE *f = fopen(CONF_PATH, "r");
     if (f) {
@@ -399,22 +399,25 @@ static void serve_config(int fd)
             if (!eq || line[0] == '#') continue;
             *eq = 0;
             const char *key = line, *val = eq + 1;
-            if      (strcmp(key, "ODOD_POOL_HOST") == 0) snprintf(host,    sizeof(host),    "%s", val);
-            else if (strcmp(key, "ODOD_POOL_PORT") == 0) snprintf(port,    sizeof(port),    "%s", val);
-            else if (strcmp(key, "ODOD_WORKER")    == 0) snprintf(worker,  sizeof(worker),  "%s", val);
-            else if (strcmp(key, "ODOD_PASSWORD")  == 0) snprintf(pass,    sizeof(pass),    "%s", val);
-            else if (strcmp(key, "ODO_TESTNET")    == 0) snprintf(testnet, sizeof(testnet), "%s", val);
+            if      (strcmp(key, "ODOD_POOL_HOST")  == 0) snprintf(host,    sizeof(host),    "%s", val);
+            else if (strcmp(key, "ODOD_POOL_PORT")  == 0) snprintf(port,    sizeof(port),    "%s", val);
+            else if (strcmp(key, "ODOD_WORKER")     == 0) snprintf(worker,  sizeof(worker),  "%s", val);
+            else if (strcmp(key, "ODOD_PASSWORD")   == 0) snprintf(pass,    sizeof(pass),    "%s", val);
+            else if (strcmp(key, "ODO_TESTNET")     == 0) snprintf(testnet, sizeof(testnet), "%s", val);
+            else if (strcmp(key, "ODOD_POOL_HOST2") == 0) snprintf(host2,   sizeof(host2),   "%s", val);
+            else if (strcmp(key, "ODOD_POOL_PORT2") == 0) snprintf(port2,   sizeof(port2),   "%s", val);
         }
         fclose(f);
     }
 
     /* All values were written through value_safe() so contain no '"' or '\' */
-    char body[512];
+    char body[640];
     int n = snprintf(body, sizeof(body),
         "{\"host\":\"%s\",\"port\":\"%s\",\"worker\":\"%s\","
-        "\"pass\":\"%s\",\"testnet\":%s}",
+        "\"pass\":\"%s\",\"testnet\":%s,\"host2\":\"%s\",\"port2\":\"%s\"}",
         host, port, worker, pass,
-        testnet[0] == '1' ? "true" : "false");
+        testnet[0] == '1' ? "true" : "false",
+        host2, port2);
     send_response(fd, "200 OK", "application/json", body, (size_t)n);
 }
 
