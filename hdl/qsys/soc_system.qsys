@@ -144,6 +144,7 @@
    internal="pio_thermal.external_connection"
    type="conduit"
    dir="end" />
+ <interface name="pll_lock" internal="odo_0.pll_lock" type="conduit" dir="end" />
  <interface name="pwm_fan" internal="pwm_fan.pwm" type="conduit" dir="end" />
  <interface name="reset" internal="clk_0.clk_in_reset" type="reset" dir="end" />
  <interface name="spi_lcd" internal="spi_lcd.external" type="conduit" dir="end" />
