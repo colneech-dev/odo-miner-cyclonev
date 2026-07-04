@@ -455,8 +455,20 @@ static void wlan_ip(char *ip, size_t ip_sz)
     freeifaddrs(ifa0);
 }
 
+#define WIFI_STATUS_TTL 30  /* seconds — iw dev link is slow; cache it */
+
 static void serve_wifi_status(int fd)
 {
+    static char   cache[512];
+    static size_t cache_len = 0;
+    static time_t cache_at  = 0;
+
+    time_t now = time(NULL);
+    if (cache_len > 0 && now - cache_at < WIFI_STATUS_TTL) {
+        send_response(fd, "200 OK", "application/json", cache, cache_len);
+        return;
+    }
+
     int present = access("/sys/class/net/wlan0", F_OK) == 0;
     char ssid[128] = "", ip[64] = "";
 
@@ -479,11 +491,12 @@ static void serve_wifi_status(int fd)
 
     char essid[256];
     json_escape(ssid, essid, sizeof(essid));
-    char body[512];
-    int n = snprintf(body, sizeof(body),
+    int n = snprintf(cache, sizeof(cache),
         "{\"present\":%s,\"ssid\":\"%s\",\"ip\":\"%s\"}",
         present ? "true" : "false", essid, ip);
-    send_response(fd, "200 OK", "application/json", body, (size_t)n);
+    cache_len = (size_t)n;
+    cache_at  = now;
+    send_response(fd, "200 OK", "application/json", cache, cache_len);
 }
 
 /* A full `iw scan` takes seconds and briefly interrupts the live association
