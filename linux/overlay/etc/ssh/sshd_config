@@ -1,6 +1,7 @@
 # sshd_config — remote management of the odo-miner board.
 # Key-based root login only (key: tools/testnet/odo-miner). LAN/testnet use.
 Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
 PermitRootLogin prohibit-password
 PubkeyAuthentication yes
 PasswordAuthentication no
