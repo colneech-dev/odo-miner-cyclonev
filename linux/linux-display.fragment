@@ -39,7 +39,7 @@ CONFIG_LEDS_TRIGGER_HEARTBEAT=y
 CONFIG_LEDS_TRIGGER_NETDEV=y
 
 # HPS hardware watchdog (Synopsys DesignWare WDT in the Cyclone V HPS).
-# odo-miner pets /dev/watchdog when ODOD_WATCHDOG=1 — a hung miner or
-# kernel then hard-reboots the board instead of sitting dead.
+# U-Boot SPL starts the watchdog before Linux; /etc/init.d/S10watchdog
+# (overlay) runs /sbin/watchdog to pet it. A hung board hard-reboots.
 CONFIG_WATCHDOG=y
 CONFIG_DW_WATCHDOG=y

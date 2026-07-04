@@ -1,0 +1,44 @@
+#!/bin/sh
+# S10watchdog - start the Cyclone V HPS hardware watchdog daemon.
+#
+# The DW watchdog in the HPS is started by U-Boot SPL before Linux boots.
+# If nothing pets /dev/watchdog within the timeout (~60s), the board
+# hard-reboots. This daemon pets it every 10s so the board stays up.
+#
+# Note: ODOD_WATCHDOG=0 in /etc/odod.conf (the default) means the miner
+# daemon does NOT open /dev/watchdog, so this daemon remains the sole
+# keeper throughout the board's lifetime. Only disable ODOD_WATCHDOG if
+# you also stop this daemon first (they cannot both hold /dev/watchdog).
+
+WATCHDOG_DEV=/dev/watchdog
+
+case "$1" in
+start)
+    printf 'Starting watchdog: '
+    if [ ! -c "$WATCHDOG_DEV" ]; then
+        echo "no $WATCHDOG_DEV - skipping"
+        exit 0
+    fi
+    if [ -x /sbin/watchdog ]; then
+        /sbin/watchdog
+        echo 'OK'
+    else
+        echo 'MISSING /sbin/watchdog'
+        exit 1
+    fi
+    ;;
+stop)
+    printf 'Stopping watchdog: '
+    start-stop-daemon -K -x /sbin/watchdog 2>/dev/null
+    echo 'OK'
+    ;;
+restart)
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+*)
+    echo "Usage: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
