@@ -91,7 +91,12 @@ try {
     }
 
     Write-Host "[2/6] point $qsysTcl at odo_$Epoch.v"
-    (Get-Content $qsysTcl) -replace 'add_fileset_file odo_[\d_a-z]+\.v(\s+)VERILOG PATH \.\./src/pipelined/odo_[\d_a-z]+\.v', "add_fileset_file odo_$Epoch.v`$1VERILOG PATH ../src/pipelined/odo_$Epoch.v" |
+    # NOTE: the epoch-numbered filename is always odo_<digits>.v — the pattern
+    # must require digits only (\d+), not [\d_a-z]+, or it also matches the
+    # fixed, non-epoch-specific odo_miner_core.v fileset line (its "miner_core"
+    # suffix matches [_a-z]+ too) and clobbers that reference with a duplicate
+    # of the epoch file, silently dropping odo_miner_core.v from the fileset.
+    (Get-Content $qsysTcl) -replace 'add_fileset_file odo_\d+\.v(\s+)VERILOG PATH \.\./src/pipelined/odo_\d+\.v', "add_fileset_file odo_$Epoch.v`$1VERILOG PATH ../src/pipelined/odo_$Epoch.v" |
         Set-Content $qsysTcl
     if (-not (Select-String -Path $qsysTcl -Pattern "odo_$Epoch\.v" -Quiet)) {
         throw "failed to update $qsysTcl fileset reference"
@@ -131,10 +136,16 @@ try {
             Where-Object { $_ -match "(\d+\.\d+) MHz" } | Select-Object -First 1
         if ($fmaxLine -and $fmaxLine.Line -match "; (\d+\.\d+) MHz") {
             $fmax = [double]$Matches[1]
-            # Derive miner clock from soc_top.v defparams
+            # Derive miner clock from soc_top.v defparams. Must match the
+            # u_pll_miner-QUALIFIED defparam name, not a bare "clk0_multiply_by"
+            # — soc_top.v declares u_pll_fab (55 MHz fabric clock) BEFORE
+            # u_pll_miner, so an unqualified pattern silently grabs u_pll_fab's
+            # multiplier/divider instead and validates Fmax against the wrong
+            # (much lower) target, making this gate never actually catch a
+            # miner-clock timing violation.
             $stv = Get-Content "hdl/src/soc_top.v" -Raw
-            $mul = if ($stv -match "clk0_multiply_by\s*=\s*(\d+)") { [double]$Matches[1] } else { 3 }
-            $div = if ($stv -match "clk0_divide_by\s*=\s*(\d+)") { [double]$Matches[1] } else { 1 }
+            $mul = if ($stv -match "u_pll_miner\.clk0_multiply_by\s*=\s*(\d+)") { [double]$Matches[1] } else { 3 }
+            $div = if ($stv -match "u_pll_miner\.clk0_divide_by\s*=\s*(\d+)") { [double]$Matches[1] } else { 1 }
             $targetMhz = 50.0 * $mul / $div
             Write-Host "      Fmax=$fmax MHz  target=$targetMhz MHz  margin=$([math]::Round($fmax-$targetMhz,2)) MHz"
             if ($fmax -lt $targetMhz) {
