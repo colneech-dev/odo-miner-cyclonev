@@ -105,6 +105,15 @@ BR2_PACKAGE_E2FSPROGS=y
 # linux/overlay/etc/init.d/S45wifi) gets its lease from BusyBox's own udhcpc,
 # not dhcpcd. dhcpcd's init script was never wired to anything and just
 # failed noisily at boot (missing /var/run/dhcpcd — nothing ever created it).
+#
+# ifupdown-scripts (S40network, running `ifup -a` against /etc/network/
+# interfaces) defaults to ON for any build using the default rootfs skeleton
+# (package/ifupdown-scripts/Config.in: "default y if BR2_ROOTFS_SKELETON_
+# DEFAULT") — it's independent of dhcpcd, so removing dhcpcd alone doesn't
+# drop it. This board has no /etc/network/interfaces (WiFi is entirely
+# S45wifi's own doing), so it always failed at boot too (missing /run/network,
+# nothing to bring up). Explicitly disabled since it defaults on.
+# BR2_PACKAGE_IFUPDOWN_SCRIPTS is not set
 BR2_PACKAGE_OPENSSH=y
 BR2_PACKAGE_ETHTOOL=y
 BR2_PACKAGE_NET_TOOLS=y
