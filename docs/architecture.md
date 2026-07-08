@@ -274,7 +274,7 @@ The daemon speaks **Stratum** (line-delimited JSON-RPC over TCP) to an OdoCrypt-
 - DHCP with retry; if no lease, keep retrying (don't give up).
 - Stratum reconnect with exponential backoff on disconnect.
 - Optional **failover pool list** in `/etc/odod.conf` — rotate to backup pool if primary is unreachable for N seconds.
-- A watchdog (hardware HPS watchdog or a userspace heartbeat) that reboots the board if `odod` wedges and the service supervisor can't recover it.
+- A watchdog (hardware HPS watchdog, petted by `S10watchdog`) that reboots the board if `odod` wedges and BusyBox init can't recover it.
 - NTP (or RTC) for correct `ntime` and mutation-epoch timing.
 
 ## 9. Testing & Bring-up Plan

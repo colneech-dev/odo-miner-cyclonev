@@ -94,5 +94,5 @@ when network and display are both down.
 1. BootROM (BOOTSEL=101) loads U-Boot SPL from SD raw partition (A2).
 2. SPL → U-Boot → `boot.scr`: loads `fpga.rbf`, `fpga load`, `bridge enable`,
    then `zImage` + `socfpga_cyclone5_qmtech_odo.dtb`, boots Linux.
-3. BusyBox init: dhcpcd → S45wifi (if configured) → S90odod (miner) →
+3. BusyBox init: S45wifi (wpa_supplicant + udhcpc, if configured) → S90odod (miner) →
    S95odoui (TFT panel) → S96odowebd (web dashboard, port 80).

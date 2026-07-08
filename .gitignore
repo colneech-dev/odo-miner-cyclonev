@@ -76,6 +76,7 @@ hdl/qsys/**/*.pre.*
 hdl/qsys/**/*.hex
 hdl/qsys/**/*.nlv
 hdl/qsys/**/*.rpt
+hdl/qsys/**/*.rpt.*
 hdl/qsys/**/*sdc
 hdl/qsys/**/hps_sdram_p0*
 

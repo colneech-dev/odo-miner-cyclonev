@@ -8,5 +8,7 @@ PasswordAuthentication no
 PermitEmptyPasswords no
 AuthorizedKeysFile .ssh/authorized_keys
 ChallengeResponseAuthentication no
-UsePAM no
+# No UsePAM directive: this OpenSSH build has no PAM support at all, so the
+# keyword itself (not just "yes") is unrecognized — "UsePAM no" still logs
+# "Unsupported option UsePAM" at every boot even though it's harmless.
 Subsystem sftp internal-sftp

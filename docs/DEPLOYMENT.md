@@ -30,7 +30,7 @@ Init scripts in `/etc/init.d/`, started in alphabetical order:
 
 | Script | What it does |
 |---|---|
-| `S45wifi` | Brings up wlan0 via wpa_supplicant + dhcpcd (if `/etc/wpa_supplicant.conf` exists) |
+| `S45wifi` | Brings up wlan0 via wpa_supplicant + BusyBox `udhcpc` (if `/etc/wpa_supplicant.conf` exists) |
 | `S50sshd` | Starts OpenSSH daemon |
 | `S90odod` | Starts the miner daemon — see below |
 | `S91epochcron` | Cron job that calls `epoch-update.sh` every hour to check for a staged epoch `.rbf` |

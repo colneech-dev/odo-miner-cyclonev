@@ -234,7 +234,7 @@ sdcard-output/
 - **Root filesystem (ext4, 8GB):**
   - Linux (from Buildroot, glibc 2.41)
   - SSH server, networking tools, WiFi (wpa_supplicant)
-  - supervisor + watchdog for unattended operation
+  - BusyBox init.d services + hardware watchdog for unattended operation
   - Your cross-compiled miner binaries at `/usr/bin/odo-*`
   - No on-target compiler — cross-compile on the build host
 

@@ -7,8 +7,9 @@ This guide walks you through building a minimal embedded Linux for the HPS (Hard
 - Linux kernel 6.6.26 LTS (multi_v7 + project fragments: SoCFPGA FPGA manager/bridges, Realtek USB WiFi)
 - Bootlin external toolchain — gcc 14.3 + **glibc 2.41** (2.42 is avoided deliberately: known C library bug; the prebuilt toolchain also saves ~1h of build time)
 - Essential utilities (busybox, coreutils, util-linux)
-- Mining daemon dependencies (openssl, libcurl, jansson) + supervisor/python3
-- Networking (Ethernet via dhcpcd, WiFi via wpa_supplicant + USB adapter drivers)
+- Mining daemon dependencies (openssl, libcurl, jansson)
+- Networking (WiFi via wpa_supplicant + BusyBox udhcpc + USB adapter drivers — the
+  board's actual network path; see `linux/overlay/etc/init.d/S45wifi`)
 - SD card boot support (U-Boot 2023.10 SPL, `.sfp` preloader image)
 
 **Expected output (in `output/images/`):**
@@ -94,14 +95,17 @@ Per-package parallelism comes from `BR2_JLEVEL` in the defconfig.
 Kconfig drops options whose dependencies aren't met, without warning. After `make cyclonev_defconfig`, sanity-check:
 
 ```bash
-grep -E 'BOOTLIN_ARMV7_EABIHF_GLIBC_STABLE|^BR2_ARM_EABIHF|PYTHON3=|SUPERVISOR=' .config
+grep -E 'BOOTLIN_ARMV7_EABIHF_GLIBC_STABLE|^BR2_ARM_EABIHF' .config
 ```
 
-All four should be `=y`. For a full audit: `make savedefconfig BR2_DEFCONFIG=./check.cfg` and diff `check.cfg` against `configs/cyclonev_defconfig`.
+Both should be `=y`. For a full audit: `make savedefconfig BR2_DEFCONFIG=./check.cfg` and diff `check.cfg` against `configs/cyclonev_defconfig`.
 
 Known dependency chains to be aware of:
-- `BR2_ARM_ENABLE_VFP/NEON` must be set on Cortex-A9 (optional FPU) or EABIhf — and with it the Bootlin toolchain and python3 — silently vanish.
-- `BR2_PACKAGE_SUPERVISOR` requires `BR2_PACKAGE_PYTHON3` to be set explicitly.
+- `BR2_ARM_ENABLE_VFP/NEON` must be set on Cortex-A9 (optional FPU) or EABIhf — and with it the Bootlin toolchain — silently vanish.
+
+Note: this rootfs does **not** carry Python3 or `supervisor` — process supervision is BusyBox
+`init.d` (`S90odod`, `S10watchdog`, etc.), not a service supervisor daemon. See
+`docs/DEPLOYMENT.md`.
 
 ---
 
@@ -147,7 +151,8 @@ The boot script it installs does, in order: load `fpga.rbf` into the fabric (`fp
 2. **SPL** initializes HPS clocks, pinmux, DDR3, then loads U-Boot (both from the same `.sfp` image)
 3. **U-Boot** runs `boot.scr` from the FAT partition: programs the FPGA (if `fpga.rbf` present), enables bridges, loads `zImage` + DTB
 4. **Kernel** boots, mounts the ext4 rootfs
-5. **Linux** brings up Ethernet (dhcpcd), starts sshd and supervisor → miner daemon
+5. **Linux** brings up WiFi (`S45wifi`: wpa_supplicant + udhcpc), starts sshd, then the
+   miner daemon (`S90odod`) via BusyBox init.d
 
 ---
 
@@ -191,7 +196,8 @@ The defconfig at `linux/buildroot_cyclonev_defconfig` is authoritative. Highligh
 
 **Mining stack:**
 - openssl, libcurl, jansson (Stratum + TLS)
-- supervisor (+python3) auto-restarts the miner daemon; watchdog reboots on hang
+- BusyBox init.d (`S90odod`) starts the miner daemon; hardware watchdog (`S10watchdog`)
+  reboots the board on a hang
 - Cross-compile the miner on the host — no on-target compiler exists
 
 **Display (KFB carrier):**
@@ -200,7 +206,7 @@ The defconfig at `linux/buildroot_cyclonev_defconfig` is authoritative. Highligh
 
 **Rootfs:** ext4, 8 GB. Root password `odo-miner`, hostname `odo-miner`, console on ttyS0 @ 115200.
 
-**See `docs/DEPLOYMENT.md` for post-build configuration** (NTP, watchdog, passwords, supervisor).
+**See `docs/DEPLOYMENT.md` for post-build configuration** (NTP, watchdog, passwords).
 
 ---
 

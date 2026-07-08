@@ -99,9 +99,12 @@ BR2_PACKAGE_UTIL_LINUX=y
 BR2_PACKAGE_E2FSPROGS=y
 
 # -----------------------------------------------------------------------------
-# Networking (dhcpcd is the DHCP client; ISC dhcp no longer exists in Buildroot)
+# Networking
 # -----------------------------------------------------------------------------
-BR2_PACKAGE_DHCPCD=y
+# dhcpcd removed: WiFi (the only network path this board actually uses — see
+# linux/overlay/etc/init.d/S45wifi) gets its lease from BusyBox's own udhcpc,
+# not dhcpcd. dhcpcd's init script was never wired to anything and just
+# failed noisily at boot (missing /var/run/dhcpcd — nothing ever created it).
 BR2_PACKAGE_OPENSSH=y
 BR2_PACKAGE_ETHTOOL=y
 BR2_PACKAGE_NET_TOOLS=y
@@ -148,10 +151,14 @@ BR2_PACKAGE_JANSSON=y
 
 # -----------------------------------------------------------------------------
 # System Robustness ('watch' comes from procps-ng).
-# supervisor requires python3 — without it Kconfig silently drops supervisor.
 # -----------------------------------------------------------------------------
-BR2_PACKAGE_PYTHON3=y
-BR2_PACKAGE_SUPERVISOR=y
+# python3/supervisor removed: this project's actual process supervision is
+# BusyBox init.d (S90odod, S10watchdog, etc. — see docs/DEPLOYMENT.md, which
+# already documents this as the live design and calls the systemd/supervisor
+# approach "superseded"). supervisord shipped in the rootfs anyway (stale
+# defconfig leftover from before that switch) and failed at boot every time
+# (missing /var/run/supervisord.pid directory) without anything relying on
+# it — pure noise, and a needless ~30+ MB of Python3 + supervisor in the rootfs.
 BR2_PACKAGE_LOGROTATE=y
 BR2_PACKAGE_SYSSTAT=y
 BR2_PACKAGE_WATCHDOG=y
