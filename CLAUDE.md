@@ -42,7 +42,27 @@ This repository contains a standalone Cyclone V SoC port of the `odo-miner` OdoC
 - `scripts/` — build and deployment helpers
 - `services/` — init/service unit files
 
-## Current status (2026-07-04)
+## Current status (2026-07-19)
+
+- **INCIDENT (2026-07-19): epoch renewal failed a second, independent way —
+  crond silently died, not the operator-side script this time.** The Jul 16
+  boundary (bitstream_epoch 1783296000 -> job epoch 1784160000) was staged
+  correctly days ahead as `/boot/fpga_next.rbf`, but never applied: `crond`
+  exited within ~30s of boot with zero trace in `dmesg`/syslog (no OOM, no
+  segfault) and never restarted, so the crontab entry that should have run
+  `usr/sbin/epoch-update.sh` every 5 min was simply never executed by
+  anything for 9.5 days. Board mined the stale epoch the whole time:
+  **4,535,737 of 4,645,408 shares rejected (97.6%)**. Fixed manually (mount
+  `/boot`, swap `fpga_next.rbf` into `fpga.rbf`, reboot — board back to 100%
+  accepted immediately). Root-fixed by removing the crond dependency
+  entirely: `S91epochcron` now runs `epoch-update.sh` from a plain
+  `while true; do ...; sleep 300; done` loop instead of a crond-executed
+  crontab entry (nothing else on this board used cron). Two independent
+  single-point-of-failure incidents in the epoch-renewal safety net in one
+  month (see the June 20 Task Scheduler entry below) — treat epoch renewal
+  as still fragile until it's survived a real boundary unattended.
+
+
 
 - **DEPLOYED: pipelined core** (`feat/pipelined-miner`, merged to `main`). The
   upstream pipelined `odo_encrypt` (epoch baked into LUTs, free-running nonce

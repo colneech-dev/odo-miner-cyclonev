@@ -1,6 +1,6 @@
 # Project TODO — odo-miner-cyclonev
 
-**Last updated:** 2026-07-04
+**Last updated:** 2026-07-19
 **Owner:** odo-miner-cyclonev maintainers
 **Device:** `5CSXFC6C6U23I7` — Cyclone V SX, 41,910 ALMs, 553 M10K, QMTECH KFB
 dual-SDRAM board (DE10-Nano-compatible ball-out, MiSTer-style).
@@ -80,6 +80,21 @@ with zero manual intervention, deploys go over SSH.
    hardcoded board IP in deploy scripts; SSH host-key pinning instead of
    disabled checking. **Deployed and hardware-verified**: ~25.7 MH/s,
    123/123 shares accepted, `pll_ok` reads real lock, 0 FIFO overflow.
+7. 🔴 **INCIDENT + fix (2026-07-19): crond silently died, epoch renewal
+   missed the Jul 16 boundary.** `fpga_next.rbf` was correctly pre-staged
+   days ahead, but `crond` exited ~30s after boot with zero trace in
+   dmesg/syslog and never restarted — the crontab entry was installed the
+   whole time, nothing was ever running to execute it. **4,535,737 /
+   4,645,408 shares rejected (97.6%) over 9.5 days** before caught and fixed
+   manually (swap fpga_next.rbf -> fpga.rbf, reboot). This is the SECOND
+   independent single-point-of-failure in epoch renewal this month (see #2
+   above for the June 20 Task Scheduler failure — a completely different,
+   operator-side cause). Fixed by removing the crond dependency entirely:
+   `S91epochcron` now runs `epoch-update.sh` from a plain shell loop
+   (`while true; ...; sleep 300`) instead of a crond-executed crontab entry.
+   Next real epoch boundary (Jul 26, 1785024000) is the first unattended
+   test of the new mechanism — do not assume it's fixed until it survives
+   one for real.
 
 ---
 
