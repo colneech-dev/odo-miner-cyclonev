@@ -1,7 +1,17 @@
 #!/bin/sh
-# S91epochcron — install the root crontab entry for epoch-update.sh.
-# Runs after S90odod (the miner, which writes status.json) and assumes
-# S50crond is already started (lower-numbered init scripts run first).
+# S91epochcron — run epoch-update.sh on a 5-minute loop.
+#
+# NOTE: despite the filename, this is NOT crond-based anymore. It was
+# originally a crontab installer, but crond was observed (2026-07-19) to
+# silently exit within ~30s of boot with zero trace in dmesg or syslog — no
+# OOM kill, no segfault, nothing — leaving the crontab entry correctly
+# installed but never executed. The board mined on a stale epoch bitstream
+# for 9+ days (~97.6% share rejection) before this was caught manually; the
+# staged /boot/fpga_next.rbf sat untouched the whole time. Nothing else on
+# this board uses cron, so removing the crond dependency for something this
+# safety-critical outweighs keeping the filename accurate — a plain shell
+# loop has far less surface area to fail the same silent way. Filename kept
+# so deploy tooling / docs referencing "S91epochcron" still find it.
 #
 # epoch-update.sh compares status.json's "epoch" (the pool's current job
 # epoch) against "bitstream_epoch" (what's baked into the running FPGA); when
@@ -12,25 +22,28 @@
 # trigger. The staged file is placed there by the build host ahead of time
 # (scripts/epoch_build_deploy.ps1) — this just applies it at the right moment.
 
-CRONTAB=/etc/cron/crontabs/root
-LINE="*/5 * * * * /usr/sbin/epoch-update.sh >>/var/log/epoch-update.log 2>&1"
+PIDFILE=/run/epochloop.pid
+INTERVAL=300   # 5 minutes, matching the old cron cadence
 
 start() {
-    printf "Installing epoch-update crontab: "
-    mkdir -p /etc/cron/crontabs
-    touch "$CRONTAB"
-    if ! grep -qF "epoch-update.sh" "$CRONTAB" 2>/dev/null; then
-        echo "$LINE" >> "$CRONTAB"
-    fi
-    chmod 0600 "$CRONTAB"
-    # crond re-reads crontabs automatically; nudge it if running.
-    pid=$(pidof crond)
-    [ -n "$pid" ] && kill -HUP "$pid" 2>/dev/null
+    printf "Starting epoch-update loop: "
+    (
+        while true; do
+            /usr/sbin/epoch-update.sh >>/var/log/epoch-update.log 2>&1
+            sleep "$INTERVAL"
+        done
+    ) </dev/null >/dev/null 2>&1 &
+    echo $! > "$PIDFILE"
     echo "OK"
 }
 
 stop() {
-    : # leave the crontab in place; nothing to undo
+    printf "Stopping epoch-update loop: "
+    if [ -f "$PIDFILE" ]; then
+        kill "$(cat "$PIDFILE")" 2>/dev/null
+        rm -f "$PIDFILE"
+    fi
+    echo "OK"
 }
 
 case "$1" in
