@@ -58,7 +58,9 @@ set_global_assignment -name VERILOG_MACRO "ODOKEY=1785024000"
 # routing quality varies (see odo_miner_core.v comment history), so this is
 # a retry knob, not a permanent per-epoch requirement. Remove/change for the
 # next epoch's build unless it also needs it.
-set_global_assignment -name SEED 2
+# SEED=2 closed it but thin (+0.046 ns setup); SEED=3 closes it with much
+# more margin (+0.346 ns setup, +0.333 ns hold) — kept this one.
+set_global_assignment -name SEED 3
 
 # --- Pin assignments ----------------------------------------------------------
 # Extracted from QMTECH Cyclone V SoC KFB Schematic v01 (32-bit DDR3)
