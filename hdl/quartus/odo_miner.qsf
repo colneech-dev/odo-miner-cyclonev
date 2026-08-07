@@ -49,7 +49,7 @@ set_global_assignment -name AUTO_SHIFT_REGISTER_RECOGNITION OFF
 # (the baked-in epoch seed) as Verilog macros. ODOKEY must match the
 # odo_<seed>.v listed in pipelined_miner_hw.tcl and the deployed epoch.
 set_global_assignment -name VERILOG_MACRO "THROUGHPUT=6"
-set_global_assignment -name VERILOG_MACRO "ODOKEY=1785024000"
+set_global_assignment -name VERILOG_MACRO "ODOKEY=1785888000"
 
 # Epoch 1785024000 missed timing by -0.001 ns (Slow 1100mV 100C, miner clock)
 # at the default seed (Quartus defaults to SEED=1 if unset) — this epoch's
@@ -58,9 +58,11 @@ set_global_assignment -name VERILOG_MACRO "ODOKEY=1785024000"
 # routing quality varies (see odo_miner_core.v comment history), so this is
 # a retry knob, not a permanent per-epoch requirement. Remove/change for the
 # next epoch's build unless it also needs it.
-# SEED=2 closed it but thin (+0.046 ns setup); SEED=3 closes it with much
-# more margin (+0.346 ns setup, +0.333 ns hold) — kept this one.
-set_global_assignment -name SEED 3
+# Epoch 1785888000: SEED=3 (carried over) closed timing but razor-thin
+# (+0.012 ns setup, +0.294 ns hold) — worse than SEED=2's already-flagged-thin
+# +0.046 ns on the previous epoch. SEED=4 closes it with real margin
+# (+0.215 ns setup, +0.322 ns hold) — deployed this one.
+set_global_assignment -name SEED 4
 
 # --- Pin assignments ----------------------------------------------------------
 # Extracted from QMTECH Cyclone V SoC KFB Schematic v01 (32-bit DDR3)
