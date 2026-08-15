@@ -42,6 +42,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# See the matching comment in epoch_build_deploy.ps1 -- PS 7.3+ turns any
+# stderr write from a directly-invoked native exe into a terminating error
+# under $ErrorActionPreference="Stop", regardless of exit code. This script
+# calls epoch_build_deploy.ps1 directly (& ...), so it needs the same guard
+# even though its own wsl/ssh calls weren't observed to trigger it.
+$PSNativeCommandUseErrorActionPreference = $false
 $repo = Split-Path -Parent $PSScriptRoot
 $markerDir = Join-Path $repo "scripts\.epoch_autorenew"
 $logFile   = Join-Path $markerDir "autorenew.log"

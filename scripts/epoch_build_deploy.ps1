@@ -51,6 +51,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# PS 7.3+ makes ANY stderr write from a directly-invoked (&) native exe honor
+# $ErrorActionPreference and throw -- even a harmless info/warning line with
+# exit code 0. Hit this for real: a scheduled (non-interactive) run died on
+# qsys-generate/quartus_sh printing a benign TBB allocator warning to stderr
+# ("TBBmalloc: skip allocation functions replacement..."), aborting the whole
+# build with no actual failure having occurred (2026-08-14, missed the Aug 15
+# epoch boundary as a result). Every risky step below already checks
+# $LASTEXITCODE / Test-Path explicitly and throws its own descriptive error,
+# so this PS7 behavior is pure downside here -- disable it.
+$PSNativeCommandUseErrorActionPreference = $false
 $repo = Split-Path -Parent $PSScriptRoot
 Push-Location $repo
 try {

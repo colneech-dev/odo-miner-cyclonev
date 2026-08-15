@@ -49,7 +49,7 @@ set_global_assignment -name AUTO_SHIFT_REGISTER_RECOGNITION OFF
 # (the baked-in epoch seed) as Verilog macros. ODOKEY must match the
 # odo_<seed>.v listed in pipelined_miner_hw.tcl and the deployed epoch.
 set_global_assignment -name VERILOG_MACRO "THROUGHPUT=6"
-set_global_assignment -name VERILOG_MACRO "ODOKEY=1785888000"
+set_global_assignment -name VERILOG_MACRO "ODOKEY=1786752000"
 
 # Epoch 1785024000 missed timing by -0.001 ns (Slow 1100mV 100C, miner clock)
 # at the default seed (Quartus defaults to SEED=1 if unset) — this epoch's
@@ -60,8 +60,10 @@ set_global_assignment -name VERILOG_MACRO "ODOKEY=1785888000"
 # next epoch's build unless it also needs it.
 # Epoch 1785888000: SEED=3 (carried over) closed timing but razor-thin
 # (+0.012 ns setup, +0.294 ns hold) — worse than SEED=2's already-flagged-thin
-# +0.046 ns on the previous epoch. SEED=4 closes it with real margin
-# (+0.215 ns setup, +0.322 ns hold) — deployed this one.
+# +0.046 ns on the previous epoch. SEED=4 closed it with real margin
+# (+0.215 ns setup, +0.322 ns hold) — deployed.
+# Epoch 1786752000: SEED=4 (carried over) still gives comfortable margin
+# (+0.284 ns setup, +0.347 ns hold) on this epoch's routing too — kept as-is.
 set_global_assignment -name SEED 4
 
 # --- Pin assignments ----------------------------------------------------------
