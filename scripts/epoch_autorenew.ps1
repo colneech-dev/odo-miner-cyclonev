@@ -27,6 +27,7 @@
 
   Usage:
     .\epoch_autorenew.ps1 -BoardIp <your-board-ip> [-Throughput 6] [-LeadDays 2]
+        [-MinMarginNs 0.1] [-MaxSeedAttempts 6]
 
   Exit code 0 on success-or-not-due-yet, non-zero on a real failure (so
   Task Scheduler's history/alerting reflects actual problems, not routine
@@ -38,7 +39,13 @@ param(
     [Parameter(Mandatory=$true)][string]$BoardIp,
     [string]$SshKey = "tools/testnet/odo-miner",
     [int]$Throughput = 6,   # must match QSF VERILOG_MACRO THROUGHPUT
-    [double]$LeadDays = 2.0
+    [double]$LeadDays = 2.0,
+    # Forwarded straight to epoch_build_deploy.ps1 -- see its param block for
+    # rationale. Exposed here too since this is the unattended entry point,
+    # and a hard epoch (needing more than the default 6 seed tries, or a
+    # looser/tighter margin bar) shouldn't require editing the script.
+    [double]$MinMarginNs = 0.1,
+    [int]$MaxSeedAttempts = 6
 )
 
 $ErrorActionPreference = "Stop"
@@ -105,7 +112,7 @@ try {
     }
 
     Log "DUE: building epoch $epochNext (T=$Throughput) and staging as fpga_next.rbf"
-    & (Join-Path $PSScriptRoot "epoch_build_deploy.ps1") -Epoch $epochNext -Throughput $Throughput -BoardIp $BoardIp -SshKey $SshKey -StageAs fpga_next.rbf
+    & (Join-Path $PSScriptRoot "epoch_build_deploy.ps1") -Epoch $epochNext -Throughput $Throughput -BoardIp $BoardIp -SshKey $SshKey -StageAs fpga_next.rbf -MinMarginNs $MinMarginNs -MaxSeedAttempts $MaxSeedAttempts
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) { throw "epoch_build_deploy.ps1 exited with code $LASTEXITCODE" }
 
     Set-Content -Path $marker -Value "built $(Get-Date -Format o), epoch_next was $epochNext"

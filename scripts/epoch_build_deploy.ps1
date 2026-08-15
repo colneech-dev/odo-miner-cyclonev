@@ -17,7 +17,15 @@
     4. qsys-generate (epoch RTL is pulled in via the qsys component fileset,
        unlike soc_top.v which Quartus reads directly -- qsys-generate must
        re-run to pick it up)
-    5. quartus_sh --flow compile
+    5. quartus_sh --flow compile, RETRIED ACROSS SEED VALUES until the
+       u_pll_miner clock's setup/hold slack both clear -MinMarginNs (per-epoch
+       LUT/S-box patterns route differently, so a seed that closed cleanly on
+       one epoch can be razor-thin or fail outright on the next -- this has
+       needed a manual seed bump on 2 of the last 3 epochs, see
+       docs/TODO.md/CLAUDE.md epoch-renewal incident history). Tries whatever
+       SEED is already in the QSF first, then walks 1, 2, 3, ... skipping
+       repeats, up to -MaxSeedAttempts total. The QSF is left with whichever
+       SEED won, ready to commit.
     6. scp the .rbf to the board as /boot/fpga_next.rbf (does NOT touch the
        live fpga.rbf or reboot -- epoch-update.sh applies it at the boundary)
 
@@ -34,11 +42,24 @@
 #>
 param(
     [Parameter(Mandatory=$true)][long]$Epoch,
-    [int]$Throughput = 6,   # T=6 @ 156.25 MHz is the deployed config; per-epoch Fmax varies, so the Fmax gate (step 5) checks each build against the actual miner clock
+    [int]$Throughput = 6,   # T=6 @ 156.25 MHz is the deployed config; per-epoch Fmax varies, so the timing gate (step 5) checks each build against the actual miner clock
     # No default: this is a public repo (CLAUDE.md bans committing real LAN
     # IPs) and the board's address is environment-specific. Always pass it.
     [Parameter(Mandatory=$true)][string]$BoardIp,
     [string]$SshKey = "tools/testnet/odo-miner",
+    # Minimum acceptable Slow-1100mV-100C setup/hold slack (ns) on the
+    # u_pll_miner clock before a build is considered good enough to deploy.
+    # Calibrated against project history: +0.012/+0.046 ns were both flagged
+    # "razor-thin" and re-seeded away from; +0.2-0.35 ns is the range every
+    # epoch has settled on once given a few seed tries. 0.1 sits as a real
+    # bar between those, not just "didn't go negative".
+    [double]$MinMarginNs = 0.1,
+    # How many distinct SEED values to try (starting with whatever's already
+    # in the QSF, then 1, 2, 3, ... skipping repeats) before giving up. Each
+    # attempt is a full ~25 min Quartus compile, so this is a real time
+    # budget -- 6 gives ~2.5h worst case, comfortably inside the 48h lead
+    # time epoch_autorenew.ps1 uses by default.
+    [int]$MaxSeedAttempts = 6,
     # Filename to stage the built .rbf as on the board's FAT boot partition.
     # Default "fpga_next.rbf" is the slot epoch-update.sh's cron job watches
     # for the CURRENTLY CONFIGURED pool's auto-renewal -- only use the default
@@ -61,6 +82,38 @@ $ErrorActionPreference = "Stop"
 # $LASTEXITCODE / Test-Path explicitly and throws its own descriptive error,
 # so this PS7 behavior is pure downside here -- disable it.
 $PSNativeCommandUseErrorActionPreference = $false
+
+# Parses the Slow 1100mV 100C Model Setup/Hold Summary tables in a Quartus
+# .sta.rpt for the u_pll_miner clock's slack, in ns. Each section title in
+# the report appears TWICE: once as an unprefixed numbered Table-of-Contents
+# entry ("  8. Slow 1100mV 100C Model Setup Summary"), and once as the real
+# ";"-bordered section header that precedes the actual data table. Only the
+# second form starts with ";" -- match on that to avoid reading the ToC.
+#
+# This replaces an earlier "Fmax" check that parsed the wrong line (the
+# PLL's nominal *configured* frequency, which trivially always equals the
+# target by construction) and so silently never caught a real violation --
+# every build reported "margin=0 MHz" regardless of actual timing closure.
+function Get-PllMinerSlackNs {
+    param([string]$StaRpt, [string]$SectionTitle)
+    if (-not (Test-Path $StaRpt)) { return $null }
+    $content = Get-Content $StaRpt
+    $headerIdx = -1
+    for ($i = 0; $i -lt $content.Length; $i++) {
+        if ($content[$i].TrimStart().StartsWith(";") -and $content[$i] -like "*$SectionTitle*") {
+            $headerIdx = $i
+            break
+        }
+    }
+    if ($headerIdx -lt 0) { return $null }
+    for ($i = $headerIdx; $i -lt [Math]::Min($headerIdx + 30, $content.Length); $i++) {
+        if ($content[$i] -match 'u_pll_miner.*PLL_OUTPUT_COUNTER.*divclk\s*;\s*(-?\d+\.\d+)\s*;') {
+            return [double]$Matches[1]
+        }
+    }
+    return $null
+}
+
 $repo = Split-Path -Parent $PSScriptRoot
 Push-Location $repo
 try {
@@ -127,42 +180,65 @@ try {
     Pop-Location
     if ($rc -ne 0) { throw "qsys-generate failed (rc=$rc)" }
 
-    Write-Host "[5/6] quartus_sh --flow compile (this takes ~25 min)"
-    $log = "hdl/quartus/build_epoch_$Epoch.log"
-    & "C:\altera_lite\25.1std\quartus\bin64\quartus_sh.exe" --flow compile "hdl/quartus/odo_miner" 2>&1 |
-        Tee-Object -FilePath $log
-    if (-not (Test-Path "hdl/quartus/output_files/odo_miner.rbf")) {
-        throw "compile did not produce odo_miner.rbf -- check $log"
+    Write-Host "[5/6] quartus_sh --flow compile (~25 min per SEED attempt)"
+    $currentSeed = 1
+    if ((Get-Content $qsf -Raw) -match 'set_global_assignment -name SEED (\d+)') {
+        $currentSeed = [int]$Matches[1]
+    }
+    # Try whatever seed is already in the QSF first (often a good starting
+    # point -- a prior epoch's winning seed frequently carries over cleanly),
+    # then walk fresh integers upward, skipping repeats, up to $MaxSeedAttempts.
+    $seedCandidates = @($currentSeed)
+    $next = 1
+    while ($seedCandidates.Count -lt $MaxSeedAttempts -and $next -le 1000) {
+        if ($seedCandidates -notcontains $next) { $seedCandidates += $next }
+        $next++
+    }
+
+    $staRpt = "hdl/quartus/output_files/odo_miner.sta.rpt"
+    $attemptLog = @()
+    $wonSeed = $null
+    foreach ($seed in $seedCandidates) {
+        (Get-Content $qsf) -replace 'set_global_assignment -name SEED \d+', "set_global_assignment -name SEED $seed" |
+            Set-Content $qsf
+
+        Write-Host "      --- SEED=$seed ---"
+        $log = "hdl/quartus/build_epoch_${Epoch}_seed${seed}.log"
+        & "C:\altera_lite\25.1std\quartus\bin64\quartus_sh.exe" --flow compile "hdl/quartus/odo_miner" 2>&1 |
+            Tee-Object -FilePath $log
+
+        if (-not (Test-Path "hdl/quartus/output_files/odo_miner.rbf")) {
+            Write-Host "      SEED=${seed}: compile did not produce odo_miner.rbf -- check $log"
+            $attemptLog += "SEED=${seed}: no .rbf produced"
+            continue
+        }
+
+        # Setup/hold slack on the miner clock, Slow 1100mV 100C corner --
+        # see Get-PllMinerSlackNs above for why this replaces the old (never
+        # actually functional) Fmax-line parse.
+        $setupSlack = Get-PllMinerSlackNs -StaRpt $staRpt -SectionTitle "Slow 1100mV 100C Model Setup Summary"
+        $holdSlack  = Get-PllMinerSlackNs -StaRpt $staRpt -SectionTitle "Slow 1100mV 100C Model Hold Summary"
+        if ($null -eq $setupSlack -or $null -eq $holdSlack) {
+            Write-Host "      SEED=${seed}: could not parse pll_miner setup/hold slack from $staRpt"
+            $attemptLog += "SEED=${seed}: slack unparseable"
+            continue
+        }
+
+        Write-Host "      SEED=${seed}: setup=$setupSlack ns  hold=$holdSlack ns  (need >= $MinMarginNs ns both)"
+        $attemptLog += "SEED=${seed}: setup=$setupSlack ns hold=$holdSlack ns"
+        if ($setupSlack -ge $MinMarginNs -and $holdSlack -ge $MinMarginNs) {
+            Write-Host "      SEED=$seed closes timing with margin -- keeping this build."
+            $wonSeed = $seed
+            break
+        }
+        Write-Host "      SEED=${seed}: margin too thin (or negative) -- trying next seed"
+    }
+
+    if ($null -eq $wonSeed) {
+        throw "TIMING: no SEED among {$($seedCandidates -join ', ')} closed epoch $Epoch with >= $MinMarginNs ns setup/hold margin on u_pll_miner.`n$($attemptLog -join "`n")`nTry raising -MaxSeedAttempts, lowering -MinMarginNs, or lowering the miner clock (u_pll_miner clk0_multiply_by/divide_by in soc_top.v)."
     }
     $rbfTime = (Get-Item "hdl/quartus/output_files/odo_miner.rbf").LastWriteTime
-    Write-Host "      built: $rbfTime"
-
-    # Fmax safety check: per-epoch LUT patterns affect routing, so Fmax varies
-    # per epoch. A build that meets 0 errors can still have a timing violation
-    # (Critical Warning). Parse the STA report and abort if Fmax < miner clock.
-    $staRpt = "hdl/quartus/output_files/odo_miner.sta.rpt"
-    if (Test-Path $staRpt) {
-        $fmaxLine = Select-String -Path $staRpt -Pattern "pll_miner.*PLL_OUTPUT_COUNTER.*divclk" |
-            Where-Object { $_ -match "(\d+\.\d+) MHz" } | Select-Object -First 1
-        if ($fmaxLine -and $fmaxLine.Line -match "; (\d+\.\d+) MHz") {
-            $fmax = [double]$Matches[1]
-            # Derive miner clock from soc_top.v defparams. Must match the
-            # u_pll_miner-QUALIFIED defparam name, not a bare "clk0_multiply_by"
-            # — soc_top.v declares u_pll_fab (55 MHz fabric clock) BEFORE
-            # u_pll_miner, so an unqualified pattern silently grabs u_pll_fab's
-            # multiplier/divider instead and validates Fmax against the wrong
-            # (much lower) target, making this gate never actually catch a
-            # miner-clock timing violation.
-            $stv = Get-Content "hdl/src/soc_top.v" -Raw
-            $mul = if ($stv -match "u_pll_miner\.clk0_multiply_by\s*=\s*(\d+)") { [double]$Matches[1] } else { 3 }
-            $div = if ($stv -match "u_pll_miner\.clk0_divide_by\s*=\s*(\d+)") { [double]$Matches[1] } else { 1 }
-            $targetMhz = 50.0 * $mul / $div
-            Write-Host "      Fmax=$fmax MHz  target=$targetMhz MHz  margin=$([math]::Round($fmax-$targetMhz,2)) MHz"
-            if ($fmax -lt $targetMhz) {
-                throw "TIMING VIOLATION: Fmax $fmax MHz < target $targetMhz MHz for epoch $Epoch. Lower the miner clock (u_pll_miner clk0_multiply_by/divide_by in soc_top.v) and rebuild."
-            }
-        }
-    }
+    Write-Host "      built: $rbfTime (SEED=$wonSeed)"
 
     Write-Host "[6/6] staging on the board as /boot/$StageAs"
     $rbf = "hdl/quartus/output_files/odo_miner.rbf"
@@ -203,7 +279,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "DONE. Epoch $Epoch staged as /boot/$StageAs (md5 $md5, verified)."
+    Write-Host "DONE. Epoch $Epoch (SEED=$wonSeed) staged as /boot/$StageAs (md5 $md5, verified)."
     if ($StageAs -eq "fpga_next.rbf") {
         Write-Host "The board's epoch-update.sh cron job will swap it in and reboot automatically"
         Write-Host "once the currently-running miner's job epoch diverges from its baked epoch."
