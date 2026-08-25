@@ -9,21 +9,40 @@
   epoch_next/epoch_interval off the daemon).
 
   Logic each run:
-    1. SSH to the board, read /run/odod/status.json.
+    0. If status.epoch != status.bitstream_epoch: an ACTIVE MISMATCH is
+       already happening -- the board is mining status.epoch right now with
+       the wrong bitstream baked in, shares are being rejected on THIS run,
+       not some future one. Build status.epoch immediately, ignoring lead
+       time entirely. This is not the same case as step 3 below: status.json's
+       epoch_next field always means "the epoch after status.epoch", so once
+       a boundary is actually missed and passes, epoch_next silently rolls
+       forward to the epoch AFTER the broken one -- a lead-time check against
+       epoch_next alone would then report "not due yet" for weeks while the
+       board sits on a live, un-noticed mismatch. Hit this for real: the Aug
+       25 boundary was missed (build crashed both prior attempts -- see the
+       epoch_build_deploy.ps1 header), and once it passed, this script kept
+       reporting "not due yet" against the NEXT boundary (Sep 4) forever,
+       never coming back to fix the one that was actually broken.
+    1. Otherwise: SSH to the board, read /run/odod/status.json (already done
+       for step 0's check).
     2. Lead time = min($LeadDays, interval/4) -- scales down automatically for
        a short interval (testnet) so the lead time never exceeds the cycle
        itself, while still giving mainnet's 10-day cycle a comfortable
        multi-day buffer for retries.
     3. If epoch_next is further out than the lead time: not due yet, exit
        quietly (this is the common case, most runs do nothing).
-    4. If due: check $MarkerDir for a "this epoch_next already built+staged"
-       marker (written on success) -- skip if present (idempotent re-runs,
-       e.g. Task Scheduler firing again before the next boundary).
-    5. Otherwise: run epoch_build_deploy.ps1 -Epoch epoch_next (default
-       -StageAs fpga_next.rbf -- correct here since epoch_next IS the next
-       epoch for whichever pool is CURRENTLY live on the board). On success,
-       write the marker. On failure, throw (no marker written, so the next
-       scheduled run retries) and append to the failure log.
+    4. If due (step 0 or step 3): check $MarkerDir for a "this target epoch
+       already built+staged" marker (written on success) -- skip if present
+       (idempotent re-runs, e.g. Task Scheduler firing again before the next
+       boundary).
+    5. Otherwise: run epoch_build_deploy.ps1 -Epoch <target> (default
+       -StageAs fpga_next.rbf -- correct in both cases: either it's the next
+       epoch for whichever pool is CURRENTLY live on the board, or it's the
+       CURRENT epoch during an active mismatch, and the board's own
+       epoch-update.sh loop swaps fpga_next.rbf in as soon as it sees the
+       mismatch regardless of which case staged it). On success, write the
+       marker. On failure, throw (no marker written, so the next scheduled
+       run retries) and append to the failure log.
 
   Usage:
     .\epoch_autorenew.ps1 -BoardIp <your-board-ip> [-Throughput 6] [-LeadDays 2]
@@ -89,34 +108,45 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not $statusJson) { throw "could not read status.json from the board (board unreachable or daemon not running)" }
 
     $status = $statusJson | ConvertFrom-Json
-    $epochNext     = [long]$status.epoch_next
-    $epochInterval = [long]$status.epoch_interval
+    $currentEpoch   = [long]$status.epoch
     $bitstreamEpoch = [long]$status.bitstream_epoch
+    $epochNext      = [long]$status.epoch_next
+    $epochInterval  = [long]$status.epoch_interval
     if ($epochNext -eq 0 -or $epochInterval -eq 0) { throw "status.json missing epoch_next/epoch_interval (old daemon build?)" }
 
-    $nowUnix = [long][double]::Parse((Get-Date -UFormat %s -Millisecond 0))
-    $remaining = $epochNext - $nowUnix
-    $leadSeconds = [Math]::Min($LeadDays * 86400, $epochInterval / 4.0)
+    if ($currentEpoch -ne 0 -and $currentEpoch -ne $bitstreamEpoch) {
+        # ACTIVE MISMATCH -- see step 0 in the header comment. Build the
+        # CURRENT epoch right now, not epoch_next (epoch_next has already
+        # rolled past the broken one).
+        $targetEpoch = $currentEpoch
+        Log "MISMATCH: board is mining epoch $currentEpoch but bitstream is $bitstreamEpoch -- building $targetEpoch NOW, ignoring lead time"
+    } else {
+        $nowUnix = [long][double]::Parse((Get-Date -UFormat %s -Millisecond 0))
+        $remaining = $epochNext - $nowUnix
+        $leadSeconds = [Math]::Min($LeadDays * 86400, $epochInterval / 4.0)
 
-    Log "pool=$($status.pool) bitstream_epoch=$bitstreamEpoch epoch_next=$epochNext remaining=$([Math]::Round($remaining/3600,1))h lead=$([Math]::Round($leadSeconds/3600,1))h"
+        Log "pool=$($status.pool) bitstream_epoch=$bitstreamEpoch epoch_next=$epochNext remaining=$([Math]::Round($remaining/3600,1))h lead=$([Math]::Round($leadSeconds/3600,1))h"
 
-    if ($remaining -gt $leadSeconds) {
-        Log "not due yet -- nothing to do"
-        exit 0
+        if ($remaining -gt $leadSeconds) {
+            Log "not due yet -- nothing to do"
+            exit 0
+        }
+        $targetEpoch = $epochNext
     }
 
-    $marker = Join-Path $markerDir "staged_$epochNext.done"
+    $marker = Join-Path $markerDir "staged_$targetEpoch.done"
     if (Test-Path $marker) {
-        Log "epoch $epochNext already built+staged (marker present) -- nothing to do"
+        Log "epoch $targetEpoch already built+staged (marker present) -- nothing to do"
         exit 0
     }
 
-    Log "DUE: building epoch $epochNext (T=$Throughput) and staging as fpga_next.rbf"
-    & (Join-Path $PSScriptRoot "epoch_build_deploy.ps1") -Epoch $epochNext -Throughput $Throughput -BoardIp $BoardIp -SshKey $SshKey -StageAs fpga_next.rbf -MinMarginNs $MinMarginNs -MaxSeedAttempts $MaxSeedAttempts
+    Log "DUE: building epoch $targetEpoch (T=$Throughput) and staging as fpga_next.rbf"
+    & (Join-Path $PSScriptRoot "epoch_build_deploy.ps1") -Epoch $targetEpoch -Throughput $Throughput -BoardIp $BoardIp -SshKey $SshKey -StageAs fpga_next.rbf -MinMarginNs $MinMarginNs -MaxSeedAttempts $MaxSeedAttempts
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) { throw "epoch_build_deploy.ps1 exited with code $LASTEXITCODE" }
 
-    Set-Content -Path $marker -Value "built $(Get-Date -Format o), epoch_next was $epochNext"
-    Log "SUCCESS: epoch $epochNext staged as fpga_next.rbf; board's epoch-update.sh cron will swap it in at the boundary"
+    Set-Content -Path $marker -Value "built $(Get-Date -Format o), target epoch was $targetEpoch"
+    $applyNote = if ($targetEpoch -eq $currentEpoch) { "immediately (mismatch already active)" } else { "at the boundary" }
+    Log "SUCCESS: epoch $targetEpoch staged as fpga_next.rbf; board's epoch-update.sh cron will swap it in $applyNote"
 }
 catch {
     Log "FAILURE: $($_.Exception.Message)"

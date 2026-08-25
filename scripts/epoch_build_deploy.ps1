@@ -72,15 +72,17 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-# PS 7.3+ makes ANY stderr write from a directly-invoked (&) native exe honor
-# $ErrorActionPreference and throw -- even a harmless info/warning line with
-# exit code 0. Hit this for real: a scheduled (non-interactive) run died on
-# qsys-generate/quartus_sh printing a benign TBB allocator warning to stderr
-# ("TBBmalloc: skip allocation functions replacement..."), aborting the whole
-# build with no actual failure having occurred (2026-08-14, missed the Aug 15
-# epoch boundary as a result). Every risky step below already checks
-# $LASTEXITCODE / Test-Path explicitly and throws its own descriptive error,
-# so this PS7 behavior is pure downside here -- disable it.
+# PS 7.3+ makes an UNREDIRECTED native exe's stderr writes honor
+# $ErrorActionPreference and throw, even a harmless info line with exit code
+# 0. Disabling this covers step 4's bare qsys-generate invocation. It does
+# NOT cover step 5's quartus_sh call, which explicitly merges stderr via
+# 2>&1 -- that path has its own, older, version-independent guard (a locally
+# scoped $ErrorActionPreference="Continue" right around that call) because
+# this setting alone does nothing for redirected stderr. See the comment at
+# that call site: a benign Quartus/TBB allocator stderr line
+# ("TBBmalloc: skip allocation functions replacement...") killed scheduled
+# runs on 2026-08-14, -23, and -24 this way, missing the Aug 15 AND Aug 25
+# boundaries -- this single-flag fix from the first incident was incomplete.
 $PSNativeCommandUseErrorActionPreference = $false
 
 # Parses the Slow 1100mV 100C Model Setup/Hold Summary tables in a Quartus
@@ -175,8 +177,12 @@ try {
     Write-Host "[4/6] qsys-generate (picks up the new epoch RTL fileset)"
     $qsysGen = "C:\altera_lite\25.1std\quartus\sopc_builder\bin\qsys-generate.exe"
     Push-Location hdl/qsys
+    # See the big comment above quartus_sh in step 5 -- same guard needed here.
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & $qsysGen soc_system.qsys --synthesis=VERILOG --output-directory=soc_system "--search-path=$(Get-Location),`$"
     $rc = $LASTEXITCODE
+    $ErrorActionPreference = $savedEap
     Pop-Location
     if ($rc -ne 0) { throw "qsys-generate failed (rc=$rc)" }
 
@@ -204,8 +210,22 @@ try {
 
         Write-Host "      --- SEED=$seed ---"
         $log = "hdl/quartus/build_epoch_${Epoch}_seed${seed}.log"
+        # $PSNativeCommandUseErrorActionPreference=$false (top of script) only
+        # suppresses PS 7.3+'s automatic promotion of an UNREDIRECTED native
+        # exe's stderr writes to terminating errors. This call explicitly
+        # merges stderr via 2>&1, which has ALWAYS turned into a terminating
+        # error under $ErrorActionPreference="Stop" in every PowerShell
+        # version (5.1 included) -- that setting does nothing for it. This is
+        # what actually killed the Aug 14/23/24 scheduled runs on a benign
+        # Quartus/TBB allocator stderr line; the fix above only ever covered
+        # step 4's bare (non-redirected) invocation. Scope Continue locally
+        # so a stderr line doesn't abort the run -- $LASTEXITCODE and the
+        # Test-Path check below are the real, already-existing success gate.
+        $savedEap = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         & "C:\altera_lite\25.1std\quartus\bin64\quartus_sh.exe" --flow compile "hdl/quartus/odo_miner" 2>&1 |
             Tee-Object -FilePath $log
+        $ErrorActionPreference = $savedEap
 
         if (-not (Test-Path "hdl/quartus/output_files/odo_miner.rbf")) {
             Write-Host "      SEED=${seed}: compile did not produce odo_miner.rbf -- check $log"
