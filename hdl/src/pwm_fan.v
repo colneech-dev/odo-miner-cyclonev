@@ -7,6 +7,19 @@
 //
 // Register map (byte address, 32-bit access):
 //   0x00  DUTY  [7:0] - 0 = off, 255 = full speed. Read returns last write.
+//
+// Resets to FULL SPEED (255), not off. The miner core free-runs with no
+// software start/stop (see pipelined_miner_top.v) -- it begins hashing at
+// full throughput the instant reset_n releases, well before Linux has
+// booted far enough to run the thermal daemon and take over fan control
+// (hps/thermal.c's own thermal_init() explicitly zeroes the fan too, but
+// only once it starts, and even then the first real DS18B20 reading has a
+// 750ms conversion delay). Defaulting to off left a real fan-less window
+// from FPGA configuration through however long boot happens to take that
+// run, with the core already at full heat output -- an intermittent,
+// boot-time-dependent brownout/reset-loop risk, not tied to any specific
+// epoch's bitstream. Software still explicitly manages the fan curve once
+// the daemon is up; this only covers the gap before that.
 
 module pwm_fan (
     input  wire        clk,
@@ -31,7 +44,7 @@ module pwm_fan (
 
     always @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            duty <= 8'h0;
+            duty <= 8'hFF;   // full speed until software takes over -- see header comment
         end else if (avs_write && avs_address == ADDR_DUTY) begin
             duty <= avs_writedata[7:0];
         end

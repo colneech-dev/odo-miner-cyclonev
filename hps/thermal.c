@@ -44,7 +44,12 @@ static struct {
     volatile uint8_t  *pwm_regs;   /* pwm_fan block base */
 } g_th = { .fd = -1, .map_base = NULL, .regs = NULL, .pwm_regs = NULL };
 
-static int  g_fan_pct = 0;
+/* Must match pwm_fan.v's post-reset duty (255 = 100%), not "off" -- see the
+ * comment in thermal_init(). thermal_fan_update()'s ramp/hysteresis logic
+ * branches on this to decide what to do with the very first reading, so it
+ * has to reflect what the hardware is actually doing at daemon startup,
+ * not an assumed-off state software never actually set. */
+static int  g_fan_pct = 100;
 
 /* ---------- register helpers ------------------------------------------ */
 
@@ -220,7 +225,20 @@ int thermal_init(void)
     /* Fixed directions: tach/reset=input, one-wire starts released (input)
      * until a transaction drives it. */
     pio_wr(PIO_REG_DIR, 0);
-    thermal_fan_set_pct(0);
+
+    /* Deliberately do NOT touch the fan here. pwm_fan.v now resets to full
+     * speed (255) in hardware, not off -- the miner core free-runs with no
+     * software start/stop and begins hashing at full throughput the instant
+     * the fabric comes out of reset, well before this daemon even starts,
+     * let alone gets its first real temperature reading (thermal_read_c()'s
+     * DS18B20 conversion alone takes ~750ms). Calling thermal_fan_set_pct(0)
+     * here would immediately undo that hardware safety margin and reopen
+     * the exact fan-less window it exists to close. g_fan_pct is seeded to
+     * match the real hardware state (see its declaration) so the normal
+     * thermal_fan_update() ramp/hysteresis logic takes over correctly and
+     * safely on the very first reading, instead of the fan sitting
+     * needlessly at full speed forever because software's tracked state
+     * never matched what the hardware was actually doing. */
 
     fprintf(stderr, "[thermal] pio_thermal mapped at LWH2F+0x%lx, pwm_fan at LWH2F+0x%lx\n",
             (unsigned long)THERMAL_PIO_OFFSET, (unsigned long)PWM_FAN_OFFSET);
