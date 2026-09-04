@@ -49,7 +49,7 @@ set_global_assignment -name AUTO_SHIFT_REGISTER_RECOGNITION OFF
 # (the baked-in epoch seed) as Verilog macros. ODOKEY must match the
 # odo_<seed>.v listed in pipelined_miner_hw.tcl and the deployed epoch.
 set_global_assignment -name VERILOG_MACRO "THROUGHPUT=6"
-set_global_assignment -name VERILOG_MACRO "ODOKEY=1786752000"
+set_global_assignment -name VERILOG_MACRO "ODOKEY=1788480000"
 
 # Epoch 1785024000 missed timing by -0.001 ns (Slow 1100mV 100C, miner clock)
 # at the default seed (Quartus defaults to SEED=1 if unset) — this epoch's
@@ -64,7 +64,16 @@ set_global_assignment -name VERILOG_MACRO "ODOKEY=1786752000"
 # (+0.215 ns setup, +0.322 ns hold) — deployed.
 # Epoch 1786752000: SEED=4 (carried over) still gives comfortable margin
 # (+0.284 ns setup, +0.347 ns hold) on this epoch's routing too — kept as-is.
-set_global_assignment -name SEED 4
+# Epoch 1787616000: SEED=4 (carried over) closed with +0.196 ns setup,
+# +0.356 ns hold — deployed and ran clean for ~10 days. (Note: this qsf
+# change itself was never committed at the time, in the middle of the
+# 2026-08-25 board-crash incident -- recorded here after the fact so the
+# history in this comment block stays accurate; the epoch WAS built and
+# hardware-verified, only the commit was missed.)
+# Epoch 1788480000: SEED=4 (carried over) came in razor-thin (+0.022 ns
+# setup); SEED=1 was an outright violation (-0.211 ns setup). SEED=2 closes
+# with real margin (+0.188 ns setup, +0.348 ns hold) — kept.
+set_global_assignment -name SEED 2
 
 # --- Pin assignments ----------------------------------------------------------
 # Extracted from QMTECH Cyclone V SoC KFB Schematic v01 (32-bit DDR3)
