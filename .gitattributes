@@ -15,3 +15,8 @@ makefile text eol=lf
 # "bad interpreter: ^M" and the board boots to a dead miner/wifi/ssh.
 linux/overlay/etc/init.d/* text eol=lf
 linux/overlay/usr/sbin/*   text eol=lf
+
+# S11modules parses these with `while read -r module args`, so a CRLF checkout
+# would hand modprobe a module name with a trailing ^M and silently load
+# nothing — i.e. a board that boots with no WiFi driver and no network.
+linux/overlay/etc/modules-load.d/* text eol=lf

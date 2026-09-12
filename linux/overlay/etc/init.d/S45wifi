@@ -22,7 +22,11 @@ CTRL_IFACE=/tmp/wpa_supplicant
 # modprobe can't find it without depmod; use insmod with a full path instead.
 RTL8188EU_KO=/lib/modules/$(uname -r)/kernel/drivers/staging/r8188eu/8188eu.ko
 # Fallback in-kernel drivers tried if 8188eu doesn't load.
-WIFI_MODULES_FALLBACK="rtl8xxxu rtl8192cu mt7601u"
+# rtw88_8821cu drives the RTL8811CU/RTL8821CU dual-band adapter (0bda:c811)
+# fitted 2026-09-13; it is ALSO loaded unconditionally from
+# /etc/modules-load.d/rtw88.conf, because this list is only reached when
+# 8188eu.ko is absent. Keep both in sync.
+WIFI_MODULES_FALLBACK="rtw88_8821cu rtl8xxxu rtl8192cu mt7601u"
 
 start() {
     printf "Starting WiFi: "
