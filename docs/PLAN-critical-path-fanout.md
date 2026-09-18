@@ -92,6 +92,62 @@ The reason it is still worth measuring: **routing is ~50% of total power**
 is the only lever found so far that could plausibly move power and speed in the
 same direction.
 
+## RESULT — step 1 measured 2026-09-18
+
+Same epoch (1789344000), same SEED=2, SDC untouched. Only `MAX_FANOUT 64` on
+`progress[1]` changed, so the delta is attributable.
+
+| | baseline | MAX_FANOUT 64 | delta |
+|---|---|---|---|
+| **Fmax (Slow 1100mV 100C)** | 160.15 MHz | **164.31 MHz** | **+4.16 MHz** |
+| **setup slack @ 156.25 MHz** | +0.156 ns | **+0.314 ns** | **+0.158 ns** |
+| hold slack | +0.347 ns | +0.341 ns | −0.006 ns |
+| ALM | 20,425 (49%) | 21,011 (50%) | +586 |
+
+**Mechanism confirmed, not just the outcome:** `progress[1]` no longer appears
+in the fitter's Non-Global High Fan-Out Signals table at all (was 646 loads), so
+the duplication happened and each copy now drives ≤64. The +586 ALM is larger
+than the ~10 registers predicted, because Quartus duplicated the driver's logic
+cone rather than only the flop — immaterial against ~21k spare.
+
+Slightly better than AM01's +0.090 ns from the same technique.
+
+### Step 2 is now refuted — do not do it
+
+The critical path moved off the strobe entirely:
+
+```
+0.314  odo_sbox_small33:sbox49inst|out[2]   -> odo_encrypt_loop|state[4][556]
+0.315  odo_encrypt_loop:crypter|out[380]    -> odo_encrypt_loop|state[0][258]
+0.434  keccak_hasher:hash|state[0][469]     -> keccak_buffer:buffer|stateout[758]
+0.460  odo_sbox_small14:sbox21inst|out[1]   -> odo_encrypt_loop|state[8][622]
+```
+
+`progress[1]` is gone from the worst-path list; the limiter is now S-box→state
+datapath, i.e. the cipher itself. The remaining high-fanout strobes
+(`miner_rst_s2` 903, `settle_cnt[1]~14` 864, `progress[173]` 813) are **not on
+the critical path**, so constraining them should be expected to buy nothing.
+Recorded as a negative result so nobody spends builds rediscovering it. This is
+also where AM01 arrived: once the strobe is fixed, what is left is the cipher,
+and their S-box duplication "works and loses".
+
+### What the win is actually worth
+
+Fmax 164.31 MHz against a 156.25 MHz constraint is 5.2% of timing headroom.
+Converting it needs a PLL ratio change, and the honest arithmetic is tight:
+
+| target | PLL (50 MHz ×M/N) | slack vs Fmax 164.31 | verdict |
+|---|---|---|---|
+| 160.00 MHz | 16/5 | +0.164 ns | clears the 0.1 ns bar |
+| 162.50 MHz | 13/4 | +0.068 ns | **below our own MinMarginNs gate** |
+| 164.29 MHz | 23/7 | ~0 | no margin at all |
+
+So the realistic step is **160 MHz, ~+2.4% (≈26.6 MH/s)** — not the full 5.2%.
+And it must be treated as a separate controlled experiment, because raising the
+clock raises power on a board whose ceiling is power: ~+2.4% frequency on ~1.8 A
+against a ~2.0–2.2 A limit is comfortable, but it is a different variable and
+should not be folded into this one.
+
 ## Risks
 
 | Risk | Handling |
