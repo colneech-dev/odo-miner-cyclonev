@@ -75,6 +75,35 @@ set_global_assignment -name VERILOG_MACRO "ODOKEY=1789344000"
 # with real margin (+0.188 ns setup, +0.348 ns hold) — kept.
 set_global_assignment -name SEED 2
 
+# --- Critical-path fanout (perf/critical-path-fanout) -------------------------
+# progress[1] is the enable into odo_encrypt_loop:
+#
+#     odo_encrypt_loop crypter(clk, state[1], progress[1], out, write);
+#
+# i.e. one register gating the load of the 640-bit state array. The fitter's
+# own Non-Global High Fan-Out Signals table measures it at 646 loads, and
+# report_timing puts it at the launch end of 3 of the 6 worst setup paths --
+# the true critical path is this control strobe, NOT the cipher datapath or
+# the S-boxes. The path is also routing-dominated: interconnect is 55-82% of
+# the delay on those paths (one net alone is 4.645 ns of a 5.637 ns path).
+#
+# Capping fanout makes Quartus duplicate the driver so each copy feeds fewer
+# loads over shorter wires. progress is a plain shift register with a single
+# source (progress[0]), so duplication is functionally free -- every copy sees
+# the same input, and whichever copy feeds progress[2] is immaterial. Cost is
+# ~10 extra registers against ~21k spare ALMs.
+#
+# Deliberately the ONLY change in this build, so the slack delta is
+# attributable. The SDC is untouched, so slack stays comparable to the
+# baseline measured on the same epoch/seed:
+#
+#     epoch 1789344000, SEED=2 -- Fmax 160.15 MHz, setup +0.156, hold +0.347
+#
+# See docs/PLAN-critical-path-fanout.md. Prior art: the AM01 project found the
+# same shape (a control strobe, not the cipher) and won +0.090 ns from
+# max_fanout plus +0.438 ns from over-constraining.
+set_instance_assignment -name MAX_FANOUT 64 -to "soc_system:u_soc|pipelined_miner_top:odo_0|miner:u_miner|odo_keccak:worker|odo_encrypt:crypt|progress[1]"
+
 # --- Pin assignments ----------------------------------------------------------
 # Extracted from QMTECH Cyclone V SoC KFB Schematic v01 (32-bit DDR3)
 
