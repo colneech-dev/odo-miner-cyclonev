@@ -148,6 +148,54 @@ clock raises power on a board whose ceiling is power: ~+2.4% frequency on ~1.8 A
 against a ~2.0–2.2 A limit is comfortable, but it is a different variable and
 should not be folded into this one.
 
+## RESULT — 160 MHz FAILED, and the reasoning behind it was wrong
+
+Built 2026-09-19: PLL 25/8 → 16/5, fanout fix retained, same epoch, SEED=2.
+
+| build | constraint | Fmax | setup | verdict |
+|---|---|---|---|---|
+| A deployed | 156.25 MHz | 160.15 MHz | +0.156 ns | shipping |
+| B fanout | 156.25 MHz | 164.31 MHz | +0.314 ns | good |
+| **C clock** | **160.00 MHz** | **158.96 MHz** | **−0.041 ns** | **FAILS** |
+
+Negative slack, and **Fmax fell** from 164.31 to 158.96 when the constraint rose.
+
+### The mistake, stated plainly
+
+The prediction table above ("160.00 MHz → +0.164 ns") treated Fmax as a fixed
+property of the netlist — a budget of speed that could be spent. It is not. The
+fitter solves whatever constraint it is handed; at 156.25 MHz with slack to
+spare it happened to land a placement good for 164.31 MHz, and asked for 160 MHz
+it explored a different, harder problem and landed on one worth only 158.96.
+
+Reading Fmax off a loose build to justify a tighter constraint is invalid. The
+only way to know whether a clock closes is to build at that clock.
+
+AM01 documented the same anti-correlation before this build was started
+(`880f660`, "212.5 MHz: slower, more slack, far worse. Slack is
+anti-correlated") — the evidence was available and was not applied.
+
+### What survives
+
+Build B is unaffected and stands on its own merit. It is **not** a hashrate
+change; it is a robustness change:
+
+- setup margin doubles, +0.156 → +0.314 ns, for +586 ALM and no RTL edit
+- this project has had epochs land at **+0.022 ns** and **−0.211 ns**, forcing
+  seed retries, and an epoch boundary was missed while that played out
+
+Double the baseline margin means future epochs are materially more likely to
+close on the first seed. That is worth shipping even at identical MH/s.
+
+### If 160 MHz is revisited
+
+SEED=2 is a single sample and seeds move Fmax by more than the ~1.2 MHz shortfall
+here — `epoch_build_deploy.ps1` already automates that sweep. It was not run
+because the prize is +2.4% and **power, not timing, is this board's binding
+constraint**: ~1.8 A against a ~2.0–2.2 A limit, with T=5 a measured brownout.
+Spending hours of compile to chase 2.4% into a power wall is poor value while
+the fanout win is already banked.
+
 ## Risks
 
 | Risk | Handling |

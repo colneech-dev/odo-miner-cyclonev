@@ -156,15 +156,34 @@ module soc_top (
     // Dedicated PLL for the pipelined OdoCrypt core. DEPLOYED CONFIG:
     // THROUGHPUT=6 @ 156.25 MHz ≈ 26.0 MH/s raw (see odo_miner.qsf VERILOG_MACRO).
     // Ratio 25/8 → 156.25 MHz; VCO = 1250 MHz (within 600–1600 MHz spec).
-    // Epoch 1782432000 Fmax = 159.24 MHz @ Slow/100C → +2.99 MHz margin.
     // Separate from u_pll_fab so the 156.25 MHz and 55 MHz domains don't share a
     // VCO solution. Exported into soc_system as miner_clk_clk; the wrapper's CDC
     // bridges 55<->156.25 MHz.
+    //
+    // 160 MHz (16/5) WAS TRIED AND FAILED — 2026-09-19, branch
+    // perf/critical-path-fanout. Do not retry it on this seed without reading
+    // docs/PLAN-critical-path-fanout.md first. Measured, same epoch, SEED=2:
+    //
+    //     156.25 MHz constraint  ->  Fmax 164.31 MHz, setup +0.314 ns
+    //     160.00 MHz constraint  ->  Fmax 158.96 MHz, setup -0.041 ns  (FAILS)
+    //
+    // Fmax went DOWN when the constraint went up. Fmax is not a fixed property
+    // of the netlist that can be "spent": the fitter solves whatever constraint
+    // it is given, and the 160 MHz problem led it to a worse placement than the
+    // 156.25 MHz one. Reading 164.31 off a 156.25 MHz build and concluding that
+    // 160 MHz has +0.164 ns of room is exactly the mistake that produced this
+    // failed build. AM01 hit the same anti-correlation independently ("slower,
+    // more slack, far worse. Slack is anti-correlated").
+    //
+    // A seed sweep may still close 160 MHz — SEED=2 is one sample, and
+    // epoch_build_deploy.ps1 already automates that search. It was not tried
+    // here because the payoff is only +2.4% and power, not timing, is this
+    // board's binding constraint.
+    //
     // POWER NOTE: the earlier brownouts were all at THROUGHPUT=4 (150 and 125 MHz)
     // — T=4 unrolls ~2x the pipeline logic and browned the core rail. T=6 @ 150
     // MHz soaked stable (core rail ~1.8 A, brownout ~2.0–2.2 A). 156.25 MHz is a
     // 4.2% clock step so power increase is ~0.075 A — well within the margin.
-    // If this is stable under sustained load, 137.5 MHz (×11/4) is the next step.
     wire        clk_miner;
     wire        miner_pll_locked;
     wire [5:0]  miner_clk_bus;
