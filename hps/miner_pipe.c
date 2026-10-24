@@ -27,6 +27,7 @@
 #include "KeccakP-800-SnP.h"
 #include "miner_io_pipe.h"
 #include "thermal.h"
+#include "reject_log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +41,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/reboot.h>
+#include <sys/stat.h>
 
 static volatile sig_atomic_t g_term = 0;
 static void on_sig(int s) { (void)s; g_term = 1; }
@@ -258,6 +260,69 @@ static double mono_s(void)
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
+/* ---- pool rejects: which share, and why (reject_log.h) ---------------------------------------------------------
+ * stratum.c prints the raw reply, which names only a request id. Every submit is remembered by id here, and the
+ * stratum client's on_submit_result hook turns a reject into one line carrying the pool's reason, the job and the
+ * nonce, in the journal AND in a size-bounded file that survives journal rotation and reboots. */
+#define PIPE_REJECT_PATH      "/var/lib/odod/rejects.log"
+#define PIPE_REJECT_MAX_BYTES (256 * 1024)       /* then renamed to .1: at most ~512 KB in all */
+
+static struct submit_ring g_subring;
+
+static void reject_persist(const char *text)
+{
+    struct stat sb;
+    if (stat(PIPE_REJECT_PATH, &sb) == 0 && sb.st_size > PIPE_REJECT_MAX_BYTES)
+        (void)rename(PIPE_REJECT_PATH, PIPE_REJECT_PATH ".1");
+    FILE *f = fopen(PIPE_REJECT_PATH, "a");
+    if (!f) {
+        static int moaned;            /* once: a log that cannot be written is worth one line, not one per reject */
+        if (!moaned) {
+            moaned = 1;
+            fprintf(stderr, "[pipe] cannot write %s: %s -- rejects will only be in the journal\n",
+                    PIPE_REJECT_PATH, strerror(errno));
+        }
+        return;
+    }
+    time_t now = time(NULL);
+    struct tm tmv;
+    char ts[32] = "?";
+    if (gmtime_r(&now, &tmv))
+        strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+    fprintf(f, "%s %s\n", ts, text);
+    fclose(f);
+}
+
+static void on_submit_result(void *user, uint64_t id, bool accepted, const char *line)
+{
+    (void)user;
+    if (accepted)
+        return;
+    char reason[REJECT_REASON_MAX];
+    char text[256];
+    long code;
+    reject_extract(line, reason, sizeof reason, &code);
+    reject_format(text, sizeof text, id, reason, code, submit_ring_find(&g_subring, id), time(NULL));
+    printf("[pipe] %s\n", text);
+    reject_persist(text);
+}
+
+/* stratum_init() memsets the context, so the hook must be installed again after EVERY init (pool failover too). */
+static void install_stratum_hooks(stratum_ctx_t *st)
+{
+    st->on_submit_result = on_submit_result;
+    st->on_submit_result_user = NULL;
+}
+
+/* stratum_submit_share() plus the bookkeeping that lets a later reject name its share. */
+static int submit_tracked(stratum_ctx_t *st, const job_t *job, uint32_t nonce)
+{
+    int rc = stratum_submit_share(st, job, nonce);
+    if (rc == 0)
+        submit_ring_put(&g_subring, st->next_id - 1, job->job_id, nonce, time(NULL));
+    return rc;
+}
+
 static void status_write(void)
 {
     const char *path = getenv("ODOD_STATUS_FILE");
@@ -376,6 +441,7 @@ int main(int argc, char **argv)
         return 1;
     }
     g_st.epoch_interval = st.odo_interval;   /* from ODO_TESTNET/ODO_EPOCH_INTERVAL */
+    install_stratum_hooks(&st);
 
     job_t cur; job_init(&cur);
     int have_cur = 0;
@@ -401,6 +467,7 @@ int main(int argc, char **argv)
                     continue;
                 }
                 g_st.epoch_interval = st.odo_interval;
+                install_stratum_hooks(&st);
                 snprintf(g_st.pool, sizeof(g_st.pool), "%s:%s",
                          hosts[pool_idx], ports[pool_idx]);
                 printf("[pipe] switching to pool %s:%s\n",
@@ -459,7 +526,7 @@ int main(int argc, char **argv)
                     uint8_t h[32];
                     compute_pow(cur.header, nonce, h);
                     if (target_met(h, cur.share_target)) {
-                        if (stratum_submit_share(&st, &cur, nonce) == 0) {
+                        if (submit_tracked(&st, &cur, nonce) == 0) {
                             shares++;
                             g_st.shares     = shares;
                             g_st.last_share = time(NULL);

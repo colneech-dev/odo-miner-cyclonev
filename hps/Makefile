@@ -90,7 +90,7 @@ odo-miner-pipe-uio: $(PIPE_MINER_UIO_SRCS)
 # Algorithm tests
 # -----------------------------------------------------------------------
 .PHONY: test test_upstream check test_units test_stratum_fuzz
-.PHONY: check-logging test_stratum_hook
+.PHONY: check-logging test_stratum_hook test_reject_log test_near_miss
 
 test_units: test_units.c job.c odocrypt_header.c
 	$(CC) $(CFLAGS) -o $@ $^
@@ -120,8 +120,14 @@ test_stratum_hook: test_stratum_hook.c stratum.c job.c odocrypt_header.c
 	$(CC) $(CFLAGS) -D_DEFAULT_SOURCE -I. -o $@ $^ -lm
 	./test_stratum_hook
 
-check-logging: test_stratum_hook
+# Pure helpers behind the daemon's reject log (reply parsing, the submit ring, the log line).
+test_reject_log: test_reject_log.c reject_log.h
+	$(CC) -std=c11 -Wall -Wextra -I. -o $@ test_reject_log.c
+	./test_reject_log
+
+check-logging: test_stratum_hook test_reject_log
 	@echo '-- stratum hook negative controls --'; CC='$(CC)' sh check_hook_mutants.sh
+	@echo '-- reject_log negative controls + wiring --'; CC='$(CC)' sh check_rejectlog_mutants.sh
 
 test: test_odo
 	./test_odo
