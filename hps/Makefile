@@ -90,6 +90,7 @@ odo-miner-pipe-uio: $(PIPE_MINER_UIO_SRCS)
 # Algorithm tests
 # -----------------------------------------------------------------------
 .PHONY: test test_upstream check test_units test_stratum_fuzz
+.PHONY: check-logging test_stratum_hook
 
 test_units: test_units.c job.c odocrypt_header.c
 	$(CC) $(CFLAGS) -o $@ $^
@@ -112,6 +113,15 @@ test_stratum_loopback: test_stratum_loopback.c stratum.c job.c odocrypt_header.c
 	$(CC) $(CFLAGS) -I$(UPSTREAM_CRYPTO) -c $(UPSTREAM_CRYPTO)/KeccakP-800-reference.c \
 	      -o /tmp/keccak800_lb.o
 	$(CC) $(CFLAGS) -I$(UPSTREAM_CRYPTO) -o $@ $^ /tmp/keccak800_lb.o $(LDFLAGS)
+
+# The stratum client's optional per-result hook (reject log): the REAL stratum.c driven over a socketpair.
+# Separate from `check` (the cipher cross-check). `make check-logging` runs this and the other logging tests.
+test_stratum_hook: test_stratum_hook.c stratum.c job.c odocrypt_header.c
+	$(CC) $(CFLAGS) -D_DEFAULT_SOURCE -I. -o $@ $^ -lm
+	./test_stratum_hook
+
+check-logging: test_stratum_hook
+	@echo '-- stratum hook negative controls --'; CC='$(CC)' sh check_hook_mutants.sh
 
 test: test_odo
 	./test_odo

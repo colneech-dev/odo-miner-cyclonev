@@ -81,6 +81,12 @@ typedef struct {
     uint64_t shares_accepted;
     uint64_t shares_rejected;
 
+    /* Optional per-result hook, NULL = off (K7: reject_log.h). Called for EVERY mining.submit reply: id = the request
+     * id stratum_submit_share() used, accepted = an explicit result:true, line = the raw reply. stratum_init()
+     * memsets the context, so install the hook AFTER every stratum_init(). */
+    void (*on_submit_result)(void *user, uint64_t id, bool accepted, const char *line);
+    void  *on_submit_result_user;
+
     uint64_t next_id;
 } stratum_ctx_t;
 

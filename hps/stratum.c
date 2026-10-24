@@ -573,15 +573,21 @@ static void handle_result(stratum_ctx_t *ctx, const char *line)
     if (idp) {
         uint64_t id = strtoull(idp, NULL, 10);
         if (id != 0 && take_pending_submit(ctx, id)) {
+            /* Only an explicit "result":true is an accept. Anything else in a
+             * response to OUR submit id is a reject -- including
+             * "result":null with an "error" array, which is how NOMP- and
+             * miningcore-style pools reject shares. That case used to match
+             * neither branch, so it was dropped uncounted and the dashboard
+             * showed zero rejects while the pool refused shares (2026-10-01). */
             bool ok = false;
-            if (parse_json_bool(line, "result", &ok)) {
-                if (ok) {
-                    ctx->shares_accepted++;
-                } else {
-                    ctx->shares_rejected++;
-                    fprintf(stderr, "[stratum] share REJECTED: %s\n", line);
-                }
+            if (parse_json_bool(line, "result", &ok) && ok) {
+                ctx->shares_accepted++;
+            } else {
+                ctx->shares_rejected++;
+                fprintf(stderr, "[stratum] share REJECTED: %s\n", line);
             }
+            if (ctx->on_submit_result)
+                ctx->on_submit_result(ctx->on_submit_result_user, id, ok, line);
             return;
         }
     }
