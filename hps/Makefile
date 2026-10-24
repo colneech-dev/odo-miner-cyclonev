@@ -125,9 +125,14 @@ test_reject_log: test_reject_log.c reject_log.h
 	$(CC) -std=c11 -Wall -Wextra -I. -o $@ test_reject_log.c
 	./test_reject_log
 
-check-logging: test_stratum_hook test_reject_log
+test_near_miss: test_near_miss.c near_miss.h
+	$(CC) -std=c11 -Wall -Wextra -I. -o $@ test_near_miss.c -lm
+	./test_near_miss
+
+check-logging: test_stratum_hook test_reject_log test_near_miss
 	@echo '-- stratum hook negative controls --'; CC='$(CC)' sh check_hook_mutants.sh
 	@echo '-- reject_log negative controls + wiring --'; CC='$(CC)' sh check_rejectlog_mutants.sh
+	@echo '-- near_miss negative controls + wiring --'; CC='$(CC)' sh check_nearmiss_mutants.sh
 
 test: test_odo
 	./test_odo

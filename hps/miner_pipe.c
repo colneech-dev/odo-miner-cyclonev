@@ -28,6 +28,7 @@
 #include "miner_io_pipe.h"
 #include "thermal.h"
 #include "reject_log.h"
+#include "near_miss.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -269,6 +270,10 @@ static double mono_s(void)
 
 static struct submit_ring g_subring;
 
+/* near_miss.h: a share at least this fraction of its job's NETWORK difficulty is logged (never sampled).
+ * ODOD_NEAR_MISS_RATIO overrides the default 0.1; read in main(). */
+static double g_near_miss_ratio = NEAR_MISS_RATIO_DEFAULT;
+
 static void reject_persist(const char *text)
 {
     struct stat sb;
@@ -442,6 +447,10 @@ int main(int argc, char **argv)
     }
     g_st.epoch_interval = st.odo_interval;   /* from ODO_TESTNET/ODO_EPOCH_INTERVAL */
     install_stratum_hooks(&st);
+    g_near_miss_ratio = near_miss_ratio_parse(getenv("ODOD_NEAR_MISS_RATIO"));
+    if (g_near_miss_ratio != NEAR_MISS_RATIO_DEFAULT)
+        printf("[pipe] NEAR-MISS logging: shares >= %.3g of the network difficulty\n",
+               g_near_miss_ratio);
 
     job_t cur; job_init(&cur);
     int have_cur = 0;
@@ -544,6 +553,18 @@ int main(int argc, char **argv)
                                 printf("[pipe] *** BLOCK FOUND *** job=%s nonce=0x%08"
                                        PRIx32 " diff=%.6g (blocks_found=%" PRIu64 ")\n",
                                        cur.job_id, nonce, d, g_st.blocks_found);
+                            }
+                            /* NEAR-MISS: a share that was a sizeable fraction of a block. The per-share SHARE lines
+                             * rotate out of the journal in ~2 days, so the closest this board has come would
+                             * otherwise be unanswerable. Rare, hence always logged (see near_miss.h).
+                             * hash_to_difficulty() of the network TARGET is the network difficulty in the same
+                             * diff-1 convention as the share's d. */
+                            if (!is_block) {
+                                double nd = hash_to_difficulty(cur.target);
+                                if (near_miss_hit(d, nd, g_near_miss_ratio))
+                                    printf("[pipe] NEAR-MISS job=%s nonce=0x%08" PRIx32
+                                           " diff=%.6g net=%.6g ratio=%.3f\n",
+                                           cur.job_id, nonce, d, nd, d / nd);
                             }
                             if (new_best || is_block)
                                 stats_save();
