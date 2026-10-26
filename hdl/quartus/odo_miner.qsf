@@ -49,7 +49,7 @@ set_global_assignment -name AUTO_SHIFT_REGISTER_RECOGNITION OFF
 # (the baked-in epoch seed) as Verilog macros. ODOKEY must match the
 # odo_<seed>.v listed in pipelined_miner_hw.tcl and the deployed epoch.
 set_global_assignment -name VERILOG_MACRO "THROUGHPUT=6"
-set_global_assignment -name VERILOG_MACRO "ODOKEY=1790208000"
+set_global_assignment -name VERILOG_MACRO "ODOKEY=1792800000"
 
 # Epoch 1785024000 missed timing by -0.001 ns (Slow 1100mV 100C, miner clock)
 # at the default seed (Quartus defaults to SEED=1 if unset) — this epoch's
@@ -73,7 +73,10 @@ set_global_assignment -name VERILOG_MACRO "ODOKEY=1790208000"
 # Epoch 1788480000: SEED=4 (carried over) came in razor-thin (+0.022 ns
 # setup); SEED=1 was an outright violation (-0.211 ns setup). SEED=2 closes
 # with real margin (+0.188 ns setup, +0.348 ns hold) — kept.
-set_global_assignment -name SEED 3
+# Epochs 1791072000, 1791936000 and 1792800000: SEED=2 (build_epoch_<seed>_seed2.log),
+# chosen by scripts/epoch_build_deploy.ps1. Epoch 1792800000 closed at +0.112 ns setup,
+# +0.356 ns hold on the miner clock (Slow 1100mV 100C), deployed 2026-10-24.
+set_global_assignment -name SEED 2
 
 # --- Critical-path fanout (perf/critical-path-fanout) -------------------------
 # progress[1] is the enable into odo_encrypt_loop:
@@ -102,7 +105,12 @@ set_global_assignment -name SEED 3
 # See docs/PLAN-critical-path-fanout.md. Prior art: the AM01 project found the
 # same shape (a control strobe, not the cipher) and won +0.090 ns from
 # max_fanout plus +0.438 ns from over-constraining.
-set_instance_assignment -name MAX_FANOUT 64 -to "soc_system:u_soc|pipelined_miner_top:odo_0|miner:u_miner|odo_keccak:worker|odo_encrypt:crypt|progress[1]"
+# The cap is 200, not the 64 measured above: the epoch 1792800000 build (SEED=2) was
+# compiled with 200 and the fitter made 3 duplicates of progress[1] (map report, "Registers
+# Duplicated to Honor Maximum Fanout Requirements"). It closed at +0.112 ns setup against
+# +0.156 ns for the original epoch 1789344000 baseline, so it is less margin than the 64 step
+# measured. Why 200 was chosen is not recorded; 64 has not been re-measured on a newer epoch.
+set_instance_assignment -name MAX_FANOUT 200 -to "soc_system:u_soc|pipelined_miner_top:odo_0|miner:u_miner|odo_keccak:worker|odo_encrypt:crypt|progress[1]"
 
 # --- Pin assignments ----------------------------------------------------------
 # Extracted from QMTECH Cyclone V SoC KFB Schematic v01 (32-bit DDR3)
